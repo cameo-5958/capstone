@@ -14,18 +14,26 @@ function AnimationService.Animate(uuid: string, animID: string)
     -- Broadcast, to all players, a request to
     -- animate a NON-PLAYER object
 
-    API:FireAllClients(uuid, "UUID", animID)
+    API:FireAllClients(uuid, "UUID", animID, "Start")
+end
+
+-- Public API for stopping non-players
+function AnimationService.Stop(uuid: string, animID: string)
+    -- Broadcast, to all players, a request to
+    -- animate a NON-PLAYER object
+
+    API:FireAllClients(uuid, "UUID", animID, "Stop")
 end
 
 -- Public API for animating players
-local function AnimatePlayer(player: Player, animID: string)
+local function AnimatePlayer(player: Player, animID: string, status: string)
     for _, ply in ipairs(Players:GetPlayers()) do
         -- Confirm it ISN'T the current player 
         -- (as they're already playing the animation)
         -- locally
 
         if ply ~= player then
-            API:FireClient(ply, player, "Player", animID)
+            API:FireClient(ply, player, "Player", animID, status)
         end
     end
 end

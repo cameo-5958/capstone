@@ -76,4 +76,10 @@ function Entity.Animate(self: Entity, animId: string)
 	AnimationServiceServer.Animate(self.UUID, animId)
 end
 
+-- End an animation
+function Entity.StopAnimation(self: Entity, animId: string)
+	-- Hand myself in again
+	AnimationServiceServer.Animate(self.UUID, animId)
+end
+
 return Entity

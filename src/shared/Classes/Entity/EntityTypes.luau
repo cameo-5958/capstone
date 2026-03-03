@@ -52,6 +52,7 @@ export type Entity = {
 
 	-- Animation
 	Animate: (self: Entity, animId: string) -> (),
+	StopAnimation: (self: Entity, animId: string) -> (),
 }
 
 -- Return the class
