@@ -4,17 +4,27 @@
 -- methods
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
+local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 local PlayerServiceServer = {}
 
+type Entity = EntityTypes.Entity
+
 -- Store player Characters here
-local PlayerCharacters: { [string]: Model } = {}
+local PlayerCharacters: { [string]: Entity } = {}
 
 -- Player added method
 local function PlayerAdded(player: Player)
 	-- Wait for character to load and store it
 	local character = player.Character or player.CharacterAdded:Wait()
-	PlayerCharacters[player.Name] = character
+	
+	-- Create an Entity associated with the player
+	local entity = Entity.new(character, player.Name)
+
+	PlayerCharacters[player.Name] = entity
 
 	-- Do any additional setup here
 end
@@ -37,7 +47,7 @@ end
 
 -- Method that returns list of players for use in
 -- other Services
-function PlayerServiceServer.GetPlayers(): { [string]: Model }
+function PlayerServiceServer.GetPlayers(): { [string]: Entity }
 	return PlayerCharacters
 end
 

@@ -49,6 +49,9 @@ export type Entity = {
 	-- Doing damage
 	ApplyDamage: (self: Entity, damage: number, target: Entity) -> (),
 	TakeDamage: (self: Entity, damage: number, source: Entity) -> (),
+
+	-- Animation
+	Animate: (self: Entity, animId: string) -> (),
 }
 
 -- Return the class

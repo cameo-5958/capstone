@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 local AnimationService = {}
 
 -- Public API for animating non-players
-function AnimationService.Animate(uuid: number, animID: string)
+function AnimationService.Animate(uuid: string, animID: string)
     -- Broadcast, to all players, a request to
     -- animate a NON-PLAYER object
 

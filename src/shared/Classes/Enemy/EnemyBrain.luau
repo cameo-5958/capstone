@@ -138,8 +138,9 @@ function Brain.GetTargetPlayer(self: Brain, range: number): Model?
 
 	local highestScore = -1
 	local hitModel = nil
-	for _, model in pairs(plys) do
+	for _, player in pairs(plys) do
 		-- Ensure model exists
+		local model = player.Character
 		if not model then
 			continue
 		end
