@@ -63,52 +63,32 @@ function MovementEngine.init(self: MovementEngine): ()
 	self:DeferTask()
 end
 
-if RunService:IsServer() then
-	-- All Entity engines take a class of
-	-- type Entity in order to instantiate
-	function MovementEngine.new(entity: Entity): MovementEngine
-		local self = setmetatable({}, MovementEngine)
+-- Players have a slightly different
+-- instantiation process
+function MovementEngine.lnew(): MovementEngine
+	local lp = Players.LocalPlayer
+	local chr = lp.Character or lp.CharacterAdded:Wait()
+	local self = setmetatable({}, MovementEngine)
 
-		-- Initialize Engine state table
-		self.States = {}
-		self.Character = entity.Character
-		self.Humanoid = entity.Character:FindFirstChild("Humanoid")
-		self.RootPart = entity.RootPart
-		self.EntityUUID = entity.UUID
-		self.Speed = entity.__Stats["Speed"];
-		-- Initialize other states
-		((self :: any) :: MovementEngine):init()
+	-- Initialize Engine state table
+	self.States = {}
+	self.Character = chr
+	self.Humanoid = chr:WaitForChild("Humanoid")
+	self.RootPart = chr.PrimaryPart :: Part
+	self.Player = lp
+	self.Speed = 12
+	-- Initialize other states
+	((self :: any) :: MovementEngine):init()
 
-		return (self :: any) :: MovementEngine
-	end
-else
-	-- Players have a slightly different
-	-- instantiation process
-	function MovementEngine.lnew(): MovementEngine
-		local lp = Players.LocalPlayer
-		local chr = lp.Character or lp.CharacterAdded:Wait()
-		local self = setmetatable({}, MovementEngine)
+	-- Movement would detect Enemies using
+	-- local EnemyService and choose closest one
 
-		-- Initialize Engine state table
-		self.States = {}
-		self.Character = chr
-		self.Humanoid = chr:WaitForChild("Humanoid")
-		self.RootPart = chr.PrimaryPart :: Part
-		self.Player = lp
-		self.Speed = 12
-		-- Initialize other states
-		((self :: any) :: MovementEngine):init()
+	return (self :: any) :: MovementEngine
+end
 
-		-- Movement would detect Enemies using
-		-- local EnemyService and choose closest one
-
-		return (self :: any) :: MovementEngine
-	end
-
-	-- GetTarget is a wrapper for ClosestEnemy
-	function MovementEngine.GetTarget(_: MovementEngine, pos: Vector3, sight: number?): Entity
-		return EnemyServiceClient.GetClosest(pos, sight)
-	end
+-- GetTarget is a wrapper for ClosestEnemy
+function MovementEngine.GetTarget(_: MovementEngine, pos: Vector3, sight: number?): Entity
+	return EnemyServiceClient.GetClosest(pos, sight)
 end
 
 -- Utility method for applying Velocity

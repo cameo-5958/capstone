@@ -8,14 +8,12 @@ type Modifier = __mod_type.Modifier
 local Modifier = {}
 Modifier.__index = Modifier
 
-function Modifier.new(
+-- function Modifier.new(
 
-): Modifier
-    local self = setmetatable({}, Modifier)
+-- ): Modifier
+--     local self = setmetatable({}, Modifier)
 
-    
-
-    return self
-end
+--     return self
+-- end
 
 return Modifier
