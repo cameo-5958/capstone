@@ -139,6 +139,11 @@ function Brain.GetTargetPlayer(self: Brain, range: number): Model?
 	local highestScore = -1
 	local hitModel = nil
 	for _, model in pairs(plys) do
+		-- Ensure model exists
+		if not model then
+			continue
+		end
+
 		-- Fire a raycast to ensure this player
 		-- is detected
 		if self:HitPlayer(model, range) then
