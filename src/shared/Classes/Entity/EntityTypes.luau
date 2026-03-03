@@ -1,5 +1,7 @@
 --!strict
 
+-- Import BrainTypes
+
 -- Define the class's type
 type Stat =
 	"Health"

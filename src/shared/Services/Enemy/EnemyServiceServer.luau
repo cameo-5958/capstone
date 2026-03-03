@@ -1,10 +1,22 @@
 --!strict
 -- Creates and handles enemies
 
+-- Create RemoteEvent for Enemy API
+local API = Instance.new("RemoteEvent")
+API.Parent = script.Parent
+API.Name = "EnemyEndpoint"
+
+-- Create RemoteEvent for Enemy API
+local Handler = Instance.new("RemoteEvent")
+Handler.Parent = script.Parent
+Handler.Name = "EnemyHandler"
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Brains = require(ReplicatedStorage.Classes.Enemy.Brains)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
+local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -13,16 +25,8 @@ type Entity = EntityTypes.Entity
 local Database = ReplicatedStorage:WaitForChild("Database")
 local EnemiesDatabase = Database.Enemies
 
--- Create RemoteEvent for Enemy API
-local API = Instance.new("RemoteEvent")
-API.Parent = script.Parent
-API.Name = "EnemyEndpoint"
-
 -- Create Folder for enemies to be stored in
-local EnemyFolder = workspace:FindFirstChild("EntitiesFolder") or Instance.new("Folder")
-EnemyFolder.Name = "EntitiesFolder"
-EnemyFolder.Parent = workspace
-
+local EnemyFolder = workspace:WaitForChild("EntitiesFolder")
 local __Enemies: {
 	[string]: Entity, -- UUID -> Entity
 
@@ -84,6 +88,13 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 
 	-- Add to the database
 	__Enemies[entity.UUID] = entity
+
+	-- Give it its engines
+	local movementEngine = Movement.new(entity)
+	local brain = Brains.Aggressive(movementEngine, 32)
+
+	-- Start the brain loop
+	brain:Go()
 
 	-- Send the entity to all clients
 	API:FireAllClients({

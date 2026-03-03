@@ -3,8 +3,16 @@
   "tree": {
     "$className": "DataModel",
 
+    "HttpService": {
+      "$className": "HttpService",
+      "$properties": {
+        "HttpEnabled": true
+      }
+    },
+
     "ReplicatedStorage": {
-      "$path": "src/shared"
+      "$path": "src/shared",
+      "$ignoreUnknownInstances": true
     },
 
     "ServerScriptService": {
@@ -46,8 +54,12 @@
             512
           ]
         }
+      },
+      "EntitiesFolder": {
+        "$className": "Folder"
       }
     },
+
     "Lighting": {
       "$properties": {
         "Ambient": [
@@ -61,6 +73,7 @@
         "Technology": "Voxel"
       }
     },
+
     "SoundService": {
       "$properties": {
         "RespectFilteringEnabled": true

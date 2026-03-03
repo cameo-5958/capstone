@@ -3,16 +3,14 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local EnemyModuleClient = require(ReplicatedStorage.Modules.Enemy.EnemyModuleClient)
+local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
 local EntityTypes = require(script.Parent.EntityTypes)
 type Entity = EntityTypes.Entity
-
--- Two EnemyModule types
 
 local MovementEngine = {}
 MovementEngine.__index = MovementEngine
 
-type MovementEngine = {
+export type MovementEngine = {
 	-- Store the RootPart and Humanoid since we don't
 	-- need to store full Entity
 	Character: Model,
@@ -60,6 +58,9 @@ function MovementEngine.init(self: MovementEngine): ()
 	-- Default state of the engine is to have movement enabled
 	self.MovementEnabled = true
 	self.Invincible = false
+
+	-- Enable movement
+	self:DeferTask()
 end
 
 if RunService:IsServer() then
@@ -94,7 +95,7 @@ else
 		self.Humanoid = chr:WaitForChild("Humanoid")
 		self.RootPart = chr.PrimaryPart :: Part
 		self.Player = lp
-		self.Speed = 16
+		self.Speed = 12
 		-- Initialize other states
 		((self :: any) :: MovementEngine):init()
 
@@ -106,7 +107,7 @@ else
 
 	-- GetTarget is a wrapper for ClosestEnemy
 	function MovementEngine.GetTarget(_: MovementEngine, pos: Vector3, sight: number?): Entity
-		return EnemyModuleClient.GetClosest(pos, sight)
+		return EnemyServiceClient.GetClosest(pos, sight)
 	end
 end
 

@@ -39,12 +39,15 @@ function Entity.new(Model: Model, Name: string): Entity
 		CritDamage = 1.5,
 		PhysicalAttack = 10,
 		MagicalAttack = 10,
-		Speed = 16,
+		Speed = 8,
 	}
 	self.__Buffs = {}
 
 	-- States
 	self.__Alive = true
+
+	-- Brain (only for enemies)
+	self.__Brain = nil
 
 	return (self :: any) :: Entity
 end

@@ -4,7 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local Movement = require(ReplicatedStorage.Classes.Entity.Movement)
+local Movement = require(ReplicatedStorage.Classes.Entity.PlayerMovement)
 local LocalPlayer = Players.LocalPlayer
 
 -- Create a new MovementEngine

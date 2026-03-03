@@ -2,16 +2,163 @@
 -- EnemyBrain.luau defines the logic that
 -- brains use
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
+local BrainTypes = require(ReplicatedStorage.Classes.Enemy.BrainTypes)
+local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
+
+type MovementEngine = Movement.MovementEngine
+type Brain = BrainTypes.Brain
+type Neuron = BrainTypes.Neuron
+
 local Brain = {}
 Brain.__index = Brain
 
--- Typing
-type Brain = typeof(setmetatable(
-	{
-		-- The brain has many different attributes
-		-- that are associated with it
-	} :: any,
-	Brain
-))
+-- Constructor
+function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
+	local self = setmetatable({}, Brain)
+
+	self.MovementEngine = movementEngine
+	self.Character = movementEngine.Character
+	self.RootPart = self.Character.PrimaryPart :: Part
+
+	-- Initialize Neurons
+	self.Neurons = neurons
+	for _, neuron in neurons do
+		neuron.Brain = (self :: any) :: Brain
+	end
+
+	-- Initialize state
+	self.LastEnteredState = 0
+	self.CurrentNeuron = nil
+
+	-- Aggro
+	self.Aggro = false
+
+	return self :: any
+end
+
+-- Go and Stop
+function Brain.Go(self: Brain)
+	-- Begin a RunService loop
+	self.__Thread = RunService.Heartbeat:Connect(function(dt)
+		self:Tick(dt)
+	end)
+end
+
+function Brain.Stop(self: Brain)
+	if self.__Thread then
+		self.__Thread:Disconnect()
+	end
+end
+
+-- Brain thread
+function Brain.Tick(self: Brain, dt: number)
+	-- Check if we should exist the current state
+	if self.CurrentNeuron then
+		if self.CurrentNeuron.CanExit(self.CurrentNeuron) then
+			self.CurrentNeuron.OnExit(self.CurrentNeuron)
+			self.LastEnteredState = os.clock()
+			self.CurrentNeuron = nil
+		end
+	end
+
+	-- Regardless of if we have a state, if there is an
+	-- interrupting state, we must enter it
+	for _, neuron in self.Neurons do
+		if neuron.Priority == "Interrupting" and neuron:CanEnter() then
+			-- Exit the current neuron, if any
+			if self.CurrentNeuron then
+				self.CurrentNeuron:OnExit()
+			end
+
+			neuron:OnEnter()
+			self.CurrentNeuron = neuron
+			break
+		end
+	end
+
+	-- If we don't have a state, check if we can enter one
+	-- in order of priority: Interrupting > Core > Idle
+	if not self.CurrentNeuron then
+		for _, state in ipairs({ "Core", "Idle" }) do
+			for _, neuron in self.Neurons do
+				if neuron.Priority == state and neuron:CanEnter() then
+					neuron:OnEnter()
+					self.CurrentNeuron = neuron
+					break
+				end
+			end
+			if self.CurrentNeuron then
+				print("Current neuron is " .. self.CurrentNeuron.Priority)
+
+				break
+			end
+		end
+	end
+
+	-- Update the current state
+	if self.CurrentNeuron then
+		self.CurrentNeuron:OnUpdate(dt)
+	end
+end
+
+-- Raycast for Enemy Vision
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+raycastParams.FilterDescendantsInstances = { workspace:WaitForChild("EntitiesFolder") }
+-- Any utility methods used by neurons
+function Brain.HitPlayer(self: Brain, player: Model, range: number): boolean
+	-- Grab player position
+	local pos = self.RootPart.Position
+	local playerPos = (player.PrimaryPart :: Part).Position
+
+	-- Raycast here
+	local result = workspace:Raycast(pos, (playerPos - pos).Unit * range, raycastParams)
+
+	if not result then
+		return false
+	end
+
+	return result.Instance:IsDescendantOf(player)
+end
+
+function Brain.Obstruction(self: Brain, pos: Vector3): boolean
+	-- Raycast
+	local myPos = self.RootPart.Position
+	local result = workspace:Raycast(pos, myPos - pos, raycastParams)
+
+	return result
+end
+
+function Brain.GetTargetPlayer(self: Brain, range: number): Model?
+	-- Get list of players
+	local plys = PlayerServiceServer.GetPlayers()
+
+	local highestScore = -1
+	local hitModel = nil
+	for _, model in pairs(plys) do
+		-- Fire a raycast to ensure this player
+		-- is detected
+		if self:HitPlayer(model, range) then
+			local score = range - (self.RootPart.Position - (model.PrimaryPart :: Part).Position).Magnitude
+
+			if score > highestScore then
+				highestScore = score
+				hitModel = model
+			end
+		end
+	end
+
+	return hitModel
+end
+
+function Brain.Delta(self: Brain, player: Model): Vector3
+	local myPos = self.RootPart.Position
+	local playerPos = (player.PrimaryPart :: Part).Position
+
+	return (myPos - playerPos)
+end
 
 return Brain

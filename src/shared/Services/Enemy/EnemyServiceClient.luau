@@ -1,8 +1,9 @@
 --!strict
 -- Mostly an utility module
 
--- Grab API endpoint
+-- Grab API endpoints
 local API: RemoteEvent = script.Parent:WaitForChild("EnemyEndpoint")
+local Handler: RemoteEvent = script.Parent:WaitForChild("EnemyHandler")
 
 -- Require
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,5 +49,20 @@ function Enemies.GetClosest(pos: Vector3, sight: number?)
 
 	return __Enemies[closest]
 end
+
+-- Handle movement etc.
+Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
+	if action == "Move" then
+		local ent = __Enemies[data.UUID]
+		if ent and ent.Character and ent.Character:FindFirstChild("Humanoid") then
+			(ent.Character:FindFirstChild("Humanoid") :: Humanoid):MoveTo(data.Position)
+		end
+	elseif action == "Pivot" then
+		local ent = __Enemies[data.UUID]
+		if ent and ent.Character and ent.Character.PrimaryPart then
+			ent.Character.PrimaryPart:PivotTo(data.CFrame)
+		end
+	end
+end)
 
 return table.freeze(Enemies)
