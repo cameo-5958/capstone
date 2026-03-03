@@ -63,14 +63,9 @@ function Entity.Inflate(ent: Entity): Entity
 		error("Entity with UUID " .. uuid .. " does not exist in the world.")
 	end
 
-	print("Inflation is happening now")
-
 	-- Inflate self
 	ent.Character = char :: Model
 	ent.RootPart = char.PrimaryPart or char:WaitForChild("HumanoidRootPart") :: BasePart
-
-	print("Rootpart: ", ent.RootPart)
-	print("Post inflation: ", ent)
 
 	return ent
 end
