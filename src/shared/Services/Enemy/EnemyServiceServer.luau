@@ -63,7 +63,7 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	end
 
 	-- Require the data to create the entity
-	local data = require(Enemy.Data) :: any
+	local data = require(Enemy.Data) :: { ["Name"]: string, string : any }
 	local model = Enemy.Model:Clone() :: Model
 
 	model.Parent = EnemyFolder
@@ -79,10 +79,12 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 
 	-- Set enemy specific stats
 	for key, value in pairs(data) do
-		if entity[key] then
+		if typeof(entity[key]) ~= typeof(table) then
 			entity[key] = value
 		else
-			entity.__Stats[key] = value
+			for k, v in pairs(value) do
+				entity["__" .. key][k] = v 
+			end
 		end
 	end
 

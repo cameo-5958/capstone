@@ -61,6 +61,8 @@ local function OnEnter(self: Neuron): ()
 	self.__Attributes["Direction"] = direction
 	self.__Attributes["CurrentTheta"] = startTheta
 	self.__Attributes["TargetTheta"] = startTheta + (arcSize * direction)
+
+	
 end
 
 local function OnUpdate(self: Neuron, dt: number): ()

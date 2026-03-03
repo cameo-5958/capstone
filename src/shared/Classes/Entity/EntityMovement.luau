@@ -1,6 +1,7 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
 local EntityTypes = require(script.Parent.EntityTypes)
 type Entity = EntityTypes.Entity
 
@@ -21,7 +22,7 @@ export type MovementEngine = {
 	MoveToFinished: CustomEvent,
 
 	-- Identifier
-	EntityUUID: number,
+	EntityUUID: string,
 
 	-- Moving Metadata
 	MovementEnabled: boolean,
@@ -48,6 +49,11 @@ export type MovementEngine = {
 	-- Constructors
 	new: (Entity) -> (),
 	init: (MovementEngine) -> (),
+
+	-- Animations
+	__Animations: {string: string},
+	Play: (MovementEngine, string) -> (),
+	Stop: (MovementEngine, string) -> (),
 }
 
 function MovementEngine.__tostring(self: MovementEngine): string
@@ -74,6 +80,7 @@ function MovementEngine.new(entity: Entity): MovementEngine
 	self.RootPart = entity.RootPart
 	self.EntityUUID = entity.UUID
 	self.Speed = entity.__Stats["Speed"]
+	self.__Animations = entity.__Animations
 
 	self.MoveToFinished = self.Humanoid.MoveToFinished;
 	-- Initialize other states
@@ -256,5 +263,18 @@ function MovementEngine.PivotTo(self: MovementEngine, cf: CFrame): ()
 		CFrame = cf,
 	})
 end
+
+-- Animate myself
+function MovementEngine.Play(self: MovementEngine, animId: string)
+	-- Hand myself in to the animator
+	AnimationServiceServer.Animate(self.EntityUUID, self.__Animations[animId])
+end
+
+-- End an animation
+function MovementEngine.Stop(self: MovementEngine, animId: string)
+	-- Hand myself in again
+	AnimationServiceServer.Animate(self.EntityUUID, self.__Animations[animId])
+end
+
 
 return MovementEngine

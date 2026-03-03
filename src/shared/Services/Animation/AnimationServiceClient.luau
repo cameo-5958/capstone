@@ -90,8 +90,6 @@ local function GetPlayer(player: Player): Model
     return character --Animate(character, animId)
 end
 
--- 
-
 -- Handle animation generally
 API.OnClientEvent:Connect(function(identifier: Player | string, manageType: string, animId: string, status: string)
     local model: Model

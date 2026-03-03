@@ -6,8 +6,6 @@ type Entity = EntityTypes.Entity
 
 -- Require Services
 local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
 
 -- Base table
 local Entity = {}
@@ -68,18 +66,6 @@ function Entity.Inflate(ent: Entity): Entity
 	ent.RootPart = char.PrimaryPart or char:WaitForChild("HumanoidRootPart") :: BasePart
 
 	return ent
-end
-
--- Animate myself
-function Entity.Animate(self: Entity, animId: string)
-	-- Hand myself in to the animator
-	AnimationServiceServer.Animate(self.UUID, animId)
-end
-
--- End an animation
-function Entity.StopAnimation(self: Entity, animId: string)
-	-- Hand myself in again
-	AnimationServiceServer.Animate(self.UUID, animId)
 end
 
 return Entity

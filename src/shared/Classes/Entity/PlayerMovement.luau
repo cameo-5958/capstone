@@ -3,6 +3,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
 local EntityTypes = require(script.Parent.EntityTypes)
 type Entity = EntityTypes.Entity
@@ -43,6 +44,12 @@ export type MovementEngine = {
 
 	-- GetTarget API
 	GetTarget: (MovementEngine, Vector3, number) -> Entity,
+
+	-- Animating
+	__Animations: {string: string},
+	GetAnimation: (MovementEngine, string) -> (string),
+	Play: (MovementEngine, string) -> (),
+	Stop: (MovementEngine, string) -> (),
 
 	-- Constructors
 	new: (Entity) -> (),
@@ -259,6 +266,25 @@ function MovementEngine.Dash(self: MovementEngine): ()
 
 	-- Apply an impulse
 	self:Impulse(dashDirection * 36, 0.3)
+end
+
+-- Getting an animation
+function MovementEngine.GetAnimation(self: MovementEngine, animation: string): string
+	if self.__Animations[animation] then
+		return self.__Animations[animation]
+	end
+
+	return self.__Animations["Walk"]
+end
+
+-- Animating
+function MovementEngine.Play(self: MovementEngine, animation: string) 
+	AnimationServiceClient.Animate(self:GetAnimation(animation))
+end
+
+
+function MovementEngine.Stop(self: MovementEngine, animation: string)
+	AnimationServiceClient.StopAnimation(self:GetAnimation(animation))
 end
 
 return MovementEngine
