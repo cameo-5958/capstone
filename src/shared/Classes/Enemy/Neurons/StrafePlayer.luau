@@ -19,8 +19,7 @@ local function CanEnter(self: Neuron): boolean
 
 	-- Try to strafe if in range
 	if dist < range * 1.5 then
-		local chance = 1 - (self.__Attributes["Strafes"] * 0.2)
-		if math.random() < chance then
+		if self.__Attributes["Strafes"] < 2 then
 			return true
 		else
 			self.__Attributes["Strafes"] = 0 -- Failed roll, proceed to attack
@@ -55,12 +54,10 @@ local function OnEnter(self: Neuron): ()
 	local startTheta = math.atan2(rel.Z, rel.X)
 
 	local direction = math.random() > 0.5 and 1 or -1
-	-- Random arc between 45 and 135 degrees
-	local arcSize = (math.random() * 0.5 + 0.25) * math.pi
 
+	-- Random arc between 15 and 45 degrees
 	self.__Attributes["Direction"] = direction
-	self.__Attributes["CurrentTheta"] = startTheta
-	self.__Attributes["TargetTheta"] = startTheta + (arcSize * direction)
+	self.__Attributes["TargetDeltaTheta"] = math.pi * 10 / math.random(40, 120)
 end
 
 local function OnUpdate(self: Neuron, dt: number): ()
