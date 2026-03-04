@@ -2,10 +2,8 @@ return {
 	["Name"] = "Goblin",
 	["Family"] = "Goblins",
 
-	["Stats"] = {
-
-	},
+	["Stats"] = {},
 	["Animations"] = {
-		["Walk"] = "",
-	}
+		["Walk"] = "rbxassetid://2510202577",
+	},
 }

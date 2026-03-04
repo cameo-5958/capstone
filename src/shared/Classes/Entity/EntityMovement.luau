@@ -51,7 +51,7 @@ export type MovementEngine = {
 	init: (MovementEngine) -> (),
 
 	-- Animations
-	__Animations: {string: string},
+	__Animations: { string: string },
 	Play: (MovementEngine, string) -> (),
 	Stop: (MovementEngine, string) -> (),
 }
@@ -275,6 +275,5 @@ function MovementEngine.Stop(self: MovementEngine, animId: string)
 	-- Hand myself in again
 	AnimationServiceServer.Animate(self.EntityUUID, self.__Animations[animId])
 end
-
 
 return MovementEngine

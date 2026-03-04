@@ -79,6 +79,9 @@ local function OnEnter(self: Neuron): ()
 		self.__Attributes["Moving"] = false
 		self.__Attributes["MoveToFinished"]:Disconnect()
 	end)
+
+	-- Play my walk animation
+	self.Brain.MovementEngine:Play("Walk")
 end
 
 local function OnExit(self: Neuron): ()
@@ -88,6 +91,9 @@ local function OnExit(self: Neuron): ()
 	self.__Attributes["Moving"] = false
 
 	self.__Attributes["MoveToFinished"]:Disconnect()
+
+	-- Stop my walk animation
+	self.Brain.MovementEngine:Stop("Walk")
 end
 
 local function OnUpdate(self: Neuron, _: number): ()
