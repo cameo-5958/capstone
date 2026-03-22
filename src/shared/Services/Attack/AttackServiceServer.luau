@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
+local AttackCalculator = require(ReplicatedStorage.Modules.Combat.AttackCalculator)
 local WeaponModule = require(ReplicatedStorage.Classes.Weapon.Weapon)
 
 local AttackServiceServer = {}
@@ -34,9 +35,8 @@ local ActiveAttacks: { [Player]: ActiveAttack } = {}
 local NextAttackAt: { [Player]: number } = {}
 
 local overlapParams = OverlapParams.new()
-overlapParams.FilterType = Enum.RaycastFilterType.Include
-overlapParams.FilterDescendantsInstances = { workspace:WaitForChild("EntitiesFolder") }
-overlapParams.MaxParts = 32
+overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+overlapParams.MaxParts = 64
 
 local function ClearAttackLater(player: Player, attackId: string, clearAt: number, animationId: string)
 	local delayTime = math.max(0, clearAt - workspace:GetServerTimeNow())
@@ -59,6 +59,7 @@ local function GetHitboxCFrame(entity, profile: AttackProfile): CFrame
 end
 
 local function IsTargetInsideHitbox(entity, target, profile: AttackProfile): boolean
+	overlapParams.FilterDescendantsInstances = { entity.Character }
 	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(entity, profile), profile.HitboxSize, overlapParams)
 	for _, part in ipairs(parts) do
 		if part:IsDescendantOf(target.Character) then
@@ -67,6 +68,41 @@ local function IsTargetInsideHitbox(entity, target, profile: AttackProfile): boo
 	end
 
 	return false
+end
+
+local function GetEnemyAttackProfile(attacker, swingRange: number?): AttackProfile
+	local weapon = attacker:GetEquippedWeapon()
+	if weapon then
+		return weapon:GetAttackProfile()
+	end
+
+	local effectiveSwingRange = swingRange or 4.5
+	local hitRange = effectiveSwingRange + 1.5
+	return {
+		AnimationId = "",
+		Windup = 0,
+		ActiveDuration = 0.1,
+		Recovery = 0,
+		Cooldown = 0,
+		HitReset = 0,
+		HitboxSize = Vector3.new(3.25, 4.5, hitRange),
+		HitboxOffset = CFrame.new(0, 0, -(hitRange * 0.5)),
+	}
+end
+
+function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: number, swingRange: number?)
+	if not attacker or not target then
+		return false
+	end
+
+	local profile = GetEnemyAttackProfile(attacker, swingRange)
+	if not IsTargetInsideHitbox(attacker, target, profile) then
+		return false
+	end
+
+	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
+	AttackCalculator.Calculate(attacker, target, baseDamage)
+	return true
 end
 
 local function BeginPrimaryAttack(player: Player)

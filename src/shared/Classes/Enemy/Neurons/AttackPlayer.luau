@@ -13,6 +13,10 @@ local AttackPlayer = {}
 AttackPlayer.__index = AttackPlayer
 setmetatable(AttackPlayer, SuperNeuron)
 
+local function GetAttackServiceServer()
+	return require(ReplicatedStorage.Services.Attack.AttackServiceServer)
+end
+
 local function GetDesiredLungeDistance(self: Neuron, distanceToTarget: number): number
 	return math.min(
 		self.__Attributes["MaxLungeDistance"],
@@ -77,7 +81,14 @@ local function OnEnter(self: Neuron): ()
 
 	if attacker and targetEntity then
 		local damage = attacker:GetStat("PhysicalAttack") + attacker:GetStat("Strength")
-		attacker:ApplyDamage(damage, targetEntity)
+		local hitDelay = self.__Attributes["Windup"] + self.__Attributes["AttackDuration"]
+		task.delay(hitDelay, function()
+			if not attacker:IsAlive() or not targetEntity:IsAlive() then
+				return
+			end
+
+			GetAttackServiceServer().ProcessEnemyHit(attacker, targetEntity, damage, self.__Attributes["AttackSwingRange"])
+		end)
 	end
 
 	if self.Brain.MovementEngine.__Animations["Attack"] then

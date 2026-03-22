@@ -9,6 +9,7 @@ end
 
 local API = endpoint :: RemoteEvent
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
@@ -18,9 +19,8 @@ type WeaponType = Weapon.Weapon
 
 local WeaponServiceServer = {}
 
--- TODO: Ensure using PlayerServerService rather than
--- seperate copy
 local PlayerEntities: { [Player]: Entity } = {}
+local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
 
 local function createStarterWeapon()
 	return Weapon.new("Starter Sword", 12, {
@@ -48,11 +48,61 @@ local function SerializeEquippedWeapon(weapon: WeaponType?)
 	}
 end
 
+local function DisconnectPlayerConnections(player: Player)
+	local connections = PlayerConnections[player]
+	if not connections then
+		return
+	end
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	PlayerConnections[player] = nil
+end
+
 function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 	PlayerEntities[player] = entity
+	DisconnectPlayerConnections(player)
+
+	local character = entity.Character
+	PlayerConnections[player] = {
+		character.ChildAdded:Connect(function(child)
+			if not child:IsA("Tool") then
+				return
+			end
+
+			local slot = child:GetAttribute("ToolbarSlot")
+			if type(slot) ~= "number" then
+				return
+			end
+
+			if entity:GetToolbarWeapon(slot) == nil then
+				entity:SetEquippedIndex(nil)
+			else
+				entity:SetEquippedIndex(slot)
+			end
+			WeaponServiceServer.SyncEquippedWeapon(player)
+		end),
+		character.ChildRemoved:Connect(function(child)
+			if not child:IsA("Tool") then
+				return
+			end
+
+			local slot = child:GetAttribute("ToolbarSlot")
+			if type(slot) ~= "number" then
+				return
+			end
+
+			if entity:GetEquippedIndex() == slot then
+				entity:SetEquippedIndex(nil)
+				WeaponServiceServer.SyncEquippedWeapon(player)
+			end
+		end),
+	}
 end
 
 function WeaponServiceServer.UnregisterEntity(player: Player): ()
+	DisconnectPlayerConnections(player)
 	PlayerEntities[player] = nil
 end
 
@@ -69,22 +119,43 @@ function WeaponServiceServer.CreateStarterWeapon()
 	return createStarterWeapon()
 end
 
-API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
-	if action ~= "UseAbility" then
-		return
-	end
-
+function WeaponServiceServer.SetEquippedSlot(player: Player, slot: number?)
 	local entity = PlayerEntities[player]
 	if not entity then
 		return
 	end
 
-	local equipped = entity:GetEquippedWeapon()
-	if not equipped then
-		return
+	if slot == nil then
+		entity:SetEquippedIndex(nil)
+	else
+		if entity:GetToolbarWeapon(slot) ~= nil then
+			entity:SetEquippedIndex(slot)
+		else
+			entity:SetEquippedIndex(nil)
+		end
 	end
 
-	equipped:UseRightClick(entity, payload or {})
+	WeaponServiceServer.SyncEquippedWeapon(player)
+end
+
+API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
+	if action == "UseAbility" then
+		local entity = PlayerEntities[player]
+		if not entity then
+			return
+		end
+
+		local equipped = entity:GetEquippedWeapon()
+		if not equipped then
+			return
+		end
+
+		equipped:UseRightClick(entity, payload or {})
+	elseif action == "EquipSlot" then
+		WeaponServiceServer.SetEquippedSlot(player, payload and payload.Slot or nil)
+	elseif action == "Unequip" then
+		WeaponServiceServer.SetEquippedSlot(player, nil)
+	end
 end)
 
 return table.freeze(WeaponServiceServer)

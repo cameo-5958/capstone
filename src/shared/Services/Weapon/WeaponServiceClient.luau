@@ -16,6 +16,16 @@ function WeaponServiceClient.UseAbility(payload: { [string]: any }?): ()
 	API:FireServer("UseAbility", payload or {})
 end
 
+function WeaponServiceClient.EquipSlot(slot: number?)
+	API:FireServer("EquipSlot", {
+		Slot = slot,
+	})
+end
+
+function WeaponServiceClient.Unequip()
+	API:FireServer("Unequip", {})
+end
+
 function WeaponServiceClient.GetEquippedWeaponData(): { [string]: any }?
 	return EquippedWeaponData
 end
