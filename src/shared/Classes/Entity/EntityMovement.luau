@@ -17,6 +17,8 @@ export type MovementEngine = {
 	Humanoid: Humanoid,
 	RootPart: Part,
 	Speed: number,
+	Entity: Entity,
+	RootAttachment: Attachment?,
 
 	-- MoveToFinished
 	MoveToFinished: CustomEvent,
@@ -27,17 +29,23 @@ export type MovementEngine = {
 	-- Moving Metadata
 	MovementEnabled: boolean,
 	Invincible: boolean,
+	FacingTarget: Vector3?,
+	LookAlign: AlignOrientation?,
 
 	-- Deferred task location
 	DeferredCancelTask: thread?,
+	DeferredVelocityCancelTask: thread?,
 
 	-- Methods
-	Impulse: (MovementEngine, Vector3, number) -> (),
+	ApplyLinearVelocity: (MovementEngine, Vector3, number) -> (),
+	CancelLinearVelocity: (MovementEngine) -> (),
 	DeferTask: (MovementEngine) -> (),
 	ScheduleDeferTask: (MovementEngine, number) -> (),
 	SetInvincibilityStatus: (MovementEngine, boolean) -> (),
 	DisableMovement: (MovementEngine) -> (),
 	IsMovementEnabled: (MovementEngine) -> boolean,
+	LookAt: (MovementEngine, Vector3) -> (),
+	ClearLookAt: (MovementEngine) -> (),
 
 	-- Public API
 	Attack: (MovementEngine) -> (),
@@ -64,6 +72,7 @@ function MovementEngine.init(self: MovementEngine): ()
 	-- Default state of the engine is to have movement enabled
 	self.MovementEnabled = true
 	self.Invincible = false
+	self.FacingTarget = nil
 
 	self:DeferTask()
 end
@@ -78,6 +87,8 @@ function MovementEngine.new(entity: Entity): MovementEngine
 	self.Character = entity.Character
 	self.Humanoid = entity.Character:FindFirstChild("Humanoid") :: Humanoid
 	self.RootPart = entity.RootPart
+	self.Entity = entity
+	self.RootAttachment = self.RootPart:FindFirstChild("RootAttachment") :: Attachment?
 	self.EntityUUID = entity.UUID
 	self.Speed = entity.__Stats["Speed"]
 	self.__Animations = entity.__Animations
@@ -89,17 +100,51 @@ function MovementEngine.new(entity: Entity): MovementEngine
 	return (self :: any) :: MovementEngine
 end
 
--- Utility method for applying Velocity
-function MovementEngine.Impulse(self: MovementEngine, force: Vector3, time_: number): ()
+function MovementEngine.ApplyLinearVelocity(self: MovementEngine, force: Vector3, time_: number): ()
 	-- Create a new Attachment and LinearVelocity and parent to Character
 	local lv = self.Character:FindFirstChild("LinearVelocity") :: LinearVelocity or Instance.new("LinearVelocity")
 	lv.Parent = self.Character
+	self.RootPart.AssemblyLinearVelocity = Vector3.zero
 	lv.VectorVelocity = force
 	lv.Attachment0 = self.RootPart:FindFirstChild("RootAttachment") :: Attachment
 	lv.MaxForce = 999999
 
-	-- Set to remove soon
-	self:ScheduleDeferTask(time_)
+	if self.DeferredVelocityCancelTask then
+		task.cancel(self.DeferredVelocityCancelTask)
+	end
+
+	self.DeferredVelocityCancelTask = task.delay(time_, function()
+		self.DeferredVelocityCancelTask = nil
+
+		local activeLv = self.Character:FindFirstChild("LinearVelocity")
+		if activeLv then
+			activeLv:Destroy()
+		end
+		self.RootPart.AssemblyLinearVelocity = Vector3.zero
+	end)
+
+	Handler:FireAllClients("LinearVelocity", {
+		UUID = self.EntityUUID,
+		Velocity = force,
+		Duration = time_,
+	})
+end
+
+function MovementEngine.CancelLinearVelocity(self: MovementEngine): ()
+	if self.DeferredVelocityCancelTask then
+		task.cancel(self.DeferredVelocityCancelTask)
+		self.DeferredVelocityCancelTask = nil
+	end
+
+	local lv = self.Character:FindFirstChild("LinearVelocity")
+	if lv then
+		lv:Destroy()
+	end
+	self.RootPart.AssemblyLinearVelocity = Vector3.zero
+
+	Handler:FireAllClients("CancelLinearVelocity", {
+		UUID = self.EntityUUID,
+	})
 end
 
 -- Utility method for iframe management
@@ -132,10 +177,7 @@ function MovementEngine.DeferTask(self: MovementEngine)
 	self.Humanoid.WalkSpeed = self.Speed
 
 	-- Destroy extras, if any
-	local lv = self.Character:FindFirstChild("LinearVelocity")
-	if lv then
-		lv:Destroy()
-	end
+	self:CancelLinearVelocity()
 end
 
 -- Utility method for setting defer task
@@ -148,6 +190,7 @@ function MovementEngine.ScheduleDeferTask(self: MovementEngine, time: number)
 	-- Create a new task delayed time "time"
 	-- set to trigger in the future
 	self.DeferredCancelTask = task.delay(time, function()
+		self.DeferredCancelTask = nil
 		self:DeferTask()
 	end)
 end
@@ -155,6 +198,66 @@ end
 -- Ensure movement is currently allowed
 function MovementEngine.IsMovementEnabled(self: MovementEngine): boolean
 	return self.MovementEnabled
+end
+
+local function GetLookAlign(self: MovementEngine): AlignOrientation?
+	if self.LookAlign and self.LookAlign.Parent then
+		return self.LookAlign
+	end
+
+	local attachment = self.RootAttachment or self.RootPart:FindFirstChild("RootAttachment")
+	if not attachment then
+		return nil
+	end
+
+	local align = self.RootPart:FindFirstChild("LookAlign") :: AlignOrientation?
+	if not align then
+		align = Instance.new("AlignOrientation")
+		align.Name = "LookAlign"
+		align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+		align.Attachment0 = attachment :: Attachment
+		align.Responsiveness = 200
+		align.RigidityEnabled = false
+		align.Enabled = false
+		align.Parent = self.RootPart
+	end
+
+	self.RootAttachment = attachment :: Attachment
+	self.LookAlign = align
+
+	return align
+end
+
+function MovementEngine.LookAt(self: MovementEngine, target: Vector3): ()
+	self.FacingTarget = target
+
+	local align = GetLookAlign(self)
+	if align then
+		local myPos = self.RootPart.Position
+		local flatTarget = Vector3.new(target.X, myPos.Y, target.Z)
+		align.CFrame = CFrame.lookAt(myPos, flatTarget)
+		align.Enabled = true
+		self.Humanoid.AutoRotate = false
+	end
+
+	Handler:FireAllClients("Face", {
+		UUID = self.EntityUUID,
+		LookAt = target,
+	})
+end
+
+function MovementEngine.ClearLookAt(self: MovementEngine): ()
+	self.FacingTarget = nil
+
+	if self.LookAlign then
+		self.LookAlign.Enabled = false
+	end
+	self.Humanoid.AutoRotate = true
+
+	Handler:FireAllClients("Face", {
+		UUID = self.EntityUUID,
+		LookAt = nil,
+	})
 end
 
 -- Three movement types: Attack, Block, Dash
@@ -231,14 +334,20 @@ function MovementEngine.Dash(self: MovementEngine): ()
 	self:ScheduleDeferTask(0.3)
 
 	-- Apply an impulse
-	self:Impulse(dashDirection * 36, 0.3)
+	self:ApplyLinearVelocity(dashDirection * 36, 0.3)
 end
 
 -- Just moving
-function MovementEngine.MoveTo(self: MovementEngine, position: Vector3): ()
+function MovementEngine.MoveTo(self: MovementEngine, position: Vector3, lookAt: Vector3?): ()
 	-- Reject if movement is disabled
 	if not self:IsMovementEnabled() then
 		return
+	end
+
+	if lookAt then
+		self:LookAt(lookAt)
+	else
+		self:ClearLookAt()
 	end
 
 	self.Humanoid:MoveTo(position)
@@ -246,6 +355,7 @@ function MovementEngine.MoveTo(self: MovementEngine, position: Vector3): ()
 	Handler:FireAllClients("Move", {
 		UUID = self.EntityUUID,
 		Position = position,
+		LookAt = lookAt,
 	})
 end
 
@@ -256,6 +366,7 @@ function MovementEngine.PivotTo(self: MovementEngine, cf: CFrame): ()
 		return
 	end
 
+	self.FacingTarget = nil
 	self.RootPart:PivotTo(cf)
 	-- Broadcast moveto to everyone
 	Handler:FireAllClients("Pivot", {
@@ -273,7 +384,7 @@ end
 -- End an animation
 function MovementEngine.Stop(self: MovementEngine, animId: string)
 	-- Hand myself in again
-	AnimationServiceServer.Animate(self.EntityUUID, self.__Animations[animId])
+	AnimationServiceServer.Stop(self.EntityUUID, self.__Animations[animId])
 end
 
 return MovementEngine

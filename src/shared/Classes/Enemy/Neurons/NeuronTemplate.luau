@@ -37,7 +37,7 @@ end
 
 -- Neuron constructor
 function __New_Neuron.new(): Neuron
-	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Core")
+	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Core", "NeuronTemplate")
 
 	setmetatable(self, __New_Neuron)
 	return self :: any

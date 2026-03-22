@@ -7,6 +7,7 @@ local Handler: RemoteEvent = script.Parent:WaitForChild("EnemyHandler")
 
 -- Require
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 type Entity = EntityTypes.Entity
@@ -14,6 +15,62 @@ type Entity = EntityTypes.Entity
 local __Enemies: {
 	[string]: Entity,
 } = {}
+local __LookTargets: {
+	[string]: Vector3?,
+} = {}
+local __VelocityCancelTasks: {
+	[string]: thread?,
+} = {}
+local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
+
+local function CancelLinearVelocityVisual(uuid: string)
+	local pending = __VelocityCancelTasks[uuid]
+	if pending then
+		task.cancel(pending)
+		__VelocityCancelTasks[uuid] = nil
+	end
+
+	local ent = __Enemies[uuid]
+	if not ent or not ent.Character or not ent.Character.PrimaryPart then
+		return
+	end
+
+	local lv = ent.Character:FindFirstChild("LinearVelocity")
+		or ent.Character:FindFirstChild(LOCAL_LINEAR_VELOCITY_NAME)
+	if lv then
+		lv:Destroy()
+	end
+
+	(ent.Character.PrimaryPart :: BasePart).AssemblyLinearVelocity = Vector3.zero
+end
+
+local function ApplyLinearVelocityVisual(uuid: string, velocity: Vector3, duration: number)
+	local ent = __Enemies[uuid]
+	if not ent or not ent.Character or not ent.Character.PrimaryPart then
+		return
+	end
+
+	CancelLinearVelocityVisual(uuid)
+
+	local rootPart = ent.Character.PrimaryPart :: BasePart
+	local attachment = rootPart:FindFirstChild("RootAttachment") :: Attachment?
+	if not attachment then
+		return
+	end
+
+	local lv = Instance.new("LinearVelocity")
+	lv.Name = LOCAL_LINEAR_VELOCITY_NAME
+	lv.Attachment0 = attachment
+	lv.VectorVelocity = velocity
+	lv.MaxForce = 999999
+	lv.Parent = ent.Character
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+
+	__VelocityCancelTasks[uuid] = task.delay(duration, function()
+		__VelocityCancelTasks[uuid] = nil
+		CancelLinearVelocityVisual(uuid)
+	end)
+end
 
 -- Public API
 local Enemies = {}
@@ -50,6 +107,10 @@ function Enemies.GetClosest(pos: Vector3, sight: number?)
 	return __Enemies[closest]
 end
 
+function Enemies.GetAll()
+	return __Enemies
+end
+
 -- Handle movement etc.
 Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 	if action == "Move" then
@@ -57,10 +118,30 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 		if ent and ent.Character and ent.Character:FindFirstChild("Humanoid") then
 			(ent.Character:FindFirstChild("Humanoid") :: Humanoid):MoveTo(data.Position)
 		end
+		CancelLinearVelocityVisual(data.UUID)
+
+		__LookTargets[data.UUID] = data.LookAt
 	elseif action == "Pivot" then
 		local ent = __Enemies[data.UUID]
 		if ent and ent.Character and ent.Character.PrimaryPart then
 			ent.Character.PrimaryPart:PivotTo(data.CFrame)
+		end
+		CancelLinearVelocityVisual(data.UUID)
+		__LookTargets[data.UUID] = nil
+	elseif action == "Face" then
+		__LookTargets[data.UUID] = data.LookAt
+	elseif action == "LinearVelocity" then
+		ApplyLinearVelocityVisual(data.UUID, data.Velocity, data.Duration)
+	elseif action == "CancelLinearVelocity" then
+		CancelLinearVelocityVisual(data.UUID)
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	for uuid, target in pairs(__LookTargets) do
+		local ent = __Enemies[uuid]
+		if not target or not ent or not ent.Character or not ent.Character.PrimaryPart then
+			continue
 		end
 	end
 end)

@@ -18,7 +18,8 @@ function Neuron.new(
 	onExit: (self: Neuron) -> (),
 	onUpdate: (self: Neuron, dt: number) -> (),
 
-	priority: BrainTypes.Priority
+	priority: BrainTypes.Priority,
+	name: string
 ): Neuron
 	local self = setmetatable({}, Neuron)
 
@@ -28,6 +29,7 @@ function Neuron.new(
 	self.OnExit = onExit
 	self.OnUpdate = onUpdate
 
+	self.Name = name
 	self.Priority = priority
 
 	self.__Attributes = {}

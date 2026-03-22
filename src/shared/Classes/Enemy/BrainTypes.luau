@@ -8,8 +8,11 @@ export type Brain = {
 	RootPart: Part,
 
 	-- Current target
-	Target: Model,
+	Target: Model?,
 	Aggro: boolean,
+	RetreatTarget: Model?,
+	RetreatUntil: number,
+	PendingStrafes: number,
 
 	-- All the neurons this brain has
 	Neurons: { Neuron },
@@ -48,6 +51,7 @@ export type Neuron = {
 	CanExit: (self: Neuron) -> boolean,
 
 	-- Priority
+	Name: string,
 	Priority: Priority,
 
 	-- Execution

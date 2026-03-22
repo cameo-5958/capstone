@@ -5,7 +5,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Services = ReplicatedStorage:WaitForChild("Services")
 
 local ToLoad = {
+	"Collision",
+	"Equipment",
 	"Enemy",
+	"Attack",
+	"Weapon",
 	"Player",
 }
 

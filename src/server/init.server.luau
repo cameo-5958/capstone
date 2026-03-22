@@ -11,4 +11,5 @@ ServerLoader.load()
 local SpawnBlock = workspace:WaitForChild("SpawnPoint")
 local EnemyServiceServer = ServerLoader.Services["Enemy"]
 
-EnemyServiceServer.Spawn("Goblins.Goblin", SpawnBlock)
+-- Spawn a few enemies :)
+EnemyServiceServer.Spawn("Tests.Sword", SpawnBlock)

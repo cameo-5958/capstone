@@ -3,6 +3,8 @@
 -- Import neurons
 local neurons = script.Parent.Neurons
 local StrafePlayer = require(neurons.StrafePlayer)
+local AttackPlayer = require(neurons.AttackPlayer)
+local BackOffPlayer = require(neurons.BackOffPlayer)
 local Aggro = require(neurons.Aggro)
 local Wander = require(neurons.Wander)
 local TrackPlayer = require(neurons.TrackPlayer)
@@ -22,8 +24,10 @@ function Brains.Aggressive(movementEngine, range: number): Brain
 		Aggro.new(), -- Can get aggroed
 
 		-- Core
-		TrackPlayer.new(range), -- Tracks the player at this given range
+		AttackPlayer.new(), -- Attacks once close enough to commit
+		BackOffPlayer.new(), -- Creates space after attacking before strafing
 		StrafePlayer.new(), -- Will Strafe with higher priority than attacks
+		TrackPlayer.new(range), -- Tracks the player at this given range
 
 		-- Passive
 		Wander.new(range), -- Will wander if left alone

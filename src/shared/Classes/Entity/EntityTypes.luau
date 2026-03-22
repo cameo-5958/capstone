@@ -1,9 +1,7 @@
 --!strict
 
--- Import BrainTypes
-
 -- Define the class's type
-type Stat =
+export type Stat =
 	"Health"
 	| "MaxHealth"
 	| "Defense"
@@ -16,6 +14,8 @@ type Stat =
 	| "PhysicalAttack"
 	| "MagicalAttack"
 	| "Speed" -- Movement SPeed
+
+export type StatBlock = { [Stat]: number }
 
 export type Entity = {
 	-- ENTITY
@@ -31,9 +31,13 @@ export type Entity = {
 	RootPart: BasePart,
 
 	-- Stats
-	__Stats: { Stat: number },
-	__Animations: { string: string },
-	__Buffs: {},
+	__Stats: StatBlock,
+	__Animations: { [string]: string },
+	__Buffs: { [string]: any },
+	__Components: {
+		EquippedIndex: number?,
+		ToolbarWeapons: { any? },
+	},
 
 	-- States
 	__Alive: boolean,
@@ -45,7 +49,15 @@ export type Entity = {
 	-- Stat Methods
 	GetStat: (self: Entity, stat: Stat) -> number,
 	SetStat: (self: Entity, stat: Stat, to: number) -> number,
+	ModifyStat: (self: Entity, stat: Stat, delta: number) -> number,
 	IsAlive: (self: Entity) -> boolean,
+	GetEquippedWeapon: (self: Entity) -> any?,
+	GetEquippedIndex: (self: Entity) -> number?,
+	SetEquippedIndex: (self: Entity, index: number?) -> number?,
+	ClearEquippedWeapon: (self: Entity) -> any?,
+	GetToolbarWeapon: (self: Entity, slot: number) -> any?,
+	SetToolbarWeapon: (self: Entity, slot: number, weapon: any?) -> any?,
+	GetToolbarWeapons: (self: Entity) -> { any? },
 
 	-- Doing damage
 	ApplyDamage: (self: Entity, damage: number, target: Entity) -> (),

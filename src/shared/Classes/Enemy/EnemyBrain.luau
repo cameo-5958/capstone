@@ -35,6 +35,9 @@ function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
 
 	-- Aggro
 	self.Aggro = false
+	self.RetreatTarget = nil
+	self.RetreatUntil = 0
+	self.PendingStrafes = 0
 
 	return self :: any
 end
@@ -91,7 +94,7 @@ function Brain.Tick(self: Brain, dt: number)
 				end
 			end
 			if self.CurrentNeuron then
-				print("Current neuron is " .. self.CurrentNeuron.Priority)
+				print("Current neuron is " .. self.CurrentNeuron.Name)
 
 				break
 			end

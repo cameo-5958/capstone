@@ -62,7 +62,7 @@ end
 
 -- Neuron constructor
 function __New_Neuron.new(range: number): Neuron
-	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Idle")
+	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Idle", "Wander")
 
 	setmetatable(self, __New_Neuron)
 

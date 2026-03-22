@@ -25,17 +25,25 @@ function AnimationService.Stop(uuid: string, animID: string)
     API:FireAllClients(uuid, "UUID", animID, "Stop")
 end
 
+local function BroadcastPlayerAnimation(player: Player, animID: string, status: string, includeSelf: boolean)
+	for _, ply in ipairs(Players:GetPlayers()) do
+		if includeSelf or ply ~= player then
+			API:FireClient(ply, player, "Player", animID, status)
+		end
+	end
+end
+
+function AnimationService.PlayPlayer(player: Player, animID: string)
+	BroadcastPlayerAnimation(player, animID, "Start", true)
+end
+
+function AnimationService.StopPlayer(player: Player, animID: string)
+	BroadcastPlayerAnimation(player, animID, "Stop", true)
+end
+
 -- Public API for animating players
 local function AnimatePlayer(player: Player, animID: string, status: string)
-    for _, ply in ipairs(Players:GetPlayers()) do
-        -- Confirm it ISN'T the current player 
-        -- (as they're already playing the animation)
-        -- locally
-
-        if ply ~= player then
-            API:FireClient(ply, player, "Player", animID, status)
-        end
-    end
+	BroadcastPlayerAnimation(player, animID, status, false)
 end
 
 API.OnServerEvent:Connect(AnimatePlayer)

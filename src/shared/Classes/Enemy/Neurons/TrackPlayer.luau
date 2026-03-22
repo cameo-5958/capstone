@@ -22,7 +22,7 @@ local function CanEnter(self: Neuron): boolean
 
 	local target = self.Brain:GetTargetPlayer(self.__Attributes["Range"])
 
-	if target and self.Brain:Delta(target).Magnitude > (4 + 0.5) then
+	if target and self.Brain:Delta(target).Magnitude > self.__Attributes["DesiredDistance"] then
 		self.__Attributes["Target"] = target
 		self.__Attributes["TargetPos"] = (target.PrimaryPart :: Part).Position
 
@@ -40,7 +40,7 @@ local function CanExit(self: Neuron): boolean
 	-- - 'm within 4 units
 	-- - reached my Wait point and can't see
 
-	if self.Brain:Delta(self.__Attributes["Target"]).Magnitude < (4 + 0.5) then
+	if self.Brain:Delta(self.__Attributes["Target"]).Magnitude < self.__Attributes["DesiredDistance"] then
 		return true
 	elseif not self.__Attributes["Moving"] then
 		return true
@@ -51,13 +51,20 @@ end
 local function RecalculateTargetPos(self: Neuron): ()
 	-- Try hitting player
 	if self.Brain:HitPlayer(self.__Attributes["Target"], self.__Attributes["Range"]) then
+		local myPos = self.Brain.RootPart.Position
 		local playerPos = (self.__Attributes["Target"].PrimaryPart :: Part).Position
+		local flatPlayerPos = Vector3.new(playerPos.X, myPos.Y, playerPos.Z)
+		local flatDelta = myPos - flatPlayerPos
+
+		if flatDelta.Magnitude <= 0.001 then
+			flatDelta = -self.Brain.RootPart.CFrame.LookVector
+		end
 
 		-- Calculate target location to move to
-		self.__Attributes["TargetPos"] = playerPos + self.Brain:Delta(self.__Attributes["Target"]).Unit * 4
+		self.__Attributes["TargetPos"] = flatPlayerPos + flatDelta.Unit * self.__Attributes["DesiredDistance"]
 
 		-- Move to that target position
-		self.Brain.MovementEngine:MoveTo(self.__Attributes["TargetPos"])
+		self.Brain.MovementEngine:MoveTo(self.__Attributes["TargetPos"], flatPlayerPos)
 	end
 	-- Move to that target position
 	-- self.Brain.MovementEngine:MoveTo(self.__Attributes["TargetPos"])
@@ -107,10 +114,11 @@ end
 
 -- Neuron constructor
 function __New_Neuron.new(range: number): Neuron
-	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Core")
+	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Core", "TrackPlayer")
 
 	setmetatable(self, __New_Neuron)
 	self.__Attributes["Range"] = range + 4
+	self.__Attributes["DesiredDistance"] = 7
 	return self :: any
 end
 

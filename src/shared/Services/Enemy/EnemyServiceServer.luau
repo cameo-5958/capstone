@@ -17,6 +17,7 @@ local Brains = require(ReplicatedStorage.Classes.Enemy.Brains)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
+local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -63,13 +64,15 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	end
 
 	-- Require the data to create the entity
-	local data = require(Enemy.Data) :: { ["Name"]: string, string : any }
+	local data = require(Enemy.Data) :: { ["Name"]: string, string: any }
 	local model = Enemy.Model:Clone() :: Model
 
 	model.Parent = EnemyFolder
+	CollisionServiceServer.AssignModel(model, "Enemy")
 
 	-- Create the entity here
 	local entity = Entity.new(model, data.Name)
+	model.Name = entity.UUID
 	entity.RootPart:PivotTo(SpawnBlock.CFrame)
 
 	-- Set default enemy stats
@@ -79,14 +82,18 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 
 	-- Set enemy specific stats
 	for key, value in pairs(data) do
-		if typeof(entity[key]) ~= typeof(table) then
-			entity[key] = value
-		else
+		-- Check type of entity[key]
+		if typeof(entity[key]) == typeof(table) then
+			-- Add them one by one
 			for k, v in pairs(value) do
-				entity["__" .. key][k] = v 
+				entity[key][k] = v
 			end
+		else
+			entity[key] = value
 		end
 	end
+
+	print(entity)
 
 	-- Add to the database
 	__Enemies[entity.UUID] = entity
@@ -104,6 +111,27 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 			[entity.UUID] = entity,
 		},
 	})
+end
+
+function Enemies.GetClosest(position: Vector3, sight: number?): Entity?
+	local closest: Entity? = nil
+	local closestDistance = sight or math.huge
+
+	for _, entity in pairs(__Enemies) do
+		if entity:IsAlive() then
+			local distance = (entity.RootPart.Position - position).Magnitude
+			if distance < closestDistance then
+				closest = entity
+				closestDistance = distance
+			end
+		end
+	end
+
+	return closest
+end
+
+function Enemies.GetByUUID(uuid: string): Entity?
+	return __Enemies[uuid]
 end
 
 return Enemies
