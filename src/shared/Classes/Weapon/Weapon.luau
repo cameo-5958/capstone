@@ -25,6 +25,8 @@ export type Weapon = {
 	UUID: string,
 	Name: string,
 	WeaponId: string,
+	Class: string,
+	AttackContext: { [string]: any },
 	BaseDamage: number,
 	GrantedStats: { [Stat]: number },
 	AttackProfile: AttackProfile,
@@ -40,13 +42,16 @@ export type Weapon = {
 		rightClickAbility: AbilityCallback?,
 		weaponId: string?,
 		attackProfile: AttackProfile?,
-		toolTemplate: Tool?
+		toolTemplate: Tool?,
+		weaponClass: string?,
+		attackContext: { [string]: any }?
 	) -> Weapon,
 	SetOwner: (self: Weapon, entity: Entity?) -> Weapon,
 	SetToolInstance: (self: Weapon, tool: Tool?) -> Tool?,
 	CloneTool: (self: Weapon) -> Tool?,
 	GetDamage: (self: Weapon, owner: Entity?) -> number,
 	GetAttackProfile: (self: Weapon) -> AttackProfile,
+	GetAttackContext: (self: Weapon) -> { [string]: any },
 	UseRightClick: (self: Weapon, owner: Entity?, context: { [string]: any }?) -> boolean,
 }
 
@@ -84,13 +89,17 @@ function Weapon.new(
 	rightClickAbility: AbilityCallback?,
 	weaponId: string?,
 	attackProfile: AttackProfile?,
-	toolTemplate: Tool?
+	toolTemplate: Tool?,
+	weaponClass: string?,
+	attackContext: { [string]: any }?
 ): Weapon
 	local self = setmetatable({}, Weapon)
 
 	self.UUID = HttpService:GenerateGUID(false)
 	self.Name = name
 	self.WeaponId = weaponId or name
+	self.Class = weaponClass or "Sword"
+	self.AttackContext = table.clone(attackContext or {})
 	self.BaseDamage = baseDamage
 	self.GrantedStats = table.clone(grantedStats or {})
 	self.AttackProfile = MergeAttackProfile(attackProfile)
@@ -144,6 +153,10 @@ function Weapon.GetAttackProfile(self: Weapon): AttackProfile
 		HitboxSize = profile.HitboxSize,
 		HitboxOffset = profile.HitboxOffset,
 	}
+end
+
+function Weapon.GetAttackContext(self: Weapon): { [string]: any }
+	return table.clone(self.AttackContext)
 end
 
 function Weapon.UseRightClick(self: Weapon, owner: Entity?, context: { [string]: any }?): boolean

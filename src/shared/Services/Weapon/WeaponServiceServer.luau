@@ -14,26 +14,38 @@ local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
+type WeaponType = Weapon.Weapon
 
 local WeaponServiceServer = {}
 
+-- TODO: Ensure using PlayerServerService rather than
+-- seperate copy
 local PlayerEntities: { [Player]: Entity } = {}
 
 local function createStarterWeapon()
-	return Weapon.new(
-		"Starter Sword",
-		12,
-		{
-			Strength = 4,
-			PhysicalAttack = 6,
-			Speed = 1,
-		},
-		function(_, entity: Entity)
-			local restored = math.min(entity:GetStat("MaxHealth"), entity:GetStat("Health") + 15)
-			entity:SetStat("Health", restored)
-		end,
-		"StarterSword"
-	)
+	return Weapon.new("Starter Sword", 12, {
+		Strength = 4,
+		PhysicalAttack = 6,
+		Speed = 1,
+	}, function(_, entity: Entity)
+		local restored = math.min(entity:GetStat("MaxHealth"), entity:GetStat("Health") + 15)
+		entity:SetStat("Health", restored)
+	end, "StarterSword", nil, nil, "Sword", {
+		MaxDashRange = 2.5,
+		SwingRange = 4.5,
+	})
+end
+
+local function SerializeEquippedWeapon(weapon: WeaponType?)
+	if not weapon then
+		return nil
+	end
+
+	return {
+		Class = weapon.Class,
+		AttackContext = weapon:GetAttackContext(),
+		WeaponId = weapon.WeaponId,
+	}
 end
 
 function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
@@ -42,6 +54,15 @@ end
 
 function WeaponServiceServer.UnregisterEntity(player: Player): ()
 	PlayerEntities[player] = nil
+end
+
+function WeaponServiceServer.SyncEquippedWeapon(player: Player): ()
+	local entity = PlayerEntities[player]
+	if not entity then
+		return
+	end
+
+	API:FireClient(player, "SyncEquippedWeapon", SerializeEquippedWeapon(entity:GetEquippedWeapon()))
 end
 
 function WeaponServiceServer.CreateStarterWeapon()

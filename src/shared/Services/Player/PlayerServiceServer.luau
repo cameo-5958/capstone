@@ -49,6 +49,7 @@ local function BindCharacter(player: Player, character: Model): Entity
 
 	WeaponServiceServer.RegisterEntity(player, entity)
 	EquipmentServiceServer.GiveDefaultLoadout(entity)
+	WeaponServiceServer.SyncEquippedWeapon(player)
 
 	return entity
 end

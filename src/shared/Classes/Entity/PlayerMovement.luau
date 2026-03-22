@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 
 local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
+local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
 local EntityTypes = require(script.Parent.EntityTypes)
 type Entity = EntityTypes.Entity
@@ -137,7 +138,7 @@ else
 		self.RootPart = chr.PrimaryPart :: Part
 		self.Player = lp
 		self.Speed = 12
-		self.__Animations = table.clone(PlayerConfig.__Animations or {});
+		self.__Animations = table.clone(PlayerConfig.__Animations or {})
 		-- Initialize other states
 		((self :: any) :: MovementEngine):init()
 
@@ -304,39 +305,72 @@ function MovementEngine.Attack(self: MovementEngine): ()
 		return
 	end
 
-	-- All tunable constants
-	local _ATTACK_SIGHT_RANGE = 32
-	local _ATTACK_SWING_RANGE = 4.5
-	local _MAX_LUNGE_DISTANCE = 2.5
-	local _LUNGE_DURATION = 0.08
-	local __movement_lock_duration = 0.35
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	local weaponClass = equippedWeapon and equippedWeapon.Class or "Punch"
+	local attackContext = equippedWeapon and equippedWeapon.AttackContext or {}
 
-	-- Find the closest enemy using the
-	-- given API
-	local target = self:GetTarget(self.RootPart.Position, _ATTACK_SIGHT_RANGE)
+	if weaponClass == "Punch" then
+		attackContext = {
+			SightRange = 16,
+			SwingRange = 3,
+			MaxDashRange = 1.5,
+			LungeDuration = 0.08,
+			LockDuration = 0.25,
+		}
+	elseif weaponClass == "Sword" or weaponClass == nil then
+		local swordDefaults = {
+			SightRange = 32,
+			SwingRange = 4.5,
+			MaxDashRange = 2.5,
+			LungeDuration = 0.08,
+			LockDuration = 0.35,
+		}
+		for key, value in pairs(swordDefaults) do
+			if attackContext[key] == nil then
+				attackContext[key] = value
+			end
+		end
+	else
+		for key, value in pairs({
+			SightRange = 32,
+			SwingRange = 4.5,
+			MaxDashRange = 2.5,
+			LungeDuration = 0.08,
+			LockDuration = 0.35,
+		}) do
+			if attackContext[key] == nil then
+				attackContext[key] = value
+			end
+		end
+	end
+
+	local attackSightRange = attackContext.SightRange
+	local attackSwingRange = attackContext.SwingRange
+	local maxLungeDistance = attackContext.MaxDashRange
+	local lungeDuration = attackContext.LungeDuration
+	local movementLockDuration = attackContext.LockDuration
+
+	local target = self:GetTarget(self.RootPart.Position, attackSightRange)
 	local targetLocation = Vector3.zero
 
 	if not target then
-		targetLocation = self.RootPart.Position + self.RootPart.CFrame.LookVector.Unit * _ATTACK_SWING_RANGE
+		targetLocation = self.RootPart.Position + self.RootPart.CFrame.LookVector.Unit * attackSwingRange
 	else
 		targetLocation = target.RootPart.Position
 	end
 
-	-- Lock movement briefly after attacking so input cannot immediately cancel the lunge.
-	self:LockMovement(__movement_lock_duration)
+	self:LockMovement(movementLockDuration)
 
-	-- Find the distance between my RootPart and the target
 	local flatTargetLocation = Vector3.new(targetLocation.X, self.RootPart.Position.Y, targetLocation.Z)
 	local delta = (flatTargetLocation - self.RootPart.Position)
 	local distanceToTarget = delta.Magnitude
 	local unit = distanceToTarget > 0.001 and delta.Unit or self.RootPart.CFrame.LookVector
-	local lungeDistance = GetDesiredLungeDistance(distanceToTarget, _ATTACK_SWING_RANGE, _MAX_LUNGE_DISTANCE)
-	local lungeVelocity = lungeDistance / _LUNGE_DURATION
+	local lungeDistance = GetDesiredLungeDistance(distanceToTarget, attackSwingRange, maxLungeDistance)
+	local lungeVelocity = lungeDistance / lungeDuration
 
-	-- Face the target direction, then apply a short lunge via LinearVelocity.
 	self.RootPart.CFrame = CFrame.lookAt(self.RootPart.Position, flatTargetLocation)
 	if lungeDistance > 0 then
-		self:ApplyLinearVelocity(unit * lungeVelocity, _LUNGE_DURATION)
+		self:ApplyLinearVelocity(unit * lungeVelocity, lungeDuration)
 	end
 end
 

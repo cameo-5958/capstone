@@ -28,7 +28,8 @@ local function BuildAttackProfile(data): Weapon.AttackProfile?
 		return nil
 	end
 
-	local swingRange = attackContext.SwingRange or 6
+	local swordRange = attackContext.SwingRange or 6
+	local hitRange = swordRange + 1.5
 	return {
 		AnimationId = "",
 		Windup = 0.12,
@@ -36,8 +37,8 @@ local function BuildAttackProfile(data): Weapon.AttackProfile?
 		Recovery = 0.22,
 		Cooldown = 0.55,
 		HitReset = 0.12,
-		HitboxSize = Vector3.new(swingRange + 1, 5, swingRange + 1),
-		HitboxOffset = CFrame.new(0, 0, -(swingRange * 0.5 + 0.5)),
+		HitboxSize = Vector3.new(3.25, 4.5, hitRange),
+		HitboxOffset = CFrame.new(0, 0, -(hitRange * 0.5)),
 	}
 end
 
@@ -102,7 +103,9 @@ function EquipmentServiceServer.CreateWeaponFromDatabase(weaponPath: string): We
 		data.RightClickAbility,
 		weaponPath,
 		BuildAttackProfile(data),
-		toolTemplate
+		toolTemplate,
+		data.Family or "Sword",
+		data.AttackContext or {}
 	)
 end
 
