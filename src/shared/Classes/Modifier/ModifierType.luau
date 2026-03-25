@@ -1,20 +1,17 @@
 --!strict
 
-export type StatModifier = {
-    -- Individual stat
-    Stat: string,
-    Additive: number, 
-    Multiplicative: number,
-}
+export type ModifierKind =
+	"BaseFlat"
+	| "BaseAdditive"
+	| "FinalAdditive"
+	| "Multiplicative"
+	| "FinalStatFlat"
 
 export type Modifier = {
-    -- Modifier ID
-    MID: string,
-
-    MinModifier: { StatModifier },
-    StepModifier: { StatModifier },
-
-    MaxStack: number,
+	Id: string,
+	Type: ModifierKind,
+	Value: number,
+	Source: string?,
 }
 
 return {}

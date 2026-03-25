@@ -15,7 +15,6 @@ setmetatable(__New_Neuron, SuperNeuron)
 -- Neuron methods
 local function CanEnter(_: Neuron): boolean
 	-- You can always enter
-	print("Hitting wander neuron")
 	return true
 end
 

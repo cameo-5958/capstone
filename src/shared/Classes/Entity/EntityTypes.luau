@@ -1,55 +1,68 @@
 --!strict
 
--- Define the class's type
+local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
+local Signal = require(script.Parent.Parent.Modifier.Signal)
+local StatModule = require(script.Parent.Parent.Modifier.Stat)
+local StatBlockModule = require(script.Parent.Parent.Modifier.StatBlock)
+
 export type Stat =
 	"Health"
 	| "MaxHealth"
 	| "Defense"
 	| "TrueDefense"
-	| "Resistance" -- EHP
 	| "Strength"
 	| "CritRate"
-	| "CritDamage" -- Multiplicative, Phys DPS
-	| "Intelligence" -- Exponential, Magical DPS
+	| "CritDamage"
+	| "Intelligence"
 	| "PhysicalAttack"
 	| "MagicalAttack"
-	| "Speed" -- Movement SPeed
+	| "Speed"
 
 export type StatBlock = { [Stat]: number }
+export type Modifier = ModifierType.Modifier
+export type ModifierKind = ModifierType.ModifierKind
+export type ModifierHandle = StatBlockModule.ModifierHandle
+export type StatSignal = Signal.Signal
+export type RuntimeStat = StatModule.Stat
+export type RuntimeStatBlock = StatBlockModule.StatBlock
 
 export type Entity = {
-	-- ENTITY
-	-- Base Metadata
 	UUID: string,
 	Name: string,
 	Family: string,
 	Level: number,
 	__ScaledLevel: number,
 
-	-- Models
 	Character: Model,
 	RootPart: BasePart,
 
-	-- Stats
+	-- Replicated snapshot of final stat values.
+	-- Runtime modifier state lives outside the raw entity table so
+	-- the entity can still be sent across remotes safely.
 	__Stats: StatBlock,
 	__Animations: { [string]: string },
-	__Buffs: { [string]: any },
+	__Buffs: { [string]: { ModifierHandle } },
 	__Components: {
 		EquippedIndex: number?,
 		ToolbarWeapons: { any? },
 	},
 
-	-- States
 	__Alive: boolean,
 
-	-- Constructor
 	new: (Model, string) -> Entity,
 	Inflate: (ent: Entity) -> Entity,
 
-	-- Stat Methods
 	GetStat: (self: Entity, stat: Stat) -> number,
+	GetBaseStat: (self: Entity, stat: Stat) -> number,
 	SetStat: (self: Entity, stat: Stat, to: number) -> number,
 	ModifyStat: (self: Entity, stat: Stat, delta: number) -> number,
+	AddModifier: (self: Entity, stat: Stat, modifier: Modifier) -> ModifierHandle,
+	RemoveModifier: (self: Entity, stat: Stat, modifierId: string) -> boolean,
+	RemoveModifierHandle: (self: Entity, handle: ModifierHandle?) -> boolean,
+	RemoveModifiersFromSource: (self: Entity, source: string) -> number,
+	RegisterBuffHandles: (self: Entity, source: string, handles: { ModifierHandle }) -> (),
+	ClearBuffSource: (self: Entity, source: string) -> number,
+	GetStatChangedSignal: (self: Entity, stat: Stat) -> StatSignal,
 	IsAlive: (self: Entity) -> boolean,
 	GetEquippedWeapon: (self: Entity) -> any?,
 	GetEquippedIndex: (self: Entity) -> number?,
@@ -59,10 +72,8 @@ export type Entity = {
 	SetToolbarWeapon: (self: Entity, slot: number, weapon: any?) -> any?,
 	GetToolbarWeapons: (self: Entity) -> { any? },
 
-	-- Doing damage
 	ApplyDamage: (self: Entity, damage: number, target: Entity) -> (),
 	TakeDamage: (self: Entity, damage: number, source: Entity) -> (),
 }
 
--- Return the class
 return {}

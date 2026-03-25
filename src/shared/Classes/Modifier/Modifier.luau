@@ -1,21 +1,32 @@
 --!strict
 
--- Import the modifier from ModifierType
-local __mod_type = require(script.Parent.ModifierType)
-type Modifier = __mod_type.Modifier
+local ModifierType = require(script.Parent.ModifierType)
 
--- Create the Modifier class
+export type Modifier = ModifierType.Modifier
+export type ModifierKind = ModifierType.ModifierKind
+
 local Modifier = {}
 Modifier.__index = Modifier
 
-function Modifier.new(
+--[[
+	Create a modifier payload for Entity:AddModifier(...).
 
-): Modifier
-    local self = setmetatable({}, Modifier)
-
-    
-
-    return self
+	Common usage:
+		local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
+		entity:AddModifier("Speed", Modifier.new(
+			"class:rogue:speed",
+			"FinalAdditive",
+			0.15,
+			"class:rogue"
+		))
+]]
+function Modifier.new(id: string, modifierType: ModifierKind, value: number, source: string?): Modifier
+	return {
+		Id = id,
+		Type = modifierType,
+		Value = value,
+		Source = source,
+	}
 end
 
-return Modifier
+return table.freeze(Modifier)

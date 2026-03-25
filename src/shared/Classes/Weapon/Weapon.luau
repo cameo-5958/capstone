@@ -140,6 +140,24 @@ function Weapon.GetDamage(self: Weapon, owner: Entity?): number
 	return self.BaseDamage + wielder:GetStat("PhysicalAttack") + wielder:GetStat("Strength")
 end
 
+--[[
+	Weapon metadata should stay data-only.
+	If a future weapon needs to grant stats on equip, do not mutate
+	entity.__Stats directly. Instead, call:
+
+		local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
+		local handle = entity:AddModifier("Strength", Modifier.new(
+			"weapon:<weaponId>:strength",
+			"BaseFlat",
+			5,
+			"weapon:<weaponId>"
+		))
+
+	Then remove it later with either:
+		entity:RemoveModifierHandle(handle)
+	or:
+		entity:RemoveModifiersFromSource("weapon:<weaponId>")
+]]
 function Weapon.GetAttackProfile(self: Weapon): AttackProfile
 	local profile = self.AttackProfile
 

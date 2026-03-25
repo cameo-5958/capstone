@@ -45,6 +45,12 @@ end
 function MovementEngine.init(self: MovementEngine): ()
 	self.FacingTarget = nil
 	MovementShared.Init(self)
+	self.Entity:GetStatChangedSignal("Speed"):Connect(function(newValue: number)
+		self.Speed = newValue
+		if self:IsMovementEnabled() then
+			self.Humanoid.WalkSpeed = newValue
+		end
+	end)
 end
 
 function MovementEngine.new(entity: Entity): MovementEngine
@@ -57,7 +63,7 @@ function MovementEngine.new(entity: Entity): MovementEngine
 	self.Entity = entity
 	self.RootAttachment = self.RootPart:FindFirstChild("RootAttachment") :: Attachment?
 	self.EntityUUID = entity.UUID
-	self.Speed = entity.__Stats["Speed"]
+	self.Speed = entity:GetStat("Speed")
 	self.__Animations = entity.__Animations
 	self.MoveToFinished = self.Humanoid.MoveToFinished;
 

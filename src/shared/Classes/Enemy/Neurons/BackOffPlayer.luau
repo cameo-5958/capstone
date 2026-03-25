@@ -39,7 +39,10 @@ end
 local function OnExit(self: Neuron): ()
 	self.Brain.RetreatTarget = nil
 	self.Brain.RetreatUntil = 0
-	self.Brain.PendingStrafes = self.__Attributes["StrafesAfterBackOff"]
+	self.Brain.PendingStrafes = math.random(
+		self.__Attributes["MinStrafesAfterBackOff"],
+		self.__Attributes["MaxStrafesAfterBackOff"]
+	)
 	self.Brain.MovementEngine:ClearLookAt()
 
 	if self.Brain.MovementEngine.__Animations["Walk"] then
@@ -70,7 +73,8 @@ function BackOffPlayer.new(): Neuron
 	self.__Attributes["DesiredDistance"] = 8
 	self.__Attributes["StepDistance"] = 5
 	self.__Attributes["StartedAt"] = 0
-	self.__Attributes["StrafesAfterBackOff"] = 4
+	self.__Attributes["MinStrafesAfterBackOff"] = 2
+	self.__Attributes["MaxStrafesAfterBackOff"] = 5
 
 	return self :: any
 end

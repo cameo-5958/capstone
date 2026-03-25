@@ -21,10 +21,16 @@ local WeaponModule = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local AttackServiceServer = {}
 
 type AttackProfile = WeaponModule.AttackProfile
+type AttackContext = {
+	SwingRange: number,
+	MaxDashRange: number,
+}
 type ActiveAttack = {
 	Id: string,
 	Profile: AttackProfile,
 	Weapon: any,
+	OriginCFrame: CFrame,
+	AttackContext: AttackContext,
 	ActiveFrom: number,
 	ActiveUntil: number,
 	ClearAt: number,
@@ -37,6 +43,14 @@ local NextAttackAt: { [Player]: number } = {}
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 overlapParams.MaxParts = 64
+
+local function GetAttackContext(weapon: any): AttackContext
+	local context = weapon and weapon:GetAttackContext() or {}
+	return {
+		SwingRange = context.SwingRange or 4.5,
+		MaxDashRange = context.MaxDashRange or 2.5,
+	}
+end
 
 local function ClearAttackLater(player: Player, attackId: string, clearAt: number, animationId: string)
 	local delayTime = math.max(0, clearAt - workspace:GetServerTimeNow())
@@ -54,13 +68,13 @@ local function ClearAttackLater(player: Player, attackId: string, clearAt: numbe
 	end)
 end
 
-local function GetHitboxCFrame(entity, profile: AttackProfile): CFrame
-	return entity.RootPart.CFrame * profile.HitboxOffset
+local function GetHitboxCFrame(rootCFrame: CFrame, profile: AttackProfile): CFrame
+	return rootCFrame * profile.HitboxOffset
 end
 
-local function IsTargetInsideHitbox(entity, target, profile: AttackProfile): boolean
+local function IsTargetInsideHitbox(entity, target, profile: AttackProfile, rootCFrame: CFrame): boolean
 	overlapParams.FilterDescendantsInstances = { entity.Character }
-	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(entity, profile), profile.HitboxSize, overlapParams)
+	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(rootCFrame, profile), profile.HitboxSize, overlapParams)
 	for _, part in ipairs(parts) do
 		if part:IsDescendantOf(target.Character) then
 			return true
@@ -68,6 +82,24 @@ local function IsTargetInsideHitbox(entity, target, profile: AttackProfile): boo
 	end
 
 	return false
+end
+
+local function IsTargetInsideCapturedAttack(entity, target, active: ActiveAttack): boolean
+	if IsTargetInsideHitbox(entity, target, active.Profile, entity.RootPart.CFrame) then
+		return true
+	end
+
+	local origin = active.OriginCFrame
+	local targetRoot = target.RootPart
+	local targetPos = targetRoot.Position
+	local flatTarget = Vector3.new(targetPos.X, origin.Position.Y, targetPos.Z)
+	local delta = flatTarget - origin.Position
+	local distanceToTarget = delta.Magnitude
+	local lungeDistance = math.min(active.AttackContext.MaxDashRange, math.max(0, distanceToTarget - active.AttackContext.SwingRange))
+	local endPosition = origin.Position + origin.LookVector * lungeDistance
+	local endCFrame = CFrame.lookAt(endPosition, endPosition + origin.LookVector)
+
+	return IsTargetInsideHitbox(entity, target, active.Profile, endCFrame)
 end
 
 local function GetEnemyAttackProfile(attacker, swingRange: number?): AttackProfile
@@ -96,7 +128,7 @@ function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: numbe
 	end
 
 	local profile = GetEnemyAttackProfile(attacker, swingRange)
-	if not IsTargetInsideHitbox(attacker, target, profile) then
+	if not IsTargetInsideHitbox(attacker, target, profile, attacker.RootPart.CFrame) then
 		return false
 	end
 
@@ -122,6 +154,7 @@ local function BeginPrimaryAttack(player: Player)
 	end
 
 	local profile = weapon:GetAttackProfile()
+	local attackContext = GetAttackContext(weapon)
 	local animationId = entity.__Animations["Attack"] or profile.AnimationId
 	local attackId = HttpService:GenerateGUID(false)
 	local activeFrom = now + profile.Windup
@@ -133,6 +166,8 @@ local function BeginPrimaryAttack(player: Player)
 		Id = attackId,
 		Profile = profile,
 		Weapon = weapon,
+		OriginCFrame = entity.RootPart.CFrame,
+		AttackContext = attackContext,
 		ActiveFrom = activeFrom,
 		ActiveUntil = activeUntil,
 		ClearAt = clearAt,
@@ -184,7 +219,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 		return
 	end
 
-	if not IsTargetInsideHitbox(entity, target, active.Profile) then
+	if not IsTargetInsideCapturedAttack(entity, target, active) then
 		return
 	end
 

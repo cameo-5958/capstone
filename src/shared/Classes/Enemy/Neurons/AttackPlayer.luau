@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 local SuperNeuron = require(script.Parent.Parent.Neuron)
 local BrainTypes = require(script.Parent.Parent.BrainTypes)
+local EnemyHandler = ReplicatedStorage.Services.Enemy:WaitForChild("EnemyHandler") :: RemoteEvent
 
 type Brain = BrainTypes.Brain
 type Neuron = BrainTypes.Neuron
@@ -22,6 +23,18 @@ local function GetDesiredLungeDistance(self: Neuron, distanceToTarget: number): 
 		self.__Attributes["MaxLungeDistance"],
 		math.max(0, distanceToTarget - self.__Attributes["AttackSwingRange"])
 	)
+end
+
+local function GetEnemyHitboxData(self: Neuron): (Vector3, CFrame)
+	local attacker = self.Brain.MovementEngine.Entity
+	local equippedWeapon = attacker and attacker:GetEquippedWeapon()
+	if equippedWeapon then
+		local profile = equippedWeapon:GetAttackProfile()
+		return profile.HitboxSize, profile.HitboxOffset
+	end
+
+	local hitRange = self.__Attributes["AttackSwingRange"] + 1.5
+	return Vector3.new(3.25, 4.5, hitRange), CFrame.new(0, 0, -(hitRange * 0.5))
 end
 
 local function CanEnter(self: Neuron): boolean
@@ -78,6 +91,16 @@ local function OnEnter(self: Neuron): ()
 	if lungeDistance > 0 then
 		self.Brain.MovementEngine:ApplyLinearVelocity(attackDirection * lungeVelocity, self.__Attributes["AttackDuration"])
 	end
+
+	local hitboxSize, hitboxOffset = GetEnemyHitboxData(self)
+	EnemyHandler:FireAllClients("AttackHitbox", {
+		UUID = attacker.UUID,
+		ActiveFrom = workspace:GetServerTimeNow() + self.__Attributes["Windup"],
+		ActiveUntil = workspace:GetServerTimeNow() + self.__Attributes["Windup"] + self.__Attributes["AttackDuration"],
+		ClearAt = workspace:GetServerTimeNow() + totalAttackTime,
+		HitboxSize = hitboxSize,
+		HitboxOffset = hitboxOffset,
+	})
 
 	if attacker and targetEntity then
 		local damage = attacker:GetStat("PhysicalAttack") + attacker:GetStat("Strength")

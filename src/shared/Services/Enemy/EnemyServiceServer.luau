@@ -77,11 +77,18 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 
 	-- Set default enemy stats
 	for key, value in pairs(default) do
-		entity.__Stats[key] = value
+		entity:SetStat(key, value)
 	end
 
 	-- Set enemy specific stats
 	for key, value in pairs(data) do
+		if key == "__Stats" then
+			for statName, statValue in pairs(value) do
+				entity:SetStat(statName, statValue)
+			end
+			continue
+		end
+
 		-- Check type of entity[key]
 		if typeof(entity[key]) == typeof(table) then
 			-- Add them one by one

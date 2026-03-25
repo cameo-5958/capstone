@@ -1,13 +1,18 @@
 --!strict
 
--- Import type from EntityTypes
-local EntityTypes = require(script.Parent.EntityTypes)
-type Entity = EntityTypes.Entity
-
--- Require Services
 local HttpService = game:GetService("HttpService")
 
--- Base table
+local Modifier = require(script.Parent.Parent.Modifier.Modifier)
+local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
+local StatBlock = require(script.Parent.Parent.Modifier.StatBlock)
+local EntityTypes = require(script.Parent.EntityTypes)
+
+type Entity = EntityTypes.Entity
+type Stat = EntityTypes.Stat
+type ModifierData = EntityTypes.Modifier
+type ModifierHandle = EntityTypes.ModifierHandle
+type RuntimeStatBlock = EntityTypes.RuntimeStatBlock
+
 local Entity = {}
 Entity.__index = Entity
 
@@ -26,22 +31,76 @@ local DEFAULT_STATS: EntityTypes.StatBlock = {
 	Speed = 8,
 }
 
+local FINALIZE_MAP = {
+	Resistance = function(_: string, value: number): number
+		return math.clamp(value, 0, 0.9)
+	end,
+	CritRate = function(_: string, value: number): number
+		return math.max(0, value)
+	end,
+} :: { [string]: (string, number) -> number }
+
+local RuntimeStats = setmetatable({}, { __mode = "k" }) :: { [Entity]: RuntimeStatBlock }
+
+local function ClampHealthToMax(self: Entity)
+	local stats = RuntimeStats[self]
+	if not stats then
+		return
+	end
+
+	local maxHealth = stats:Get("MaxHealth")
+	local currentHealth = stats:GetBase("Health")
+	local clampedHealth = math.clamp(currentHealth, 0, maxHealth)
+	if currentHealth ~= clampedHealth then
+		stats:SetBase("Health", clampedHealth)
+	end
+end
+
+local function OnStatChanged(self: Entity, statName: string, newValue: number, _: number)
+	self.__Stats[statName :: Stat] = newValue
+
+	if statName == "MaxHealth" then
+		ClampHealthToMax(self)
+	elseif statName == "Health" then
+		self.__Alive = newValue > 0
+	end
+end
+
+local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
+	local stats = RuntimeStats[self]
+	if stats then
+		return stats
+	end
+
+	stats = StatBlock.new(table.clone(self.__Stats), FINALIZE_MAP, function(statName, newValue, oldValue)
+		OnStatChanged(self, statName, newValue, oldValue)
+	end)
+	RuntimeStats[self] = stats
+	ClampHealthToMax(self)
+	self.__Alive = stats:Get("Health") > 0
+
+	for statName, value in pairs(self.__Stats) do
+		self.__Stats[statName] = value
+	end
+
+	return stats
+end
+
 -- Constructor
 function Entity.new(Model: Model, Name: string): Entity
 	local self = setmetatable({}, Entity)
 
-	-- Base Metadata
 	self.UUID = HttpService:GenerateGUID(false)
 	self.Name = Name
 	self.Family = "Unknown"
 	self.Level = 1
 	self.__ScaledLevel = 1
 
-	-- Models
 	self.Character = Model
 	self.RootPart = (Model.PrimaryPart or Model:WaitForChild("HumanoidRootPart")) :: BasePart
 
-	-- Stats
+	-- `__Stats` stays as a plain serializable snapshot of final values.
+	-- The real modifier runtime is stored in the module-local RuntimeStats map.
 	self.__Stats = table.clone(DEFAULT_STATS)
 	self.__Animations = {}
 	self.__Buffs = {}
@@ -50,59 +109,127 @@ function Entity.new(Model: Model, Name: string): Entity
 		ToolbarWeapons = { nil, nil, nil, nil },
 	}
 
-	-- States
 	self.__Alive = true
-
-	-- Brain (only for enemies)
 	self.__Brain = nil
+
+	EnsureRuntimeStats((self :: any) :: Entity)
 
 	return (self :: any) :: Entity
 end
 
--- Inflate the Entity class given an UUID
 function Entity.Inflate(ent: Entity): Entity
-	-- Grab UUID from the folder
 	local uuid = ent.UUID
 	local char = workspace.EntitiesFolder:FindFirstChild(uuid)
 	if not char then
 		error("Entity with UUID " .. uuid .. " does not exist in the world.")
 	end
 
-	-- Inflate self
 	ent.Character = char :: Model
 	ent.RootPart = char.PrimaryPart or char:WaitForChild("HumanoidRootPart") :: BasePart
+	EnsureRuntimeStats(ent)
 
 	return ent
 end
 
-function Entity.GetStat(self: Entity, stat: EntityTypes.Stat): number
-	return self.__Stats[stat] or 0
+function Entity.GetStat(self: Entity, stat: Stat): number
+	return EnsureRuntimeStats(self):Get(stat)
 end
 
-function Entity.SetStat(self: Entity, stat: EntityTypes.Stat, to: number): number
-	local nextValue = to
+function Entity.GetBaseStat(self: Entity, stat: Stat): number
+	return EnsureRuntimeStats(self):GetBase(stat)
+end
 
+function Entity.SetStat(self: Entity, stat: Stat, to: number): number
+	local nextValue = to
 	if stat == "Health" then
 		nextValue = math.clamp(to, 0, self:GetStat("MaxHealth"))
 	elseif stat == "Resistance" then
 		nextValue = math.clamp(to, 0, 0.9)
 	end
 
-	self.__Stats[stat] = nextValue
-
+	local result = EnsureRuntimeStats(self):SetBase(stat, nextValue)
 	if stat == "MaxHealth" then
-		self.__Stats.Health = math.clamp(self.__Stats.Health, 0, nextValue)
+		ClampHealthToMax(self)
 	end
 
-	if stat == "Health" then
-		self.__Alive = nextValue > 0
-	end
-
-	return nextValue
+	return result
 end
 
-function Entity.ModifyStat(self: Entity, stat: EntityTypes.Stat, delta: number): number
-	return self:SetStat(stat, self:GetStat(stat) + delta)
+function Entity.ModifyStat(self: Entity, stat: Stat, delta: number): number
+	return self:SetStat(stat, self:GetBaseStat(stat) + delta)
+end
+
+--[[
+	Primary API for weapons, classes, buffs, and debuffs:
+
+	Weapons:
+		local handle = entity:AddModifier("Strength", Modifier.new(
+			"weapon:sword_01:strength",
+			"BaseFlat",
+			5,
+			"weapon:sword_01"
+		))
+
+	Class passive:
+		entity:AddModifier("Speed", Modifier.new(
+			"class:rogue:speed",
+			"FinalAdditive",
+			0.15,
+			"class:rogue"
+		))
+
+	Temporary buff:
+		local hasteHandle = entity:AddModifier("Speed", Modifier.new(
+			"buff:haste:123",
+			"Multiplicative",
+			1.25,
+			"buff:haste"
+		))
+		entity:RemoveModifierHandle(hasteHandle)
+
+	Cleanup by source:
+		entity:RemoveModifiersFromSource("weapon:sword_01")
+]]
+function Entity.AddModifier(self: Entity, stat: Stat, modifier: ModifierData): ModifierHandle
+	return EnsureRuntimeStats(self):AddModifier(stat, modifier)
+end
+
+function Entity.RemoveModifier(self: Entity, stat: Stat, modifierId: string): boolean
+	return EnsureRuntimeStats(self):RemoveModifier(stat, modifierId)
+end
+
+function Entity.RemoveModifierHandle(self: Entity, handle: ModifierHandle?): boolean
+	return EnsureRuntimeStats(self):RemoveHandle(handle)
+end
+
+function Entity.RemoveModifiersFromSource(self: Entity, source: string): number
+	self.__Buffs[source] = nil
+	return EnsureRuntimeStats(self):RemoveAllFromSource(source)
+end
+
+function Entity.RegisterBuffHandles(self: Entity, source: string, handles: { ModifierHandle })
+	self.__Buffs[source] = handles
+end
+
+function Entity.ClearBuffSource(self: Entity, source: string): number
+	local handles = self.__Buffs[source]
+	self.__Buffs[source] = nil
+	if not handles then
+		return 0
+	end
+
+	local removed = 0
+	for _, handle in ipairs(handles) do
+		if self:RemoveModifierHandle(handle) then
+			removed += 1
+		end
+	end
+
+	return removed
+end
+
+function Entity.GetStatChangedSignal(self: Entity, stat: Stat)
+	return EnsureRuntimeStats(self):GetStatObject(stat).Changed
 end
 
 function Entity.IsAlive(self: Entity): boolean
@@ -169,5 +296,8 @@ function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()
 
 	self:SetStat("Health", self:GetStat("Health") - finalDamage)
 end
+
+Entity.Modifier = Modifier
+Entity.ModifierType = ModifierType
 
 return Entity

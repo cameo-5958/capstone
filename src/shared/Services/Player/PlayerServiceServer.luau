@@ -36,7 +36,11 @@ local function BindCharacter(player: Player, character: Model): Entity
 	else
 		entity = Entity.new(character, player.Name)
 		for key, value in pairs(PlayerConfig) do
-			if typeof(entity[key]) == typeof(table) then
+			if key == "__Stats" then
+				for statName, statValue in pairs(value) do
+					entity:SetStat(statName, statValue)
+				end
+			elseif typeof(entity[key]) == typeof(table) then
 				for nestedKey, nestedValue in pairs(value) do
 					entity[key][nestedKey] = nestedValue
 				end

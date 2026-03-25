@@ -21,7 +21,47 @@ local __LookTargets: {
 local __VelocityCancelTasks: {
 	[string]: thread?,
 } = {}
+local __AttackHitboxes: {
+	[string]: {
+		Part: Part,
+		ActiveFrom: number,
+		ActiveUntil: number,
+		ClearAt: number,
+		HitboxSize: Vector3,
+		HitboxOffset: CFrame,
+	},
+} = {}
 local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
+
+local function ClearAttackHitbox(uuid: string)
+	local state = __AttackHitboxes[uuid]
+	if not state then
+		return
+	end
+
+	state.Part:Destroy()
+	__AttackHitboxes[uuid] = nil
+end
+
+local function EnsureAttackHitbox(uuid: string): Part
+	local existing = __AttackHitboxes[uuid]
+	if existing and existing.Part.Parent then
+		return existing.Part
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "EnemyAttackHitboxVisualizer"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Material = Enum.Material.ForceField
+	part.Color = Color3.fromRGB(255, 90, 90)
+	part.Transparency = 0.82
+	part.Parent = workspace
+
+	return part
+end
 
 local function CancelLinearVelocityVisual(uuid: string)
 	local pending = __VelocityCancelTasks[uuid]
@@ -134,6 +174,16 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 		ApplyLinearVelocityVisual(data.UUID, data.Velocity, data.Duration)
 	elseif action == "CancelLinearVelocity" then
 		CancelLinearVelocityVisual(data.UUID)
+	elseif action == "AttackHitbox" then
+		local hitbox = EnsureAttackHitbox(data.UUID)
+		__AttackHitboxes[data.UUID] = {
+			Part = hitbox,
+			ActiveFrom = data.ActiveFrom,
+			ActiveUntil = data.ActiveUntil,
+			ClearAt = data.ClearAt,
+			HitboxSize = data.HitboxSize,
+			HitboxOffset = data.HitboxOffset,
+		}
 	end
 end)
 
@@ -143,6 +193,24 @@ RunService.Heartbeat:Connect(function()
 		if not target or not ent or not ent.Character or not ent.Character.PrimaryPart then
 			continue
 		end
+	end
+
+	local now = workspace:GetServerTimeNow()
+	for uuid, state in pairs(__AttackHitboxes) do
+		local ent = __Enemies[uuid]
+		if now > state.ClearAt or not ent or not ent.Character or not ent.Character.PrimaryPart then
+			ClearAttackHitbox(uuid)
+			continue
+		end
+
+		if now < state.ActiveFrom or now > state.ActiveUntil then
+			state.Part.Transparency = 1
+			continue
+		end
+
+		state.Part.Transparency = 0.82
+		state.Part.Size = state.HitboxSize
+		state.Part.CFrame = ent.Character.PrimaryPart.CFrame * state.HitboxOffset
 	end
 end)
 

@@ -55,7 +55,7 @@ if RunService:IsServer() then
 		self.Humanoid = entity.Character:FindFirstChild("Humanoid")
 		self.RootPart = entity.RootPart
 		self.EntityUUID = entity.UUID
-		self.Speed = entity.__Stats["Speed"];
+		self.Speed = entity:GetStat("Speed");
 		((self :: any) :: MovementEngine):init()
 
 		return (self :: any) :: MovementEngine

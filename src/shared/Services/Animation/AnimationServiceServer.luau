@@ -11,18 +11,18 @@ local AnimationService = {}
 
 -- Public API for animating non-players
 function AnimationService.Animate(uuid: string, animID: string)
-    -- Broadcast, to all players, a request to
-    -- animate a NON-PLAYER object
+	-- Broadcast, to all players, a request to
+	-- animate a NON-PLAYER object
 
-    API:FireAllClients(uuid, "UUID", animID, "Start")
+	API:FireAllClients(uuid, "UUID", animID, "Start")
 end
 
 -- Public API for stopping non-players
 function AnimationService.Stop(uuid: string, animID: string)
-    -- Broadcast, to all players, a request to
-    -- animate a NON-PLAYER object
+	-- Broadcast, to all players, a request to
+	-- animate a NON-PLAYER object
 
-    API:FireAllClients(uuid, "UUID", animID, "Stop")
+	API:FireAllClients(uuid, "UUID", animID, "Stop")
 end
 
 local function BroadcastPlayerAnimation(player: Player, animID: string, status: string, includeSelf: boolean)
