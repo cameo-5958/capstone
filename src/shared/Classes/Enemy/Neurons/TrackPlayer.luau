@@ -2,8 +2,6 @@
 
 -- Import Neuron
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Behavior = require(ReplicatedStorage.Modules.Behavior.Behavior)
-local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 local SuperNeuron = require(script.Parent.Parent.Neuron)
 local BrainTypes = require(script.Parent.Parent.BrainTypes)
 
