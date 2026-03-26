@@ -214,7 +214,7 @@ function MovementEngine.Attack(self: MovementEngine): ()
 end
 
 function MovementEngine.Dash(self: MovementEngine): ()
-	if not self:IsMovementEnabled() then
+	if not self:IsMovementEnabled() or not self:IsGrounded() then
 		return
 	end
 

@@ -30,6 +30,7 @@ export type MovementEngine = SharedMovementEngine & {
 	GetAnimation: (MovementEngine, string) -> string,
 	Play: (MovementEngine, string) -> (),
 	Stop: (MovementEngine, string) -> (),
+	UpdateFacingFromCamera: (MovementEngine) -> (),
 	UpdateMovementAnimation: (MovementEngine) -> (),
 	new: (Entity) -> (),
 	lnew: (Player) -> (),
@@ -44,6 +45,15 @@ function MovementEngine.init(self: MovementEngine): ()
 	self.AllMovementDisabled = false
 	self.WalkAnimationPlaying = false
 	MovementShared.Init(self)
+end
+
+local function IsBowEquipped(): boolean
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	if not equippedWeapon then
+		return false
+	end
+
+	return equippedWeapon.Class == "Bow"
 end
 
 if RunService:IsServer() then
@@ -83,21 +93,37 @@ else
 		local lp = Players.LocalPlayer
 		local chr = lp.Character or lp.CharacterAdded:Wait()
 		local self = setmetatable({}, MovementEngine)
+		local humanoid = chr:WaitForChild("Humanoid") :: Humanoid
 
 		self.States = {}
 		self.Character = chr
-		self.Humanoid = chr:WaitForChild("Humanoid")
+		self.Humanoid = humanoid
 		self.RootPart = chr.PrimaryPart :: Part
 		self.Player = lp
-		self.Speed = 12
+		self.Speed = humanoid:GetAttribute("EntitySpeed") or humanoid.WalkSpeed
 		self.__Animations = table.clone(PlayerConfig.__Animations or {});
 		((self :: any) :: MovementEngine):init()
+
+		humanoid:GetAttributeChangedSignal("EntitySpeed"):Connect(function()
+			local nextSpeed = humanoid:GetAttribute("EntitySpeed")
+			if typeof(nextSpeed) ~= "number" then
+				return
+			end
+
+			self.Speed = nextSpeed
+			if self:IsMovementEnabled() then
+				self.Humanoid.WalkSpeed = nextSpeed
+			end
+		end)
 
 		self.Humanoid.Running:Connect(function()
 			self:UpdateMovementAnimation()
 		end)
 		self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
 			self:UpdateMovementAnimation()
+		end)
+		RunService.RenderStepped:Connect(function()
+			self:UpdateFacingFromCamera()
 		end)
 
 		return (self :: any) :: MovementEngine
@@ -117,6 +143,27 @@ else
 
 		return closest :: Entity
 	end
+end
+
+function MovementEngine.UpdateFacingFromCamera(self: MovementEngine)
+	local camera = workspace.CurrentCamera
+	if not camera or not self.Character or self.Character.Parent == nil then
+		return
+	end
+
+	if not IsBowEquipped() then
+		self.Humanoid.AutoRotate = true
+		return
+	end
+
+	local lookVector = camera.CFrame.LookVector
+	local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z)
+	if flatLook.Magnitude <= 0.001 then
+		return
+	end
+
+	self.Humanoid.AutoRotate = false
+	self.RootPart.CFrame = CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + flatLook.Unit)
 end
 
 function MovementEngine.DisableAllMovement(self: MovementEngine)
@@ -201,7 +248,7 @@ function MovementEngine.Attack(self: MovementEngine): ()
 end
 
 function MovementEngine.Dash(self: MovementEngine): ()
-	if not self:IsMovementEnabled() then
+	if not self:IsMovementEnabled() or not self:IsGrounded() then
 		return
 	end
 

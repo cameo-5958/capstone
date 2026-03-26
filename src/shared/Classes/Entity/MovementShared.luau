@@ -22,6 +22,7 @@ export type SharedMovementEngine = {
 	LockMovement: (SharedMovementEngine, number) -> (),
 	UnlockMovement: (SharedMovementEngine) -> (),
 	IsMovementEnabled: (SharedMovementEngine) -> boolean,
+	IsGrounded: (SharedMovementEngine) -> boolean,
 	OnLinearVelocityApplied: ((SharedMovementEngine, Vector3, number) -> ())?,
 	OnLinearVelocityCancelled: ((SharedMovementEngine) -> ())?,
 	UpdateMovementAnimation: ((SharedMovementEngine) -> ())?,
@@ -145,6 +146,18 @@ end
 
 function MovementShared.IsMovementEnabled(self: SharedMovementEngine): boolean
 	return self.MovementEnabled and not (self.AllMovementDisabled == true)
+end
+
+function MovementShared.IsGrounded(self: SharedMovementEngine): boolean
+	local humanoidState = self.Humanoid:GetState()
+	if humanoidState == Enum.HumanoidStateType.Freefall
+		or humanoidState == Enum.HumanoidStateType.Jumping
+		or humanoidState == Enum.HumanoidStateType.FallingDown
+	then
+		return false
+	end
+
+	return self.Humanoid.FloorMaterial ~= Enum.Material.Air
 end
 
 return table.freeze(MovementShared)

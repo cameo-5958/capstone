@@ -8,14 +8,13 @@ if not endpoint then
 end
 
 local API = endpoint :: RemoteEvent
-
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
+local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
-type WeaponType = Weapon.Weapon
+type WeaponType = WeaponTypes.Weapon
 
 local WeaponServiceServer = {}
 
@@ -23,17 +22,27 @@ local PlayerEntities: { [Player]: Entity } = {}
 local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
 
 local function createStarterWeapon()
-	return Weapon.new("Starter Sword", 12, {
-		Strength = 4,
-		PhysicalAttack = 6,
-		Speed = 1,
-	}, function(_, entity: Entity)
-		local restored = math.min(entity:GetStat("MaxHealth"), entity:GetStat("Health") + 15)
-		entity:SetStat("Health", restored)
-	end, "StarterSword", nil, nil, "Sword", {
-		MaxDashRange = 2.5,
-		SwingRange = 4.5,
-	})
+	return Weapon.new(
+		"Starter Sword",
+		12,
+		{
+			Strength = 4,
+			PhysicalAttack = 6,
+			Speed = 1,
+		},
+		function(_, entity: Entity)
+			local restored = math.min(entity:GetStat("MaxHealth"), entity:GetStat("Health") + 15)
+			entity:SetStat("Health", restored)
+		end,
+		"StarterSword",
+		nil,
+		nil,
+		"Sword",
+		{
+			MaxDashRange = 2.5,
+			SwingRange = 4.5,
+		}
+	)
 end
 
 local function SerializeEquippedWeapon(weapon: WeaponType?)
@@ -159,3 +168,6 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(WeaponServiceServer)
+
+
+

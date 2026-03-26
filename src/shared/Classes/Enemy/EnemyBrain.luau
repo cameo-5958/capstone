@@ -21,7 +21,7 @@ function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
 
 	self.MovementEngine = movementEngine
 	self.Character = movementEngine.Character
-	self.RootPart = self.Character.PrimaryPart :: Part
+	self.RootPart = movementEngine.RootPart
 
 	-- Initialize Neurons
 	self.Neurons = neurons
@@ -94,8 +94,6 @@ function Brain.Tick(self: Brain, dt: number)
 				end
 			end
 			if self.CurrentNeuron then
-				print("Current neuron is " .. self.CurrentNeuron.Name)
-
 				break
 			end
 		end

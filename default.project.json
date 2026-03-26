@@ -55,6 +55,30 @@
           ]
         }
       },
+      "SpawnPoint": {
+        "$className": "Part",
+        "$properties": {
+          "Anchored": true,
+          "CanCollide": false,
+          "Color": [
+            1.0,
+            0.6,
+            0.6
+          ],
+          "Locked": true,
+          "Position": [
+            0,
+            4,
+            0
+          ],
+          "Size": [
+            4,
+            8,
+            4
+          ],
+          "Transparency": 0.7
+        }
+      },
       "EntitiesFolder": {
         "$className": "Folder"
       }

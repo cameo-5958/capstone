@@ -56,6 +56,7 @@ export type Entity = {
 	GetBaseStat: (self: Entity, stat: Stat) -> number,
 	SetStat: (self: Entity, stat: Stat, to: number) -> number,
 	ModifyStat: (self: Entity, stat: Stat, delta: number) -> number,
+	SyncCharacterStats: (self: Entity) -> (),
 	AddModifier: (self: Entity, stat: Stat, modifier: Modifier) -> ModifierHandle,
 	RemoveModifier: (self: Entity, stat: Stat, modifierId: string) -> boolean,
 	RemoveModifierHandle: (self: Entity, handle: ModifierHandle?) -> boolean,

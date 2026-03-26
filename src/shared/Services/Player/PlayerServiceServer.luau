@@ -33,6 +33,7 @@ local function BindCharacter(player: Player, character: Model): Entity
 	if entity then
 		entity.Character = character
 		entity.RootPart = character.PrimaryPart or character:WaitForChild("HumanoidRootPart") :: BasePart
+		entity:SyncCharacterStats()
 	else
 		entity = Entity.new(character, player.Name)
 		for key, value in pairs(PlayerConfig) do

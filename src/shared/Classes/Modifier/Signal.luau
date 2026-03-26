@@ -24,12 +24,12 @@ function Connection.Disconnect(self: Connection)
 		return
 	end
 
-	listeners[index] = nil
+	listeners[index] = nil;
 	(self :: any)._index = nil
 end
 
 function Signal.new(): Signal
-	local self = setmetatable({}, Signal)
+	local self = setmetatable({}, Signal);
 	(self :: any)._listeners = {}
 	(self :: any)._nextId = 0
 	(self :: any)._destroyed = false

@@ -5,6 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Modifier = require(script.Parent.Parent.Modifier.Modifier)
 local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
 local StatBlock = require(script.Parent.Parent.Modifier.StatBlock)
+local AttackCalculator = require(script.Parent.Parent.Parent.Modules.Combat.AttackCalculator)
 local EntityTypes = require(script.Parent.EntityTypes)
 
 type Entity = EntityTypes.Entity
@@ -41,6 +42,7 @@ local FINALIZE_MAP = {
 } :: { [string]: (string, number) -> number }
 
 local RuntimeStats = setmetatable({}, { __mode = "k" }) :: { [Entity]: RuntimeStatBlock }
+local OnStatChanged: (self: Entity, statName: string, newValue: number, oldValue: number) -> ()
 
 local function ClampHealthToMax(self: Entity)
 	local stats = RuntimeStats[self]
@@ -53,16 +55,6 @@ local function ClampHealthToMax(self: Entity)
 	local clampedHealth = math.clamp(currentHealth, 0, maxHealth)
 	if currentHealth ~= clampedHealth then
 		stats:SetBase("Health", clampedHealth)
-	end
-end
-
-local function OnStatChanged(self: Entity, statName: string, newValue: number, _: number)
-	self.__Stats[statName :: Stat] = newValue
-
-	if statName == "MaxHealth" then
-		ClampHealthToMax(self)
-	elseif statName == "Health" then
-		self.__Alive = newValue > 0
 	end
 end
 
@@ -84,6 +76,34 @@ local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
 	end
 
 	return stats
+end
+
+local function SyncSpeedToCharacter(self: Entity)
+	local character = self.Character
+	if not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid or not humanoid:IsA("Humanoid") then
+		return
+	end
+
+	local speed = EnsureRuntimeStats(self):Get("Speed")
+	humanoid:SetAttribute("EntitySpeed", speed)
+	humanoid.WalkSpeed = speed
+end
+
+function OnStatChanged(self: Entity, statName: string, newValue: number, _: number)
+	self.__Stats[statName :: Stat] = newValue
+
+	if statName == "MaxHealth" then
+		ClampHealthToMax(self)
+	elseif statName == "Health" then
+		self.__Alive = newValue > 0
+	elseif statName == "Speed" then
+		SyncSpeedToCharacter(self)
+	end
 end
 
 -- Constructor
@@ -113,6 +133,7 @@ function Entity.new(Model: Model, Name: string): Entity
 	self.__Brain = nil
 
 	EnsureRuntimeStats((self :: any) :: Entity)
+	SyncSpeedToCharacter((self :: any) :: Entity)
 
 	return (self :: any) :: Entity
 end
@@ -127,8 +148,13 @@ function Entity.Inflate(ent: Entity): Entity
 	ent.Character = char :: Model
 	ent.RootPart = char.PrimaryPart or char:WaitForChild("HumanoidRootPart") :: BasePart
 	EnsureRuntimeStats(ent)
+	SyncSpeedToCharacter(ent)
 
 	return ent
+end
+
+function Entity.SyncCharacterStats(self: Entity)
+	SyncSpeedToCharacter(self)
 end
 
 function Entity.GetStat(self: Entity, stat: Stat): number
@@ -282,7 +308,8 @@ function Entity.GetToolbarWeapons(self: Entity)
 end
 
 function Entity.ApplyDamage(self: Entity, damage: number, target: Entity): ()
-	target:TakeDamage(damage, self)
+	local calculatedDamage = AttackCalculator.Calculate(self, target, damage)
+	target:TakeDamage(calculatedDamage, self)
 end
 
 function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()

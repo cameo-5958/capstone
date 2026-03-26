@@ -4,10 +4,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
+local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
-type WeaponType = Weapon.Weapon
+type WeaponType = WeaponTypes.Weapon
 
 local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
 
@@ -22,7 +23,7 @@ local function ResolveWeaponFolder(weaponPath: string): Instance
 	return current
 end
 
-local function BuildAttackProfile(data): Weapon.AttackProfile?
+local function BuildAttackProfile(data): WeaponTypes.AttackProfile?
 	local attackContext = data.AttackContext
 	if not attackContext then
 		return nil
@@ -143,3 +144,6 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 end
 
 return table.freeze(EquipmentServiceServer)
+
+
+

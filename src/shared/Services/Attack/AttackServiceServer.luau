@@ -15,12 +15,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
-local AttackCalculator = require(ReplicatedStorage.Modules.Combat.AttackCalculator)
 local WeaponModule = require(ReplicatedStorage.Classes.Weapon.Weapon)
+local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
 
 local AttackServiceServer = {}
 
-type AttackProfile = WeaponModule.AttackProfile
+type AttackProfile = WeaponTypes.AttackProfile
 type AttackContext = {
 	SwingRange: number,
 	MaxDashRange: number,
@@ -133,7 +133,7 @@ function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: numbe
 	end
 
 	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
-	AttackCalculator.Calculate(attacker, target, baseDamage)
+	attacker:ApplyDamage(baseDamage, target)
 	return true
 end
 
@@ -237,3 +237,4 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
+

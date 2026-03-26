@@ -57,7 +57,7 @@ local function CreateStatChangedRelay(self, statName: string, stat: StatClass)
 end
 
 function StatBlock.new(baseStats: { [string]: number }, finalizeMap: FinalizeMap?, onStatChanged: ((string, number, number) -> ())?): StatBlock
-	local self = setmetatable({}, StatBlockMetatable)
+	local self = setmetatable({}, StatBlockMetatable);
 
 	(self :: any)._stats = {}
 	(self :: any)._onStatChanged = onStatChanged
@@ -65,7 +65,7 @@ function StatBlock.new(baseStats: { [string]: number }, finalizeMap: FinalizeMap
 
 	for statName, baseValue in pairs(baseStats) do
 		local finalize = finalizeMap and finalizeMap[statName] or nil
-		local stat = Stat.new(statName, baseValue, finalize)
+		local stat = Stat.new(statName, baseValue, finalize);
 		(self :: any)._stats[statName] = stat
 		CreateStatChangedRelay(self, statName, stat)
 		stat:Recalculate()
