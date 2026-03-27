@@ -59,12 +59,10 @@ local function Stop(character: Model, animId: string)
 
 	local track = GetAnimationTrack(animator, animId)
 
-	-- No track: tried to stop something without a track
 	if not track then
-		error("Track is not playing")
+		return
 	end
 
-	-- Stop it
 	track:Stop()
 end
 

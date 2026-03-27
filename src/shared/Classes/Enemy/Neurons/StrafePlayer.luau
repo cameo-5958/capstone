@@ -11,6 +11,10 @@ setmetatable(__New_Neuron, SuperNeuron)
 
 --
 
+local function GetStrafeAnimationKey(self: Neuron): string
+	return self.__Attributes["Direction"] == 1 and "StrafeRight" or "StrafeLeft"
+end
+
 local function CanEnter(self: Neuron): boolean
 	local target = self.Brain.Target
 	if not target then
@@ -55,6 +59,11 @@ local function OnEnter(self: Neuron): ()
 
 	-- Pick a direction: 1 for Right, -1 for Left
 	self.__Attributes["Direction"] = math.random() > 0.5 and 1 or -1
+
+	local animationKey = GetStrafeAnimationKey(self)
+	if self.Brain.MovementEngine.__Animations[animationKey] then
+		self.Brain.MovementEngine:Play(animationKey)
+	end
 end
 
 local function OnUpdate(self: Neuron, _: number): ()
@@ -87,6 +96,11 @@ local function OnUpdate(self: Neuron, _: number): ()
 end
 
 local function OnExit(self: Neuron): ()
+	local animationKey = GetStrafeAnimationKey(self)
+	if self.Brain.MovementEngine.__Animations[animationKey] then
+		self.Brain.MovementEngine:Stop(animationKey)
+	end
+
 	self.Brain.MovementEngine.Humanoid.WalkSpeed = self.__Attributes["PreviousWalkSpeed"]
 	if self.Brain.PendingStrafes > 0 then
 		self.Brain.PendingStrafes -= 1

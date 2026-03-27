@@ -5,6 +5,7 @@ local PhysicsService = game:GetService("PhysicsService")
 local CollisionServiceServer = {}
 
 local REGISTERED = false
+local BoundModels = setmetatable({}, { __mode = "k" }) :: { [Model]: RBXScriptConnection }
 
 local function ensureGroup(name: string)
 	pcall(function()
@@ -35,6 +36,15 @@ end
 function CollisionServiceServer.AssignModel(model: Model, groupName: string)
 	CollisionServiceServer.init()
 	applyGroupRecursive(model, groupName)
+
+	local existing = BoundModels[model]
+	if existing then
+		existing:Disconnect()
+	end
+
+	BoundModels[model] = model.DescendantAdded:Connect(function(descendant)
+		applyGroupRecursive(descendant, groupName)
+	end)
 end
 
 return table.freeze(CollisionServiceServer)

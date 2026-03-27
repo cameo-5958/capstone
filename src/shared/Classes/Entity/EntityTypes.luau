@@ -4,18 +4,20 @@ local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
 local Signal = require(script.Parent.Parent.Modifier.Signal)
 local StatModule = require(script.Parent.Parent.Modifier.Stat)
 local StatBlockModule = require(script.Parent.Parent.Modifier.StatBlock)
+local AttackModifierApplierType = require(script.Parent.Parent.Attack.AttackModifierApplier)
 
 export type Stat =
 	"Health"
 	| "MaxHealth"
 	| "Defense"
-	| "TrueDefense"
 	| "Strength"
 	| "CritRate"
 	| "CritDamage"
 	| "Intelligence"
 	| "PhysicalAttack"
 	| "MagicalAttack"
+	| "PhysicalDamage"
+	| "MagicDamage"
 	| "Speed"
 
 export type StatBlock = { [Stat]: number }
@@ -25,6 +27,7 @@ export type ModifierHandle = StatBlockModule.ModifierHandle
 export type StatSignal = Signal.Signal
 export type RuntimeStat = StatModule.Stat
 export type RuntimeStatBlock = StatBlockModule.StatBlock
+export type AttackModifierApplier = AttackModifierApplierType.AttackModifierApplier
 
 export type Entity = {
 	UUID: string,
@@ -42,6 +45,7 @@ export type Entity = {
 	__Stats: StatBlock,
 	__Animations: { [string]: string },
 	__Buffs: { [string]: { ModifierHandle } },
+	__AttackModifierAppliers: { AttackModifierApplier },
 	__Components: {
 		EquippedIndex: number?,
 		ToolbarWeapons: { any? },
@@ -63,6 +67,20 @@ export type Entity = {
 	RemoveModifiersFromSource: (self: Entity, source: string) -> number,
 	RegisterBuffHandles: (self: Entity, source: string, handles: { ModifierHandle }) -> (),
 	ClearBuffSource: (self: Entity, source: string) -> number,
+	AddAttackModifierApplier: (self: Entity, applier: AttackModifierApplier) -> AttackModifierApplier,
+	RemoveAttackModifierApplier: (self: Entity, applier: AttackModifierApplier) -> boolean,
+	GetAttackModifierAppliers: (self: Entity) -> { AttackModifierApplier },
+	TriggerApply: (self: Entity, attackContext: any) -> (),
+	TriggerOnApplyMultipliers: (self: Entity, attackContext: any) -> (),
+	TriggerOnCritRoll: (self: Entity, attackContext: any) -> (),
+	TriggerOnAttackEnemy: (self: Entity, attackContext: any) -> (),
+	TriggerOnDefeatEnemy: (self: Entity, attackContext: any) -> (),
+	TriggerOnOncomingHit: (self: Entity, attackContext: any) -> (),
+	TriggerOnShieldBlock: (self: Entity, attackContext: any) -> (),
+	TriggerProcureData: (self: Entity, attackContext: any) -> (),
+	TriggerOnHitSuccess: (self: Entity, attackContext: any) -> (),
+	TriggerOnProjectileExpire: (self: Entity, attackContext: any) -> (),
+	TriggerOnWeaponSwap: (self: Entity, attackContext: any) -> (),
 	GetStatChangedSignal: (self: Entity, stat: Stat) -> StatSignal,
 	IsAlive: (self: Entity) -> boolean,
 	GetEquippedWeapon: (self: Entity) -> any?,

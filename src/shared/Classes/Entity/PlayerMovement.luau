@@ -252,11 +252,18 @@ function MovementEngine.Dash(self: MovementEngine): ()
 		return
 	end
 
+	local dashDuration = 0.36
+	local dashSpeed = 30
 	local dashDirection = self.RootPart.CFrame.LookVector.Unit
+	self:Stop("Attack")
+	self:Play("Dash")
 	self:DisableMovement()
 	self:SetInvincibilityStatus(true)
-	self:ScheduleDeferTask(0.3)
-	self:ApplyLinearVelocity(dashDirection * 36, 0.3)
+	self:ScheduleDeferTask(dashDuration)
+	self:ApplyLinearVelocity(dashDirection * dashSpeed, dashDuration)
+	task.delay(dashDuration, function()
+		self:Stop("Dash")
+	end)
 end
 
 function MovementEngine.GetAnimation(self: MovementEngine, animation: string): string

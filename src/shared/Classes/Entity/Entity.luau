@@ -13,6 +13,7 @@ type Stat = EntityTypes.Stat
 type ModifierData = EntityTypes.Modifier
 type ModifierHandle = EntityTypes.ModifierHandle
 type RuntimeStatBlock = EntityTypes.RuntimeStatBlock
+type AttackModifierApplier = EntityTypes.AttackModifierApplier
 
 local Entity = {}
 Entity.__index = Entity
@@ -21,21 +22,18 @@ local DEFAULT_STATS: EntityTypes.StatBlock = {
 	Health = 100,
 	MaxHealth = 100,
 	Defense = 0,
-	TrueDefense = 0,
-	Resistance = 0,
 	Strength = 10,
 	CritRate = 0.05,
 	CritDamage = 1.5,
 	Intelligence = 0,
 	PhysicalAttack = 10,
 	MagicalAttack = 10,
+	PhysicalDamage = 1,
+	MagicDamage = 1,
 	Speed = 8,
 }
 
 local FINALIZE_MAP = {
-	Resistance = function(_: string, value: number): number
-		return math.clamp(value, 0, 0.9)
-	end,
 	CritRate = function(_: string, value: number): number
 		return math.max(0, value)
 	end,
@@ -94,6 +92,15 @@ local function SyncSpeedToCharacter(self: Entity)
 	humanoid.WalkSpeed = speed
 end
 
+local function TriggerAttackModifierHook(self: Entity, hookName: string, attackContext: any)
+	for _, applier in ipairs(self.__AttackModifierAppliers) do
+		local hook = (applier :: any)[hookName]
+		if hook then
+			hook(applier, attackContext)
+		end
+	end
+end
+
 function OnStatChanged(self: Entity, statName: string, newValue: number, _: number)
 	self.__Stats[statName :: Stat] = newValue
 
@@ -124,6 +131,7 @@ function Entity.new(Model: Model, Name: string): Entity
 	self.__Stats = table.clone(DEFAULT_STATS)
 	self.__Animations = {}
 	self.__Buffs = {}
+	self.__AttackModifierAppliers = {}
 	self.__Components = {
 		EquippedIndex = nil,
 		ToolbarWeapons = { nil, nil, nil, nil },
@@ -169,8 +177,6 @@ function Entity.SetStat(self: Entity, stat: Stat, to: number): number
 	local nextValue = to
 	if stat == "Health" then
 		nextValue = math.clamp(to, 0, self:GetStat("MaxHealth"))
-	elseif stat == "Resistance" then
-		nextValue = math.clamp(to, 0, 0.9)
 	end
 
 	local result = EnsureRuntimeStats(self):SetBase(stat, nextValue)
@@ -254,6 +260,70 @@ function Entity.ClearBuffSource(self: Entity, source: string): number
 	return removed
 end
 
+function Entity.AddAttackModifierApplier(self: Entity, applier: AttackModifierApplier): AttackModifierApplier
+	table.insert(self.__AttackModifierAppliers, applier)
+	return applier
+end
+
+function Entity.RemoveAttackModifierApplier(self: Entity, applier: AttackModifierApplier): boolean
+	for index, current in ipairs(self.__AttackModifierAppliers) do
+		if current == applier then
+			table.remove(self.__AttackModifierAppliers, index)
+			return true
+		end
+	end
+
+	return false
+end
+
+function Entity.GetAttackModifierAppliers(self: Entity): { AttackModifierApplier }
+	return self.__AttackModifierAppliers
+end
+
+function Entity.TriggerApply(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "Apply", attackContext)
+end
+
+function Entity.TriggerOnApplyMultipliers(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnApplyMultipliers", attackContext)
+end
+
+function Entity.TriggerOnCritRoll(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnCritRoll", attackContext)
+end
+
+function Entity.TriggerOnAttackEnemy(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnAttackEnemy", attackContext)
+end
+
+function Entity.TriggerOnDefeatEnemy(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnDefeatEnemy", attackContext)
+end
+
+function Entity.TriggerOnOncomingHit(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnOncomingHit", attackContext)
+end
+
+function Entity.TriggerOnShieldBlock(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnShieldBlock", attackContext)
+end
+
+function Entity.TriggerProcureData(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "ProcureData", attackContext)
+end
+
+function Entity.TriggerOnHitSuccess(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnHitSuccess", attackContext)
+end
+
+function Entity.TriggerOnProjectileExpire(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnProjectileExpire", attackContext)
+end
+
+function Entity.TriggerOnWeaponSwap(self: Entity, attackContext: any): ()
+	TriggerAttackModifierHook(self, "OnWeaponSwap", attackContext)
+end
+
 function Entity.GetStatChangedSignal(self: Entity, stat: Stat)
 	return EnsureRuntimeStats(self):GetStatObject(stat).Changed
 end
@@ -317,9 +387,7 @@ function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()
 		return
 	end
 
-	local mitigated = math.max(1, damage - self:GetStat("Defense") - self:GetStat("TrueDefense"))
-	local resisted = mitigated * (1 - self:GetStat("Resistance"))
-	local finalDamage = math.max(1, math.floor(resisted + 0.5))
+	local finalDamage = math.max(1, math.floor(math.max(1, damage - self:GetStat("Defense")) + 0.5))
 
 	self:SetStat("Health", self:GetStat("Health") - finalDamage)
 end

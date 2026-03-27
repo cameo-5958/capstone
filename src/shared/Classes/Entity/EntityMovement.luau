@@ -258,11 +258,21 @@ function MovementEngine.PivotTo(self: MovementEngine, cf: CFrame): ()
 end
 
 function MovementEngine.Play(self: MovementEngine, animId: string)
-	AnimationServiceServer.Animate(self.EntityUUID, self.__Animations[animId])
+	local animationId = self.__Animations[animId]
+	if type(animationId) ~= "string" or animationId == "" then
+		return
+	end
+
+	AnimationServiceServer.Animate(self.EntityUUID, animationId)
 end
 
 function MovementEngine.Stop(self: MovementEngine, animId: string)
-	AnimationServiceServer.Stop(self.EntityUUID, self.__Animations[animId])
+	local animationId = self.__Animations[animId]
+	if type(animationId) ~= "string" or animationId == "" then
+		return
+	end
+
+	AnimationServiceServer.Stop(self.EntityUUID, animationId)
 end
 
 return MovementEngine

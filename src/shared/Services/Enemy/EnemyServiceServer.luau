@@ -18,6 +18,7 @@ local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
+local DefaultAnimations = require(ReplicatedStorage.Database.Enemies.Default.Animations)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -46,7 +47,6 @@ end)
 
 -- Entity creation
 local default = {
-	TrueDefense = 0,
 	Strength = 0,
 	CritRate = 0,
 	CritDamage = 0,
@@ -66,6 +66,10 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	-- Require the data to create the entity
 	local data = require(Enemy.Data) :: { ["Name"]: string, string: any }
 	local model = Enemy.Model:Clone() :: Model
+	local mergedAnimations = table.clone(DefaultAnimations)
+	for key, value in pairs(data.__Animations or {}) do
+		mergedAnimations[key] = value
+	end
 
 	model.Parent = EnemyFolder
 	CollisionServiceServer.AssignModel(model, "Enemy")
@@ -74,6 +78,7 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	local entity = Entity.new(model, data.Name)
 	model.Name = entity.UUID
 	entity.RootPart:PivotTo(SpawnBlock.CFrame)
+	entity.__Animations = mergedAnimations
 
 	-- Set default enemy stats
 	for key, value in pairs(default) do
@@ -86,6 +91,9 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 			for statName, statValue in pairs(value) do
 				entity:SetStat(statName, statValue)
 			end
+			continue
+		end
+		if key == "__Animations" then
 			continue
 		end
 
