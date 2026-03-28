@@ -7,6 +7,7 @@ local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.Anim
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local MovementShared = require(script.Parent.MovementShared)
+local ClassCombos = require(ReplicatedStorage.Database.Weapons.Default.Combos)
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
 local EntityTypes = require(script.Parent.EntityTypes)
 type Entity = EntityTypes.Entity
@@ -26,6 +27,12 @@ export type MovementEngine = SharedMovementEngine & {
 	Player: Player?,
 	WalkAnimationPlaying: boolean,
 	__Animations: { string: string },
+	__ComboState: {
+		WeaponId: string?,
+		ComboId: string?,
+		AttackIndex: number,
+		LastAttackAt: number,
+	},
 	GetTarget: (MovementEngine, Vector3, number) -> Entity,
 	GetAnimation: (MovementEngine, string) -> string,
 	Play: (MovementEngine, string) -> (),
@@ -44,16 +51,81 @@ end
 function MovementEngine.init(self: MovementEngine): ()
 	self.AllMovementDisabled = false
 	self.WalkAnimationPlaying = false
+	self.__ComboState = {
+		WeaponId = nil,
+		ComboId = nil,
+		AttackIndex = 1,
+		LastAttackAt = 0,
+	}
 	MovementShared.Init(self)
 end
 
-local function IsBowEquipped(): boolean
-	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
-	if not equippedWeapon then
-		return false
+local function IsComboWeapon(weaponClass: string?): boolean
+	return weaponClass == "Sword" or weaponClass == "Claymore"
+end
+
+local function GetDefaultCombo(comboSet): any
+	if comboSet.DefaultCombo and comboSet.Combos[comboSet.DefaultCombo] then
+		return comboSet.Combos[comboSet.DefaultCombo]
 	end
 
-	return equippedWeapon.Class == "Bow"
+	for _, combo in pairs(comboSet.Combos) do
+		return combo
+	end
+
+	return nil
+end
+
+local function GetMovementLockDuration(
+	self: MovementEngine,
+	equippedWeapon: { [string]: any }?,
+	fallbackDuration: number
+): number
+	if not equippedWeapon or not IsComboWeapon(equippedWeapon.Class) then
+		self.__ComboState.WeaponId = nil
+		self.__ComboState.ComboId = nil
+		self.__ComboState.AttackIndex = 1
+		self.__ComboState.LastAttackAt = 0
+		return fallbackDuration
+	end
+
+	local comboSet = ClassCombos[equippedWeapon.Class]
+	if not comboSet then
+		return fallbackDuration
+	end
+
+	local combo = GetDefaultCombo(comboSet)
+	if not combo or #combo.Attacks == 0 then
+		return fallbackDuration
+	end
+
+	local now = workspace:GetServerTimeNow()
+	local state = self.__ComboState
+	local attackIndex = state.AttackIndex
+	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
+	if state.WeaponId ~= equippedWeapon.WeaponId or state.ComboId ~= combo.Id or expired then
+		attackIndex = 1
+	end
+
+	local attack = combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
+	state.WeaponId = equippedWeapon.WeaponId
+	state.ComboId = combo.Id
+	state.AttackIndex = (attackIndex % #combo.Attacks) + 1
+	state.LastAttackAt = now
+
+	return attack.MovementLockedUntil or fallbackDuration
+end
+
+local function IsBowEquipped(): boolean
+	local character = Players.LocalPlayer.Character
+	return character ~= nil and character:GetAttribute("ForceFaceCamera") == true
+end
+
+local function GetProjectedTargetLocation(target: Entity, leadTime: number): Vector3
+	local rootPart = target.RootPart
+	local velocity = rootPart.AssemblyLinearVelocity
+	local flatVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	return rootPart.Position + flatVelocity * leadTime
 end
 
 if RunService:IsServer() then
@@ -83,7 +155,7 @@ else
 		local result = workspace:Raycast(origin, delta, raycastParams)
 
 		if not result then
-			return false
+			return true
 		end
 
 		return result.Instance:IsDescendantOf(target.Character)
@@ -221,7 +293,7 @@ function MovementEngine.Attack(self: MovementEngine): ()
 	local attackSwingRange = attackContext.SwingRange
 	local maxLungeDistance = attackContext.MaxDashRange
 	local lungeDuration = attackContext.LungeDuration
-	local movementLockDuration = attackContext.LockDuration
+	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.LockDuration)
 
 	local target = self:GetTarget(self.RootPart.Position, attackSightRange)
 	local targetLocation = Vector3.zero
@@ -229,7 +301,7 @@ function MovementEngine.Attack(self: MovementEngine): ()
 	if not target then
 		targetLocation = self.RootPart.Position + self.RootPart.CFrame.LookVector.Unit * attackSwingRange
 	else
-		targetLocation = target.RootPart.Position
+		targetLocation = GetProjectedTargetLocation(target, 0.12)
 	end
 
 	self:LockMovement(movementLockDuration)

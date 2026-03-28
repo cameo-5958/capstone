@@ -4,6 +4,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local AttackServiceClient = require(ReplicatedStorage.Services.Attack.AttackServiceClient)
+local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
 local Movement = require(ReplicatedStorage.Classes.Entity.PlayerMovement)
 
 -- Create a new MovementEngine
@@ -25,6 +26,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		if input.UserInputState == Enum.UserInputState.Begin then
 			-- Dash
 			engine:Dash()
+			PlayerServiceClient.RequestDashIFrames()
 		end
 	end
 end)

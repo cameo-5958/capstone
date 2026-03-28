@@ -86,12 +86,6 @@ function MovementShared.CancelLinearVelocity(self: SharedMovementEngine)
 end
 
 function MovementShared.SetInvincibilityStatus(self: SharedMovementEngine, status: boolean)
-	if RunService:IsServer() then
-		print("Server:", status)
-	else
-		print("Client:", status)
-	end
-
 	self.Invincible = status
 end
 

@@ -116,12 +116,12 @@ function __New_Neuron.new(): Neuron
 	self.__Attributes["Direction"] = 1
 	self.__Attributes["StartTime"] = 0
 	self.__Attributes["MaxDuration"] = 0
-	self.__Attributes["StepDistance"] = 2
+	self.__Attributes["StepDistance"] = 1.4
 	self.__Attributes["DesiredDistance"] = 7
-	self.__Attributes["StrafeWalkSpeed"] = 6
+	self.__Attributes["StrafeWalkSpeed"] = 4.5
 	self.__Attributes["PreviousWalkSpeed"] = 0
-	self.__Attributes["MinDuration"] = 0.45
-	self.__Attributes["MaxDurationRange"] = 0.9
+	self.__Attributes["MinDuration"] = 0.75
+	self.__Attributes["MaxDurationRange"] = 1.35
 
 	return self :: any
 end

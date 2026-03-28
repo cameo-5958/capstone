@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
+local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
@@ -150,6 +151,19 @@ local function GetCharacterPivot(self: CameraController, lookAtHeight: number): 
 	return rootPart.Position + Vector3.yAxis * lookAtHeight
 end
 
+local function ShouldForceFaceCamera(self: CameraController): boolean
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	return equippedWeapon ~= nil
+		and equippedWeapon.Class == "Bow"
+		and self.CurrentModeName == "Aiming"
+end
+
+local function UpdateFacingLockAttribute(self: CameraController)
+	if self.Character then
+		self.Character:SetAttribute("ForceFaceCamera", ShouldForceFaceCamera(self))
+	end
+end
+
 local function GetSmoothingAlpha(speed: number, deltaTime: number): number
 	return 1 - math.exp(-speed * deltaTime)
 end
@@ -189,6 +203,7 @@ end
 function CameraController.BindCharacter(self: CameraController, character: Model)
 	self.Character = character
 	self.RootPart = GetRootPart(character)
+	UpdateFacingLockAttribute(self)
 
 	local rootPart = self.RootPart
 	if rootPart then
@@ -306,6 +321,7 @@ function CameraController.SetMode(self: CameraController, modeName: CameraModeNa
 		if candidate == modeName then
 			self.CurrentModeIndex = index
 			self.CurrentModeName = modeName
+			UpdateFacingLockAttribute(self)
 			return modeName
 		end
 	end
@@ -318,6 +334,7 @@ function CameraController.CycleMode(self: CameraController, direction: number): 
 	local nextIndex = ((self.CurrentModeIndex - 1 + direction) % totalModes) + 1
 	self.CurrentModeIndex = nextIndex
 	self.CurrentModeName = self.ModeOrder[nextIndex]
+	UpdateFacingLockAttribute(self)
 	return self.CurrentModeName
 end
 
@@ -339,6 +356,7 @@ function CameraController.Update(self: CameraController, deltaTime: number)
 	if not self.RootPart then
 		return
 	end
+	UpdateFacingLockAttribute(self)
 
 	self:ApplyMouseLock()
 	camera.CameraType = Enum.CameraType.Scriptable

@@ -28,6 +28,13 @@ export type StatSignal = Signal.Signal
 export type RuntimeStat = StatModule.Stat
 export type RuntimeStatBlock = StatBlockModule.StatBlock
 export type AttackModifierApplier = AttackModifierApplierType.AttackModifierApplier
+export type AttackModifierHookName = AttackModifierApplierType.HookName
+export type ComboState = {
+	WeaponUUID: string?,
+	ComboId: string?,
+	AttackIndex: number,
+	LastAttackAt: number,
+}
 
 export type Entity = {
 	UUID: string,
@@ -49,9 +56,11 @@ export type Entity = {
 	__Components: {
 		EquippedIndex: number?,
 		ToolbarWeapons: { any? },
+		ComboState: ComboState,
 	},
 
 	__Alive: boolean,
+	__InvincibleUntil: number,
 
 	new: (Model, string) -> Entity,
 	Inflate: (ent: Entity) -> Entity,
@@ -67,12 +76,23 @@ export type Entity = {
 	RemoveModifiersFromSource: (self: Entity, source: string) -> number,
 	RegisterBuffHandles: (self: Entity, source: string, handles: { ModifierHandle }) -> (),
 	ClearBuffSource: (self: Entity, source: string) -> number,
+	AddAttackModifier: (self: Entity, modifier: AttackModifierApplier) -> AttackModifierApplier,
+	RemoveAttackModifier: (self: Entity, modifier: AttackModifierApplier) -> boolean,
+	RemoveAttackModifierById: (self: Entity, modifierId: string) -> boolean,
+	GetAttackModifiers: (self: Entity) -> { AttackModifierApplier },
+	TriggerAttackModifierHook: (self: Entity, hookName: AttackModifierHookName, attackContext: any) -> (),
 	AddAttackModifierApplier: (self: Entity, applier: AttackModifierApplier) -> AttackModifierApplier,
 	RemoveAttackModifierApplier: (self: Entity, applier: AttackModifierApplier) -> boolean,
 	GetAttackModifierAppliers: (self: Entity) -> { AttackModifierApplier },
 	TriggerApply: (self: Entity, attackContext: any) -> (),
 	TriggerOnApplyMultipliers: (self: Entity, attackContext: any) -> (),
 	TriggerOnCritRoll: (self: Entity, attackContext: any) -> (),
+	TriggerOnGiveMelee: (self: Entity, attackContext: any) -> (),
+	TriggerOnRecieveMelee: (self: Entity, attackContext: any) -> (),
+	TriggerOnGiveRanged: (self: Entity, attackContext: any) -> (),
+	TriggerOnRecieveRanged: (self: Entity, attackContext: any) -> (),
+	TriggerOnGiveMagic: (self: Entity, attackContext: any) -> (),
+	TriggerOnRecieveMagic: (self: Entity, attackContext: any) -> (),
 	TriggerOnAttackEnemy: (self: Entity, attackContext: any) -> (),
 	TriggerOnDefeatEnemy: (self: Entity, attackContext: any) -> (),
 	TriggerOnOncomingHit: (self: Entity, attackContext: any) -> (),
@@ -83,6 +103,9 @@ export type Entity = {
 	TriggerOnWeaponSwap: (self: Entity, attackContext: any) -> (),
 	GetStatChangedSignal: (self: Entity, stat: Stat) -> StatSignal,
 	IsAlive: (self: Entity) -> boolean,
+	IsInvincible: (self: Entity) -> boolean,
+	SetInvincibleFor: (self: Entity, duration: number) -> number,
+	ClearInvincibility: (self: Entity) -> (),
 	GetEquippedWeapon: (self: Entity) -> any?,
 	GetEquippedIndex: (self: Entity) -> number?,
 	SetEquippedIndex: (self: Entity, index: number?) -> number?,
@@ -90,6 +113,7 @@ export type Entity = {
 	GetToolbarWeapon: (self: Entity, slot: number) -> any?,
 	SetToolbarWeapon: (self: Entity, slot: number, weapon: any?) -> any?,
 	GetToolbarWeapons: (self: Entity) -> { any? },
+	ResetComboState: (self: Entity) -> (),
 
 	ApplyDamage: (self: Entity, damage: number, target: Entity) -> (),
 	TakeDamage: (self: Entity, damage: number, source: Entity) -> (),

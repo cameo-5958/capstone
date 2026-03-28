@@ -8,9 +8,10 @@ API.Name = "AnimationHandler"
 -- Requires
 local Players = game:GetService("Players")
 local AnimationService = {}
+type AnimationId = string | { string }
 
 -- Public API for animating non-players
-function AnimationService.Animate(uuid: string, animID: string)
+function AnimationService.Animate(uuid: string, animID: AnimationId)
 	-- Broadcast, to all players, a request to
 	-- animate a NON-PLAYER object
 
@@ -18,14 +19,14 @@ function AnimationService.Animate(uuid: string, animID: string)
 end
 
 -- Public API for stopping non-players
-function AnimationService.Stop(uuid: string, animID: string)
+function AnimationService.Stop(uuid: string, animID: AnimationId)
 	-- Broadcast, to all players, a request to
 	-- animate a NON-PLAYER object
 
 	API:FireAllClients(uuid, "UUID", animID, "Stop")
 end
 
-local function BroadcastPlayerAnimation(player: Player, animID: string, status: string, includeSelf: boolean)
+local function BroadcastPlayerAnimation(player: Player, animID: AnimationId, status: string, includeSelf: boolean)
 	for _, ply in ipairs(Players:GetPlayers()) do
 		if includeSelf or ply ~= player then
 			API:FireClient(ply, player, "Player", animID, status)
@@ -33,16 +34,16 @@ local function BroadcastPlayerAnimation(player: Player, animID: string, status: 
 	end
 end
 
-function AnimationService.PlayPlayer(player: Player, animID: string)
+function AnimationService.PlayPlayer(player: Player, animID: AnimationId)
 	BroadcastPlayerAnimation(player, animID, "Start", true)
 end
 
-function AnimationService.StopPlayer(player: Player, animID: string)
+function AnimationService.StopPlayer(player: Player, animID: AnimationId)
 	BroadcastPlayerAnimation(player, animID, "Stop", true)
 end
 
 -- Public API for animating players
-local function AnimatePlayer(player: Player, animID: string, status: string)
+local function AnimatePlayer(player: Player, animID: AnimationId, status: string)
 	BroadcastPlayerAnimation(player, animID, status, false)
 end
 

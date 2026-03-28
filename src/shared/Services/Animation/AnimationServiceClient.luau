@@ -10,6 +10,48 @@ local Players = game:GetService("Players")
 local AnimationServiceClient = {}
 
 local LocalPlayer = Players.LocalPlayer
+type AnimationId = string | { string }
+
+local function ResolveAnimationId(animId: AnimationId): string?
+	if type(animId) == "string" then
+		if animId == "" then
+			return nil
+		end
+
+		return animId
+	end
+
+	local count = #animId
+	if count == 0 then
+		return nil
+	end
+
+	local chosen = animId[math.random(1, count)]
+	if type(chosen) ~= "string" or chosen == "" then
+		return nil
+	end
+
+	return chosen
+end
+
+local function ResolveAnimationIds(animId: AnimationId): { string }
+	if type(animId) == "string" then
+		if animId == "" then
+			return {}
+		end
+
+		return { animId }
+	end
+
+	local resolved = {}
+	for _, value in ipairs(animId) do
+		if type(value) == "string" and value ~= "" then
+			table.insert(resolved, value)
+		end
+	end
+
+	return resolved
+end
 
 -- GetTrack
 local function GetAnimationTrack(animator: Animator, animId: string): AnimationTrack?
@@ -34,7 +76,12 @@ local function LoadTrack(animator: Animator, animId: string): AnimationTrack
 end
 
 -- Animating
-local function Animate(character: Model, animId: string)
+local function Animate(character: Model, animId: AnimationId)
+	local resolvedAnimId = ResolveAnimationId(animId)
+	if not resolvedAnimId then
+		return
+	end
+
 	-- Ensure the character has an animator already
 	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid
 	local animator: Animator = humanoid:FindFirstChild("Animator") :: Animator or Instance.new("Animator")
@@ -42,14 +89,19 @@ local function Animate(character: Model, animId: string)
 	animator.Parent = humanoid
 
 	-- Confirm the animation isn't loaded
-	local track = GetAnimationTrack(animator, animId) or LoadTrack(animator, animId)
+	local track = GetAnimationTrack(animator, resolvedAnimId) or LoadTrack(animator, resolvedAnimId)
 
 	-- Play the animation
 	track:Play()
 end
 
 -- Stop animation
-local function Stop(character: Model, animId: string)
+local function Stop(character: Model, animId: AnimationId)
+	local resolvedAnimIds = ResolveAnimationIds(animId)
+	if #resolvedAnimIds == 0 then
+		return
+	end
+
 	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid
 	local animator = humanoid:FindFirstChild("Animator") :: Animator
 
@@ -57,13 +109,12 @@ local function Stop(character: Model, animId: string)
 		error("Attempted to stop animation of character without animator")
 	end
 
-	local track = GetAnimationTrack(animator, animId)
-
-	if not track then
-		return
+	for _, resolvedAnimId in ipairs(resolvedAnimIds) do
+		local track = GetAnimationTrack(animator, resolvedAnimId)
+		if track then
+			track:Stop()
+		end
 	end
-
-	track:Stop()
 end
 
 -- Handle animation from a ENTITY
@@ -89,7 +140,7 @@ local function GetPlayer(player: Player): Model
 end
 
 -- Handle animation generally
-API.OnClientEvent:Connect(function(identifier: Player | string, manageType: string, animId: string, status: string)
+API.OnClientEvent:Connect(function(identifier: Player | string, manageType: string, animId: AnimationId, status: string)
 	local model: Model
 	if manageType == "UUID" then
 		model = GetEntity(identifier :: string)
@@ -107,7 +158,7 @@ API.OnClientEvent:Connect(function(identifier: Player | string, manageType: stri
 end)
 
 -- Animate myself
-function AnimationServiceClient.Animate(animId: string)
+function AnimationServiceClient.Animate(animId: AnimationId)
 	-- Play my own animation
 
 	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -117,7 +168,7 @@ function AnimationServiceClient.Animate(animId: string)
 	API:FireServer(animId, "Start")
 end
 
-function AnimationServiceClient.StopAnimation(animId: string)
+function AnimationServiceClient.StopAnimation(animId: AnimationId)
 	-- Stop your own character
 	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 	Stop(character, animId)

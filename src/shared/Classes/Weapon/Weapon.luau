@@ -4,14 +4,20 @@
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AttackModifierApplierModule = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local WeaponTypes = require(script.Parent.WeaponTypes)
 
+type AttackModifierApplier = AttackModifierApplierModule.AttackModifierApplier
 type Entity = EntityTypes.Entity
 type Stat = EntityTypes.Stat
 
 export type AbilityCallback = WeaponTypes.AbilityCallback
+export type AnimationId = WeaponTypes.AnimationId
 export type AttackProfile = WeaponTypes.AttackProfile
+export type ComboAttack = WeaponTypes.ComboAttack
+export type ComboDefinition = WeaponTypes.ComboDefinition
+export type ComboSet = WeaponTypes.ComboSet
 export type Weapon = WeaponTypes.Weapon
 
 local Weapon = {}
@@ -45,12 +51,15 @@ function Weapon.new(
 	name: string,
 	baseDamage: number,
 	grantedStats: { [Stat]: number }?,
+	weight: number?,
+	weaponAbility: AbilityCallback?,
 	rightClickAbility: AbilityCallback?,
 	weaponId: string?,
 	attackProfile: AttackProfile?,
 	toolTemplate: Tool?,
 	weaponClass: string?,
-	attackContext: { [string]: any }?
+	attackContext: { [string]: any }?,
+	weaponPassive: AttackModifierApplier?
 ): Weapon
 	local self = setmetatable({}, Weapon)
 
@@ -58,12 +67,16 @@ function Weapon.new(
 	self.Name = name
 	self.WeaponId = weaponId or name
 	self.Class = weaponClass or "Sword"
+	self.Type = self.Class
 	self.AttackContext = table.clone(attackContext or {})
 	self.BaseDamage = baseDamage
 	self.GrantedStats = table.clone(grantedStats or {})
+	self.Weight = weight or 0
 	self.AttackProfile = MergeAttackProfile(attackProfile)
 	self.Owner = nil
-	self.RightClickAbility = rightClickAbility
+	self.WeaponPassive = weaponPassive
+	self.WeaponAbility = weaponAbility or rightClickAbility
+	self.RightClickAbility = self.WeaponAbility
 	self.ToolTemplate = toolTemplate
 	self.ToolInstance = nil
 

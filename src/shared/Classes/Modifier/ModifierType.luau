@@ -5,7 +5,7 @@ export type ModifierKind =
 	| "BaseAdditive"
 	| "FinalAdditive"
 	| "Multiplicative"
-	| "FinalStatFlat"
+	| "FinalFlat"
 
 export type Modifier = {
 	Id: string,

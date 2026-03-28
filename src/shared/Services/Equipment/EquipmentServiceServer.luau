@@ -100,13 +100,16 @@ function EquipmentServiceServer.CreateWeaponFromDatabase(weaponPath: string): We
 	return Weapon.new(
 		data.Name or weaponPath,
 		data.BaseDamage or 0,
-		{},
+		data.__Stats or data.GrantedStats or {},
+		data.Weight or 0,
+		data.WeaponAbility or data.RightClickAbility,
 		data.RightClickAbility,
 		weaponPath,
 		BuildAttackProfile(data),
 		toolTemplate,
-		data.Family or "Sword",
-		data.AttackContext or {}
+		data.Type or data.Family or "Sword",
+		data.AttackContext or {},
+		data.WeaponPassive
 	)
 end
 

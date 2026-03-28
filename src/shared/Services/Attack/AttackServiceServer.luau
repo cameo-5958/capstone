@@ -15,12 +15,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
-local WeaponModule = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
+local ClassCombos = require(ReplicatedStorage.Database.Weapons.Default.Combos)
 
 local AttackServiceServer = {}
 
 type AttackProfile = WeaponTypes.AttackProfile
+type AnimationId = WeaponTypes.AnimationId
+type ComboDefinition = WeaponTypes.ComboDefinition
+type ComboSet = WeaponTypes.ComboSet
 type AttackContext = {
 	SwingRange: number,
 	MaxDashRange: number,
@@ -29,6 +32,8 @@ type ActiveAttack = {
 	Id: string,
 	Profile: AttackProfile,
 	Weapon: any,
+	Damage: number,
+	StopAnimationOnClear: boolean,
 	OriginCFrame: CFrame,
 	AttackContext: AttackContext,
 	ActiveFrom: number,
@@ -43,6 +48,20 @@ local NextAttackAt: { [Player]: number } = {}
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 overlapParams.MaxParts = 64
+
+local function ResolveAnimationId(animationId: AnimationId): string
+	if type(animationId) == "string" then
+		return animationId
+	end
+
+	local count = #animationId
+	if count == 0 then
+		return ""
+	end
+
+	local chosen = animationId[math.random(1, count)]
+	return type(chosen) == "string" and chosen or ""
+end
 
 local function GetAttackContext(weapon: any): AttackContext
 	local context = weapon and weapon:GetAttackContext() or {}
@@ -62,7 +81,7 @@ local function ClearAttackLater(player: Player, attackId: string, clearAt: numbe
 
 		ActiveAttacks[player] = nil
 
-		if animationId ~= "" then
+		if active.StopAnimationOnClear and animationId ~= "" then
 			AnimationServiceServer.StopPlayer(player, animationId)
 		end
 	end)
@@ -122,8 +141,81 @@ local function GetEnemyAttackProfile(attacker, swingRange: number?): AttackProfi
 	}
 end
 
+local function IsComboWeapon(weapon): boolean
+	return weapon.Class == "Sword" or weapon.Class == "Claymore"
+end
+
+local function GetDefaultCombo(comboSet: ComboSet): ComboDefinition?
+	if comboSet.DefaultCombo and comboSet.Combos[comboSet.DefaultCombo] then
+		return comboSet.Combos[comboSet.DefaultCombo]
+	end
+
+	for _, combo in pairs(comboSet.Combos) do
+		return combo
+	end
+
+	return nil
+end
+
+local function StopComboAnimations(player: Player, weaponClass: string)
+	local comboSet = ClassCombos[weaponClass] :: ComboSet?
+	if not comboSet then
+		return
+	end
+
+	for _, combo in pairs(comboSet.Combos) do
+		for _, attack in ipairs(combo.Attacks) do
+			AnimationServiceServer.StopPlayer(player, attack.AnimationId)
+		end
+	end
+end
+
+local function ResolveComboAttack(entity, weapon, now: number): (AnimationId?, number, boolean, boolean)
+	if not IsComboWeapon(weapon) then
+		entity:ResetComboState()
+		return nil, 1, true, false
+	end
+
+	local comboSet = ClassCombos[weapon.Class] :: ComboSet?
+	if not comboSet then
+		entity:ResetComboState()
+		return nil, 1, true, false
+	end
+
+	local combo = GetDefaultCombo(comboSet)
+	if not combo or #combo.Attacks == 0 then
+		entity:ResetComboState()
+		return nil, 1, true, false
+	end
+
+	local state = entity.__Components.ComboState
+	local attackIndex = state.AttackIndex
+	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
+	local startedNewSequence = false
+	if state.WeaponUUID ~= weapon.UUID or state.ComboId ~= combo.Id or expired then
+		attackIndex = 1
+		startedNewSequence = true
+	end
+	if attackIndex == 1 then
+		startedNewSequence = true
+	end
+
+	local attack = combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
+	state.WeaponUUID = weapon.UUID
+	state.ComboId = combo.Id
+	state.LastAttackAt = now
+	state.AttackIndex = (attackIndex % #combo.Attacks) + 1
+
+	return attack.AnimationId, attack.PowerScale, attackIndex < #combo.Attacks, startedNewSequence
+end
+
 function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: number, swingRange: number?)
 	if not attacker or not target then
+		return false
+	end
+
+	if target:IsInvincible() then
+		print(("Hit whiffed on invincible target: %s -> %s"):format(attacker.Name, target.Name))
 		return false
 	end
 
@@ -155,7 +247,9 @@ local function BeginPrimaryAttack(player: Player)
 
 	local profile = weapon:GetAttackProfile()
 	local attackContext = GetAttackContext(weapon)
-	local animationId = entity.__Animations["Attack"] or profile.AnimationId
+	local comboAnimationId, powerScale, stopAnimationOnClear, startedNewSequence = ResolveComboAttack(entity, weapon, now)
+	local animationId = ResolveAnimationId(comboAnimationId or entity.__Animations["Attack"] or profile.AnimationId)
+	local attackDamage = weapon:GetDamage(entity) * powerScale
 	local attackId = HttpService:GenerateGUID(false)
 	local activeFrom = now + profile.Windup
 	local activeUntil = activeFrom + profile.ActiveDuration
@@ -166,6 +260,8 @@ local function BeginPrimaryAttack(player: Player)
 		Id = attackId,
 		Profile = profile,
 		Weapon = weapon,
+		Damage = attackDamage,
+		StopAnimationOnClear = stopAnimationOnClear,
 		OriginCFrame = entity.RootPart.CFrame,
 		AttackContext = attackContext,
 		ActiveFrom = activeFrom,
@@ -173,6 +269,10 @@ local function BeginPrimaryAttack(player: Player)
 		ClearAt = clearAt,
 		Hits = {},
 	}
+
+	if startedNewSequence then
+		StopComboAnimations(player, weapon.Class)
+	end
 
 	if animationId ~= "" then
 		AnimationServiceServer.PlayPlayer(player, animationId)
@@ -214,6 +314,11 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 		return
 	end
 
+	if target:IsInvincible() then
+		print(("Hit whiffed on invincible target: %s -> %s"):format(player.Name, target.Name))
+		return
+	end
+
 	local lastHitAt = active.Hits[payload.TargetUUID]
 	if lastHitAt and now - lastHitAt < active.Profile.HitReset then
 		return
@@ -225,7 +330,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 
 	print(("Hitbox registered hit: %s -> %s"):format(player.Name, target.Name))
 	active.Hits[payload.TargetUUID] = now
-	entity:ApplyDamage(active.Weapon:GetDamage(entity), target)
+	entity:ApplyDamage(active.Damage, target)
 end
 
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
@@ -237,4 +342,7 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
+
+
+
 

@@ -30,10 +30,12 @@ local function createStarterWeapon()
 			PhysicalAttack = 6,
 			Speed = 1,
 		},
+		3,
 		function(_, entity: Entity)
 			local restored = math.min(entity:GetStat("MaxHealth"), entity:GetStat("Health") + 15)
 			entity:SetStat("Health", restored)
 		end,
+		nil,
 		"StarterSword",
 		nil,
 		nil,
@@ -52,8 +54,14 @@ local function SerializeEquippedWeapon(weapon: WeaponType?)
 
 	return {
 		Class = weapon.Class,
+		Type = weapon.Type,
 		AttackContext = weapon:GetAttackContext(),
 		WeaponId = weapon.WeaponId,
+		BaseDamage = weapon.BaseDamage,
+		GrantedStats = table.clone(weapon.GrantedStats),
+		Weight = weapon.Weight,
+		HasPassive = weapon.WeaponPassive ~= nil,
+		HasAbility = weapon.WeaponAbility ~= nil,
 	}
 end
 

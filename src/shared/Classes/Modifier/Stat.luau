@@ -22,7 +22,7 @@ export type Stat = {
 		BaseAdditive: ModifierBucket,
 		FinalAdditive: ModifierBucket,
 		Multiplicative: ModifierBucket,
-		FinalStatFlat: ModifierBucket,
+		FinalFlat: ModifierBucket,
 	},
 	SetBaseValue: (self: Stat, value: number) -> number,
 	GetBaseValue: (self: Stat) -> number,
@@ -61,9 +61,9 @@ local function ComputeFinalValue(self: Stat): number
 	local baseAdditive = 1 + SumBucket(self.Modifiers.BaseAdditive)
 	local finalAdditive = 1 + SumBucket(self.Modifiers.FinalAdditive)
 	local multiplicative = ProductBucket(self.Modifiers.Multiplicative)
-	local finalStatFlat = SumBucket(self.Modifiers.FinalStatFlat)
+	local finalFlat = SumBucket(self.Modifiers.FinalFlat)
 
-	local result = ((base + baseFlat) * baseAdditive * finalAdditive * multiplicative) + finalStatFlat
+	local result = ((base + baseFlat) * baseAdditive * finalAdditive * multiplicative) + finalFlat
 	if self.Finalize then
 		result = self.Finalize(self.Name, result)
 	end
@@ -85,7 +85,7 @@ function Stat.new(name: string, baseValue: number, finalize: FinalizeCallback?):
 		BaseAdditive = {},
 		FinalAdditive = {},
 		Multiplicative = {},
-		FinalStatFlat = {},
+		FinalFlat = {},
 	}
 
 	return (self :: any) :: Stat

@@ -12,14 +12,21 @@ type Entity = EntityType.Entity
 type Modifier = ModifierType.Modifier
 type ModifierBucket = {
 	Base: { [string]: number },
+	BaseFlat: { [string]: { Modifier } },
 	Additive: { [string]: { Modifier } },
 	Multiplicative: { [string]: { Modifier } },
+	FinalFlat: { [string]: { Modifier } },
 }
 type StatBlock = StatBlock.StatBlock
 
 export type CombatModifierContext = {
 	From: ModifierBucket,
 	To: ModifierBucket,
+}
+
+export type FinalStatContext = {
+	From: { [string]: number },
+	To: { [string]: number },
 }
 
 export type AttackContext = {
@@ -48,6 +55,7 @@ export type AttackContext = {
 	To: Entity,
 
 	Modifiers: CombatModifierContext,
+	FinalStats: FinalStatContext,
 
 	-- Actual "Attack" method
 	new: (from: Entity, to: Entity) -> AttackContext,
@@ -59,8 +67,10 @@ local function CreateModifierBucket(entity: Entity): ModifierBucket
 
 	return {
 		Base = baseStats,
+		BaseFlat = {},
 		Additive = {},
 		Multiplicative = {},
+		FinalFlat = {},
 	}
 end
 
@@ -84,6 +94,10 @@ function AttackContext.new(from: Entity, to: Entity): AttackContext
 	self.Modifiers = {
 		From = CreateModifierBucket(from),
 		To = CreateModifierBucket(to),
+	}
+	self.FinalStats = {
+		From = {},
+		To = {},
 	}
 
 	return (self :: any) :: AttackContext
