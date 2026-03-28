@@ -58,6 +58,21 @@ end
 
 -- Brain thread
 function Brain.Tick(self: Brain, dt: number)
+	if self.Target then
+		local targetEntity = PlayerServiceServer.GetEntityFromCharacter(self.Target)
+		if not targetEntity or not targetEntity:IsAlive() then
+			self.Target = nil
+		end
+	end
+
+	if self.RetreatTarget then
+		local retreatEntity = PlayerServiceServer.GetEntityFromCharacter(self.RetreatTarget)
+		if not retreatEntity or not retreatEntity:IsAlive() then
+			self.RetreatTarget = nil
+			self.RetreatUntil = 0
+		end
+	end
+
 	-- Check if we should exist the current state
 	if self.CurrentNeuron then
 		if self.CurrentNeuron.CanExit(self.CurrentNeuron) then
@@ -140,6 +155,10 @@ function Brain.GetTargetPlayer(self: Brain, range: number): Model?
 	local highestScore = -1
 	local hitModel = nil
 	for _, player in pairs(plys) do
+		if not player:IsAlive() then
+			continue
+		end
+
 		-- Ensure model exists
 		local model = player.Character
 		if not model then

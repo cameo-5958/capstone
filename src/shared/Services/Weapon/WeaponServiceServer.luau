@@ -9,6 +9,7 @@ end
 
 local API = endpoint :: RemoteEvent
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
 local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
@@ -17,6 +18,7 @@ type Entity = EntityTypes.Entity
 type WeaponType = WeaponTypes.Weapon
 
 local WeaponServiceServer = {}
+local EQUIPPED_WEAPON_SOURCE = "weapon:equipped"
 
 local PlayerEntities: { [Player]: Entity } = {}
 local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
@@ -77,9 +79,51 @@ local function DisconnectPlayerConnections(player: Player)
 	PlayerConnections[player] = nil
 end
 
+local function ApplyEquippedWeaponStats(entity: Entity): ()
+	entity:RemoveModifiersFromSource(EQUIPPED_WEAPON_SOURCE)
+
+	local equippedWeapon = entity:GetEquippedWeapon()
+	if not equippedWeapon then
+		return
+	end
+
+	for statName, statValue in pairs(equippedWeapon.GrantedStats) do
+		entity:AddModifier(statName, Modifier.new(
+			("%s:%s"):format(EQUIPPED_WEAPON_SOURCE, statName),
+			"BaseFlat",
+			statValue,
+			EQUIPPED_WEAPON_SOURCE
+		))
+	end
+end
+
+local function FireWeaponSwapHook(
+	entity: Entity,
+	previousWeapon: WeaponType?,
+	nextWeapon: WeaponType?,
+	previousSlot: number?,
+	nextSlot: number?
+): ()
+	if previousWeapon == nextWeapon and previousSlot == nextSlot then
+		return
+	end
+
+	entity:TriggerOnWeaponSwap({
+		Entity = entity,
+		PreviousWeapon = previousWeapon,
+		NextWeapon = nextWeapon,
+		PreviousSlot = previousSlot,
+		NextSlot = nextSlot,
+	})
+end
+
 function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 	PlayerEntities[player] = entity
 	DisconnectPlayerConnections(player)
+	if entity:GetToolbarWeapon(1) ~= nil and entity:GetEquippedIndex() == nil then
+		entity:SetEquippedIndex(1)
+	end
+	ApplyEquippedWeaponStats(entity)
 
 	local character = entity.Character
 	PlayerConnections[player] = {
@@ -93,11 +137,15 @@ function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 				return
 			end
 
+			local previousSlot = entity:GetEquippedIndex()
+			local previousWeapon = entity:GetEquippedWeapon()
 			if entity:GetToolbarWeapon(slot) == nil then
 				entity:SetEquippedIndex(nil)
 			else
 				entity:SetEquippedIndex(slot)
 			end
+			FireWeaponSwapHook(entity, previousWeapon, entity:GetEquippedWeapon(), previousSlot, entity:GetEquippedIndex())
+			ApplyEquippedWeaponStats(entity)
 			WeaponServiceServer.SyncEquippedWeapon(player)
 		end),
 		character.ChildRemoved:Connect(function(child)
@@ -111,7 +159,10 @@ function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 			end
 
 			if entity:GetEquippedIndex() == slot then
+				local previousWeapon = entity:GetEquippedWeapon()
 				entity:SetEquippedIndex(nil)
+				FireWeaponSwapHook(entity, previousWeapon, nil, slot, nil)
+				ApplyEquippedWeaponStats(entity)
 				WeaponServiceServer.SyncEquippedWeapon(player)
 			end
 		end),
@@ -129,6 +180,8 @@ function WeaponServiceServer.SyncEquippedWeapon(player: Player): ()
 		return
 	end
 
+	ApplyEquippedWeaponStats(entity)
+
 	API:FireClient(player, "SyncEquippedWeapon", SerializeEquippedWeapon(entity:GetEquippedWeapon()))
 end
 
@@ -142,6 +195,8 @@ function WeaponServiceServer.SetEquippedSlot(player: Player, slot: number?)
 		return
 	end
 
+	local previousSlot = entity:GetEquippedIndex()
+	local previousWeapon = entity:GetEquippedWeapon()
 	if slot == nil then
 		entity:SetEquippedIndex(nil)
 	else
@@ -152,6 +207,7 @@ function WeaponServiceServer.SetEquippedSlot(player: Player, slot: number?)
 		end
 	end
 
+	FireWeaponSwapHook(entity, previousWeapon, entity:GetEquippedWeapon(), previousSlot, entity:GetEquippedIndex())
 	WeaponServiceServer.SyncEquippedWeapon(player)
 end
 

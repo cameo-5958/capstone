@@ -3,11 +3,15 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AttackModifierApplierModule = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
+local AttackContextModule = require(ReplicatedStorage.Classes.Attack.AttackContext)
+local DamageModule = require(ReplicatedStorage.Classes.Attack.Damage)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
 type Stat = EntityTypes.Stat
 type AttackModifierApplier = AttackModifierApplierModule.AttackModifierApplier
+type AttackContext = AttackContextModule.AttackContext
+type Damage = DamageModule.Damage
 
 export type AbilityCallback = (self: any, owner: Entity, context: { [string]: any }?) -> ()
 export type AnimationId = string | { string }
@@ -44,6 +48,7 @@ export type Weapon = {
 	Type: string,
 	AttackContext: { [string]: any },
 	BaseDamage: number,
+	Damage: Damage,
 	GrantedStats: { [Stat]: number },
 	Weight: number,
 	AttackProfile: AttackProfile,
@@ -72,6 +77,8 @@ export type Weapon = {
 	SetToolInstance: (self: Weapon, tool: Tool?) -> Tool?,
 	CloneTool: (self: Weapon) -> Tool?,
 	GetDamage: (self: Weapon, owner: Entity?) -> number,
+	CreateAttackContext: (self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?) -> AttackContext,
+	ExecuteAttack: (self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?) -> AttackContext,
 	GetAttackProfile: (self: Weapon) -> AttackProfile,
 	GetAttackContext: (self: Weapon) -> { [string]: any },
 	UseRightClick: (self: Weapon, owner: Entity?, context: { [string]: any }?) -> boolean,

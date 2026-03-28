@@ -101,6 +101,7 @@ export type Entity = {
 	TriggerOnHitSuccess: (self: Entity, attackContext: any) -> (),
 	TriggerOnProjectileExpire: (self: Entity, attackContext: any) -> (),
 	TriggerOnWeaponSwap: (self: Entity, attackContext: any) -> (),
+	GetStatsChangedSignal: (self: Entity) -> StatSignal,
 	GetStatChangedSignal: (self: Entity, stat: Stat) -> StatSignal,
 	IsAlive: (self: Entity) -> boolean,
 	IsInvincible: (self: Entity) -> boolean,

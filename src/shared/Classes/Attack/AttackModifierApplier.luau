@@ -19,6 +19,7 @@ export type AttackModifierApplier = {
 	OnHitSuccess: (self: AttackModifierApplier, attackContext: any) -> (),
 	OnProjectileExpire: (self: AttackModifierApplier, attackContext: any) -> (),
 	OnWeaponSwap: (self: AttackModifierApplier, attackContext: any) -> (),
+	Components: { [string]: any },
 	__Attributes: { [string]: any },
 }
 
@@ -71,19 +72,22 @@ local DEFAULT_HOOKS: { [HookName]: (self: AttackModifierApplier, attackContext: 
 function AttackModifierApplier.new(
 	id: string?,
 	hooks: { [string]: any }?,
-	attributes: { [string]: any }?
+	attributes: { [string]: any }?,
+	components: { [string]: any }?
 ): AttackModifierApplier
 	local self = setmetatable({}, AttackModifierApplier)
+	local selfAny = self :: any
 
-	self.Id = id or "AttackModifier"
-	self.__Attributes = table.clone(attributes or {})
+	selfAny.Id = id or "AttackModifier"
+	selfAny.__Attributes = table.clone(attributes or {})
+	selfAny.Components = table.clone(components or {})
 
 	for hookName, callback in pairs(DEFAULT_HOOKS) do
-		local override = hooks and hooks[hookName];
-		(self :: any)[hookName] = if type(override) == "function" then override else callback
+		local override = hooks and hooks[hookName]
+		selfAny[hookName] = if type(override) == "function" then override else callback
 	end
 
-	return (self :: any) :: AttackModifierApplier
+	return selfAny :: AttackModifierApplier
 end
 
 function AttackModifierApplier.Call(self: AttackModifierApplier, hookName: HookName, attackContext: any): ()

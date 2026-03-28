@@ -103,7 +103,7 @@ local function OnEnter(self: Neuron): ()
 	})
 
 	if attacker and targetEntity then
-		local damage = attacker:GetStat("PhysicalAttack") + attacker:GetStat("Strength")
+		local damage = attacker:GetStat("PhysicalAttack")
 		local hitDelay = self.__Attributes["Windup"] + self.__Attributes["AttackDuration"]
 		task.delay(hitDelay, function()
 			if not attacker:IsAlive() or not targetEntity:IsAlive() then

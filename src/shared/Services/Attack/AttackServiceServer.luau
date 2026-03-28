@@ -32,7 +32,7 @@ type ActiveAttack = {
 	Id: string,
 	Profile: AttackProfile,
 	Weapon: any,
-	Damage: number,
+	ComboBaseDamage: number,
 	StopAnimationOnClear: boolean,
 	OriginCFrame: CFrame,
 	AttackContext: AttackContext,
@@ -249,7 +249,6 @@ local function BeginPrimaryAttack(player: Player)
 	local attackContext = GetAttackContext(weapon)
 	local comboAnimationId, powerScale, stopAnimationOnClear, startedNewSequence = ResolveComboAttack(entity, weapon, now)
 	local animationId = ResolveAnimationId(comboAnimationId or entity.__Animations["Attack"] or profile.AnimationId)
-	local attackDamage = weapon:GetDamage(entity) * powerScale
 	local attackId = HttpService:GenerateGUID(false)
 	local activeFrom = now + profile.Windup
 	local activeUntil = activeFrom + profile.ActiveDuration
@@ -260,7 +259,7 @@ local function BeginPrimaryAttack(player: Player)
 		Id = attackId,
 		Profile = profile,
 		Weapon = weapon,
-		Damage = attackDamage,
+		ComboBaseDamage = powerScale,
 		StopAnimationOnClear = stopAnimationOnClear,
 		OriginCFrame = entity.RootPart.CFrame,
 		AttackContext = attackContext,
@@ -330,7 +329,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 
 	print(("Hitbox registered hit: %s -> %s"):format(player.Name, target.Name))
 	active.Hits[payload.TargetUUID] = now
-	entity:ApplyDamage(active.Damage, target)
+	active.Weapon:ExecuteAttack(target, active.ComboBaseDamage, entity)
 end
 
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)

@@ -6,6 +6,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AttackModifierApplier = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
@@ -48,6 +49,38 @@ local API = endpoint :: RemoteEvent
 local DASH_IFRAME_DURATION = 0.3
 local DASH_IFRAME_COOLDOWN = 0.3
 local PlayerNextDashIframeAt: { [string]: number } = {}
+local TEST_KILL_STRENGTH_MODIFIER_ID = "test:on_defeat_enemy:strength"
+local TEST_KILL_STRENGTH_DURATION = 15
+
+local function EnsureTestAttackModifier(entity: Entity)
+	entity:RemoveAttackModifierById(TEST_KILL_STRENGTH_MODIFIER_ID)
+	entity:AddAttackModifier(AttackModifierApplier.new(TEST_KILL_STRENGTH_MODIFIER_ID, {
+		OnDefeatEnemy = function(self, attackContext)
+			local owner = attackContext.From
+			local defeated = attackContext.To
+			local stackId = ("%s:%s:%.6f"):format(
+				self.Id,
+				defeated.UUID,
+				workspace:GetServerTimeNow()
+			)
+			local activeStacks = self.Components.ActiveStacks :: { [string]: string }
+			activeStacks[stackId] = defeated.UUID
+			owner:AddModifier("Strength", Entity.Modifier.new(
+				stackId,
+				"BaseFlat",
+				100000,
+				self.Id
+			))
+			task.delay(TEST_KILL_STRENGTH_DURATION, function()
+				activeStacks[stackId] = nil
+				owner:RemoveModifier("Strength", stackId)
+			end)
+			print(("OnDefeatEnemy test modifier fired for %s against %s"):format(owner.Name, defeated.Name))
+		end,
+	}, nil, {
+		ActiveStacks = {},
+	}))
+end
 
 local function DisconnectStatConnections(playerName: string)
 	local connections = PlayerStatConnections[playerName]
@@ -124,6 +157,7 @@ local function BindCharacter(player: Player, character: Model): Entity
 		PlayerCharacters[player.Name] = entity
 	end
 
+	EnsureTestAttackModifier(entity)
 	BindStatReplication(player, entity)
 	SyncStatsToClient(player, entity)
 

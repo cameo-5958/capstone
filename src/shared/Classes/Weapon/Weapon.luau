@@ -5,10 +5,13 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AttackModifierApplierModule = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
+local AttackContextModule = require(ReplicatedStorage.Classes.Attack.AttackContext)
+local Damage = require(ReplicatedStorage.Classes.Attack.Damage)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local WeaponTypes = require(script.Parent.WeaponTypes)
 
 type AttackModifierApplier = AttackModifierApplierModule.AttackModifierApplier
+type AttackContext = AttackContextModule.AttackContext
 type Entity = EntityTypes.Entity
 type Stat = EntityTypes.Stat
 
@@ -70,6 +73,7 @@ function Weapon.new(
 	self.Type = self.Class
 	self.AttackContext = table.clone(attackContext or {})
 	self.BaseDamage = baseDamage
+	self.Damage = Damage
 	self.GrantedStats = table.clone(grantedStats or {})
 	self.Weight = weight or 0
 	self.AttackProfile = MergeAttackProfile(attackProfile)
@@ -104,12 +108,36 @@ function Weapon.CloneTool(self: Weapon): Tool?
 end
 
 function Weapon.GetDamage(self: Weapon, owner: Entity?): number
+	return self.BaseDamage
+end
+
+function Weapon.CreateAttackContext(self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?): AttackContext
 	local wielder = owner or self.Owner
-	if not wielder then
-		return self.BaseDamage
+	assert(wielder ~= nil, "Weapon.CreateAttackContext requires an owner")
+
+	local attackContextData = self:GetAttackContext()
+	local context = self.Damage.Build(wielder, target, self.BaseDamage * (comboBaseDamage or 1))
+	context.WeaponType = self.Type :: any
+	context.WeaponWeight = self.Weight
+	context.ManaCost = attackContextData.ManaCost or 0
+	context.StaminaCost = attackContextData.StaminaCost or 0
+	context.Range = attackContextData.Range or attackContextData.SwingRange or 0
+
+	if self.Type == "Bow" then
+		context.AttackType = "Ranged"
+	elseif self.Type == "Scroll" or self.Type == "Staff" then
+		context.AttackType = "Magic"
+	else
+		context.AttackType = "Melee"
 	end
 
-	return self.BaseDamage + wielder:GetStat("PhysicalAttack") + wielder:GetStat("Strength")
+	return context
+end
+
+function Weapon.ExecuteAttack(self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?): AttackContext
+	local context = self:CreateAttackContext(target, comboBaseDamage, owner)
+	context:Attack()
+	return context
 end
 
 --[[

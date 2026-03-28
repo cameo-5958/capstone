@@ -1,11 +1,12 @@
 --!strict
 
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modifier = require(script.Parent.Parent.Modifier.Modifier)
 local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
+local Damage = require(ReplicatedStorage.Classes.Attack.Damage)
 local StatBlock = require(script.Parent.Parent.Modifier.StatBlock)
-local AttackCalculator = require(script.Parent.Parent.Parent.Modules.Combat.AttackCalculator)
 local EntityTypes = require(script.Parent.EntityTypes)
 
 type Entity = EntityTypes.Entity
@@ -383,6 +384,10 @@ function Entity.TriggerOnWeaponSwap(self: Entity, attackContext: any): ()
 	self:TriggerAttackModifierHook("OnWeaponSwap", attackContext)
 end
 
+function Entity.GetStatsChangedSignal(self: Entity)
+	return EnsureRuntimeStats(self).Changed
+end
+
 function Entity.GetStatChangedSignal(self: Entity, stat: Stat)
 	return EnsureRuntimeStats(self):GetStatObject(stat).Changed
 end
@@ -464,16 +469,19 @@ function Entity.ResetComboState(self: Entity): ()
 end
 
 function Entity.ApplyDamage(self: Entity, damage: number, target: Entity): ()
-	local calculatedDamage = AttackCalculator.Calculate(self, target, damage)
-	target:TakeDamage(calculatedDamage, self)
+	local context = Damage.Build(self, target, damage)
+	context:Attack()
 end
 
 function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()
-	if not self:IsAlive() then
-		return
-	end
-
+	print("Taking " .. damage .. " damage")
 	self:SetStat("Health", self:GetStat("Health") - damage)
+
+	if not self:IsAlive() then
+		print("Am Dead")
+		local hum = self.Character:FindFirstChild("Humanoid") :: Humanoid
+		hum:TakeDamage(99999)
+	end
 end
 
 Entity.Modifier = Modifier

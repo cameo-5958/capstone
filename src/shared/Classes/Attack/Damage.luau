@@ -95,25 +95,31 @@ local function TriggerTypedDamageHooks(context: AttackContext)
 end
 
 local function ApplyDamage(context: AttackContext, baseDamage: number)
+	context.From:TriggerProcureData(context)
+	context.To:TriggerProcureData(context)
+	context.From:TriggerApply(context)
+	context.To:TriggerOnOncomingHit(context)
+	context.From:TriggerOnApplyMultipliers(context)
+
 	context.FinalStats = {
 		From = BuildFinalStats(context.Modifiers.From),
 		To = BuildFinalStats(context.Modifiers.To),
 	}
 
 	local damageStatName = GetDamageStatName(context)
-	local finalDamage = baseDamage + SumModifiers(context.Modifiers.From.BaseFlat[damageStatName] or {})
+	local finalDamage = context.BaseDamage + SumModifiers(context.Modifiers.From.BaseFlat[damageStatName] or {})
 
 	if context.AttackType == "Melee" or context.AttackType == "Ranged" then
 		-- Start by mutating the baseDamage with
 		-- final base
 
 		-- Increase by strength
-		finalDamage *= ((context.FinalStats["Strength"] / 100) + 1)
+		finalDamage *= ((context.FinalStats.From["Strength"] / 100) + 1)
 
 		-- Roll for a crit
-		if CritRoll(context, context.FinalStats["CritRate"]) then
+		if CritRoll(context, context.FinalStats.From["CritRate"]) then
 			-- Increase by crit damage
-			finalDamage *= ((context.FinalStats["CritDamage"] / 100) + 1)
+			finalDamage *= ((context.FinalStats.From["CritDamage"] / 100) + 1)
 		end
 
 		TriggerTypedDamageHooks(context)
@@ -129,15 +135,24 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 		context.Modifiers.From.Additive[damageStatName] or {}
 	)) * ProductModifiers(context.Modifiers.From.Multiplicative[damageStatName] or {})
 
-	-- Reduce the damage by the defense of the From enemy
-	finalDamage *= 100 / (context.FinalStats.From["Defense"] + 100)
+	-- Reduce the damage by the defense of the target enemy
+	finalDamage *= 100 / (context.FinalStats.To["Defense"] + 100)
+	finalDamage = math.round(finalDamage * 100) / 100
 
 	-- Have the entity take the damage
+	local targetWasAlive = context.To:IsAlive()
+	context.From:TriggerOnAttackEnemy(context)
 	context.To:TakeDamage(finalDamage, context.From)
+	context.From:TriggerOnHitSuccess(context)
+
+	if targetWasAlive and not context.To:IsAlive() then
+		context.From:TriggerOnDefeatEnemy(context)
+	end
 end
 
 function Damage.Build(from: Entity, to: Entity, baseDamage: number): AttackContext
 	local context = AttackContextModule.new(from, to)
+	context.BaseDamage = baseDamage
 
 	context.Attack = function(self: AttackContext)
 		ApplyDamage(self, baseDamage)

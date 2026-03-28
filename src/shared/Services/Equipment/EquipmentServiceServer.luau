@@ -139,8 +139,15 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 	ClearManagedTools(entity)
 	entity:SetEquippedIndex(nil)
 
-	for slot = 1, 4 do
-		EquipmentServiceServer.AssignToolbarWeapon(entity, "TestWeapon", slot)
+	local defaultWeapons = {
+		"Sword1",
+		"Sword2",
+		"Sword3",
+		"TestWeapon",
+	}
+
+	for slot, weaponPath in ipairs(defaultWeapons) do
+		EquipmentServiceServer.AssignToolbarWeapon(entity, weaponPath, slot)
 	end
 
 	entity:SetEquippedIndex(1)

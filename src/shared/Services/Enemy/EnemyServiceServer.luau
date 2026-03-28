@@ -19,6 +19,7 @@ local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
 local DefaultAnimations = require(ReplicatedStorage.Database.Enemies.Default.Animations)
+local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -50,7 +51,6 @@ local default = {
 	Strength = 0,
 	CritRate = 0,
 	CritDamage = 0,
-	PhysicalAttack = 0,
 	MagicalAttack = 0,
 }
 function Enemies.Spawn(e: string, SpawnBlock: Part): ()
@@ -96,6 +96,9 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 		if key == "__Animations" then
 			continue
 		end
+		if key == "__Components" then
+			continue
+		end
 
 		-- Check type of entity[key]
 		if typeof(entity[key]) == typeof(table) then
@@ -106,6 +109,20 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 		else
 			entity[key] = value
 		end
+	end
+
+	local toolbarWeapons = data.__Components and data.__Components.ToolbarWeapons
+	if toolbarWeapons then
+		for slot, weaponPath in ipairs(toolbarWeapons) do
+			if weaponPath ~= nil then
+				EquipmentServiceServer.AssignToolbarWeapon(entity, weaponPath, slot)
+			end
+		end
+	end
+
+	local equippedIndex = data.__Components and data.__Components.EquippedIndex
+	if type(equippedIndex) == "number" then
+		entity:SetEquippedIndex(equippedIndex)
 	end
 
 	print(entity)

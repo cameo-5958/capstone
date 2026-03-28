@@ -1,6 +1,6 @@
 return {
 	["Sword"] = {
-		["ExpireAfter"] = 1.2,
+		["ExpireAfter"] = 1.6,
 		["DefaultCombo"] = "light_chain",
 		["Combos"] = {
 			["light_chain"] = {
@@ -26,7 +26,7 @@ return {
 		},
 	},
 	["Claymore"] = {
-		["ExpireAfter"] = 1.2,
+		["ExpireAfter"] = 2.1,
 		["DefaultCombo"] = "heavy_chain",
 		["Combos"] = {
 			["heavy_chain"] = {
