@@ -38,11 +38,48 @@ local __Enemies: {
 
 local Enemies = {}
 
+local function SerializeEntityForClient(entity: Entity): { [string]: any }
+	return {
+		UUID = entity.UUID,
+		Name = entity.Name,
+		Family = entity.Family,
+		Level = entity.Level,
+		__ScaledLevel = entity.__ScaledLevel,
+		Character = entity.Character,
+		RootPart = entity.RootPart,
+		__Stats = table.clone(entity.__Stats),
+		__Animations = table.clone(entity.__Animations),
+		__Buffs = {},
+		__AttackModifierAppliers = {},
+		__Components = {
+			EquippedIndex = nil,
+			ToolbarWeapons = { nil, nil, nil, nil },
+			ComboState = {
+				WeaponUUID = nil,
+				ComboId = nil,
+				AttackIndex = entity.__Components.ComboState.AttackIndex,
+				LastAttackAt = entity.__Components.ComboState.LastAttackAt,
+			},
+		},
+		__Alive = entity.__Alive,
+		__InvincibleUntil = entity.__InvincibleUntil,
+	}
+end
+
+local function SerializeEnemiesForClient(enemies: { [string]: Entity }): { [string]: any }
+	local serialized = {}
+	for uuid, entity in pairs(enemies) do
+		serialized[uuid] = SerializeEntityForClient(entity)
+	end
+
+	return serialized
+end
+
 -- When players are added, send all the
 -- Entities as deserialized data
 Players.PlayerAdded:Connect(function(player)
 	API:FireClient(player, {
-		["Create"] = __Enemies,
+		["Create"] = SerializeEnemiesForClient(__Enemies),
 	})
 end)
 
@@ -140,7 +177,7 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	-- Send the entity to all clients
 	API:FireAllClients({
 		["Create"] = {
-			[entity.UUID] = entity,
+			[entity.UUID] = SerializeEntityForClient(entity),
 		},
 	})
 end

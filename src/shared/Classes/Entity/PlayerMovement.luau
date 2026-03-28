@@ -146,6 +146,19 @@ else
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
+	local function IsTargetAlive(target: Entity): boolean
+		if not target.Character or target.Character.Parent == nil or not target.RootPart then
+			return false
+		end
+
+		local humanoid = target.Character:FindFirstChild("Humanoid")
+		if humanoid and humanoid:IsA("Humanoid") and humanoid.Health <= 0 then
+			return false
+		end
+
+		return target:IsAlive()
+	end
+
 	local function HasLineOfSight(self: MovementEngine, target: Entity): boolean
 		raycastParams.FilterDescendantsInstances = { self.Character }
 
@@ -206,6 +219,10 @@ else
 		local closestDistance = sight or 64
 
 		for _, enemy in pairs(EnemyServiceClient.GetAll()) do
+			if not IsTargetAlive(enemy) then
+				continue
+			end
+
 			local distance = (enemy.RootPart.Position - pos).Magnitude
 			if distance < closestDistance and HasLineOfSight(self, enemy) then
 				closest = enemy

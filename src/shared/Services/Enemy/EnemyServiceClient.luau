@@ -33,6 +33,19 @@ local __AttackHitboxes: {
 } = {}
 local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
 
+local function IsEnemyAlive(ent: Entity?): boolean
+	if not ent or not ent.Character or ent.Character.Parent == nil or not ent.RootPart then
+		return false
+	end
+
+	local humanoid = ent.Character:FindFirstChild("Humanoid")
+	if humanoid and humanoid:IsA("Humanoid") and humanoid.Health <= 0 then
+		return false
+	end
+
+	return ent:IsAlive()
+end
+
 local function ClearAttackHitbox(uuid: string)
 	local state = __AttackHitboxes[uuid]
 	if not state then
@@ -134,6 +147,10 @@ function Enemies.GetClosest(pos: Vector3, sight: number?)
 	local closestDistance = sight or 64
 
 	for uuid, ent in pairs(__Enemies) do
+		if not IsEnemyAlive(ent) then
+			continue
+		end
+
 		-- Find the distance between pos and
 		-- ent location
 		local dist = (ent.RootPart.Position - pos).Magnitude

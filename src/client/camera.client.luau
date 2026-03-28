@@ -15,5 +15,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		controller:CycleMode(-1)
 	elseif input.KeyCode == Enum.KeyCode.RightBracket then
 		controller:CycleMode(1)
+	elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+		controller:ToggleOrbitFocusMode()
 	end
 end)

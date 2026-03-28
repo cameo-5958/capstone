@@ -64,6 +64,7 @@ type CameraController = {
 	Init: (self: CameraController) -> (),
 	BindCharacter: (self: CameraController, character: Model) -> (),
 	CycleMode: (self: CameraController, direction: number) -> CameraModeName,
+	ToggleOrbitFocusMode: (self: CameraController) -> CameraModeName,
 	SetMode: (self: CameraController, modeName: CameraModeName) -> CameraModeName,
 	GetMode: (self: CameraController) -> CameraModeName,
 	Update: (self: CameraController, deltaTime: number) -> (),
@@ -230,6 +231,14 @@ function CameraController.ResolveFocusTarget(self: CameraController, config: Foc
 	return closest
 end
 
+function CameraController.ToggleOrbitFocusMode(self: CameraController): CameraModeName
+	if self.CurrentModeName == "Focus" then
+		return self:SetMode("Default")
+	end
+
+	return self:SetMode("Focus")
+end
+
 function CameraController.GetZoomDistance(self: CameraController, modeName: CameraModeName?): number
 	local resolvedModeName = modeName or self.CurrentModeName
 	local modeConfig = self.Modes[resolvedModeName]
@@ -279,6 +288,7 @@ function CameraController.BuildFocusCamera(self: CameraController, config: Focus
 	local focusTarget = self:ResolveFocusTarget(config)
 	if not focusTarget then
 		self.LastFocusMidpoint = nil
+		self:SetMode("Default")
 		local fallback = MODE_CONFIGS.Default :: OrbitModeConfig
 		return self:BuildOrbitCamera(fallback)
 	end
@@ -317,10 +327,20 @@ function CameraController.GetMode(self: CameraController): CameraModeName
 end
 
 function CameraController.SetMode(self: CameraController, modeName: CameraModeName): CameraModeName
+	if modeName == "Focus" then
+		local focusConfig = self.Modes.Focus :: FocusModeConfig
+		if not self:ResolveFocusTarget(focusConfig) then
+			modeName = "Default"
+		end
+	end
+
 	for index, candidate in ipairs(self.ModeOrder) do
 		if candidate == modeName then
 			self.CurrentModeIndex = index
 			self.CurrentModeName = modeName
+			if modeName ~= "Focus" then
+				self.LastFocusMidpoint = nil
+			end
 			UpdateFacingLockAttribute(self)
 			return modeName
 		end
@@ -332,10 +352,7 @@ end
 function CameraController.CycleMode(self: CameraController, direction: number): CameraModeName
 	local totalModes = #self.ModeOrder
 	local nextIndex = ((self.CurrentModeIndex - 1 + direction) % totalModes) + 1
-	self.CurrentModeIndex = nextIndex
-	self.CurrentModeName = self.ModeOrder[nextIndex]
-	UpdateFacingLockAttribute(self)
-	return self.CurrentModeName
+	return self:SetMode(self.ModeOrder[nextIndex])
 end
 
 function CameraController.Update(self: CameraController, deltaTime: number)
