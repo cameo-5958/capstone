@@ -2,6 +2,7 @@
 
 -- Import neurons
 local neurons = script.Parent.Neurons
+local Stumble = require(neurons.Stumble)
 local StrafePlayer = require(neurons.StrafePlayer)
 local AttackPlayer = require(neurons.AttackPlayer)
 local BackOffPlayer = require(neurons.BackOffPlayer)
@@ -21,12 +22,13 @@ function Brains.Aggressive(movementEngine, range: number): Brain
 	-- Create the brain
 	local brain = Brain.new(movementEngine, {
 		-- Interrupting
+		Stumble.new(), -- Heavy hits interrupt into a short stumble
 		Aggro.new(), -- Can get aggroed
 
 		-- Core
-		AttackPlayer.new(), -- Attacks once close enough to commit
+		StrafePlayer.new(), -- Try to strafe before committing to an attack
 		BackOffPlayer.new(), -- Creates space after attacking before strafing
-		StrafePlayer.new(), -- Will Strafe with higher priority than attacks
+		AttackPlayer.new(), -- Attacks once close enough to commit
 		TrackPlayer.new(range), -- Tracks the player at this given range
 
 		-- Passive

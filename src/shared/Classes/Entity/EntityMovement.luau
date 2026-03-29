@@ -34,6 +34,7 @@ export type MovementEngine = SharedMovementEngine & {
 	Stop: (MovementEngine, string) -> (),
 	OnLinearVelocityApplied: (MovementEngine, Vector3, number) -> (),
 	OnLinearVelocityCancelled: (MovementEngine) -> (),
+	Destroy: (MovementEngine) -> (),
 	new: (Entity) -> MovementEngine,
 	init: (MovementEngine) -> (),
 }
@@ -45,7 +46,7 @@ end
 function MovementEngine.init(self: MovementEngine): ()
 	self.FacingTarget = nil
 	MovementShared.Init(self)
-	self.Entity:GetStatChangedSignal("Speed"):Connect(function(newValue: number)
+	self.__SpeedChangedConnection = self.Entity:GetStatChangedSignal("Speed"):Connect(function(newValue: number)
 		self.Speed = newValue
 		if self:IsMovementEnabled() then
 			self.Humanoid.WalkSpeed = newValue
@@ -273,6 +274,21 @@ function MovementEngine.Stop(self: MovementEngine, animId: string)
 	end
 
 	AnimationServiceServer.Stop(self.EntityUUID, animationId)
+end
+
+function MovementEngine.Destroy(self: MovementEngine)
+	self:CancelLinearVelocity()
+	self:ClearLookAt()
+
+	if self.DeferredCancelTask then
+		task.cancel(self.DeferredCancelTask)
+		self.DeferredCancelTask = nil
+	end
+
+	if self.__SpeedChangedConnection then
+		self.__SpeedChangedConnection:Disconnect()
+		self.__SpeedChangedConnection = nil
+	end
 end
 
 return MovementEngine

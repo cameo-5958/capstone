@@ -6,7 +6,7 @@ return {
 
 	["BaseDamage"] = 10,
 	["__Stats"] = {
-		["Strength"] = 8,
+		["Defense"] = 8,
 		["PhysicalAttack"] = 2,
 		["CritDamage"] = 25,
 	},

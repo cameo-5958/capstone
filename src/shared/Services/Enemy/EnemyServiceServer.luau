@@ -35,8 +35,63 @@ local __Enemies: {
 
 	-- Methods
 } = {}
+local __EnemyRuntime: {
+	[string]: {
+		Entity: Entity,
+		MovementEngine: any,
+		Brain: any,
+		DeathConnection: any,
+	},
+} = {}
+local __Deaths: {
+	[string]: {
+		UUID: string,
+		Position: Vector3,
+		DiedAt: number,
+		Entity: Entity,
+	},
+} = {}
 
 local Enemies = {}
+
+local function RemoveEnemyForClients(uuid: string)
+	API:FireAllClients({
+		Remove = {
+			[uuid] = true,
+		},
+	})
+end
+
+local function WipeEntity(uuid: string)
+	local runtime = __EnemyRuntime[uuid]
+	local entity = runtime and runtime.Entity or __Enemies[uuid]
+	if not entity then
+		return
+	end
+
+	if runtime then
+		if runtime.DeathConnection then
+			runtime.DeathConnection:Disconnect()
+			runtime.DeathConnection = nil
+		end
+		if runtime.Brain then
+			runtime.Brain:Destroy()
+		end
+		if runtime.MovementEngine then
+			runtime.MovementEngine:Destroy()
+		end
+	end
+
+	__Deaths[uuid] = {
+		UUID = uuid,
+		Position = entity.RootPart.Position,
+		DiedAt = workspace:GetServerTimeNow(),
+		Entity = entity,
+	}
+	__EnemyRuntime[uuid] = nil
+	__Enemies[uuid] = nil
+	RemoveEnemyForClients(uuid)
+end
 
 local function SerializeEntityForClient(entity: Entity): { [string]: any }
 	return {
@@ -81,6 +136,16 @@ Players.PlayerAdded:Connect(function(player)
 	API:FireClient(player, {
 		["Create"] = SerializeEnemiesForClient(__Enemies),
 	})
+end)
+
+API.OnServerEvent:Connect(function(_: Player, action: string, payload: { [string]: any }?)
+	if action == "RequestSpawnEnemy" then
+		local enemyPath = payload and payload.EnemyPath or "Tests.Sword"
+		local spawnPart = workspace:FindFirstChild("SpawnPoint")
+		if spawnPart and spawnPart:IsA("Part") then
+			Enemies.Spawn(enemyPath, spawnPart)
+		end
+	end
 end)
 
 -- Entity creation
@@ -170,6 +235,17 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	-- Give it its engines
 	local movementEngine = Movement.new(entity)
 	local brain = Brains.Aggressive(movementEngine, 32)
+	local deathConnection = entity:GetStatChangedSignal("Health"):Connect(function(newValue: number)
+		if newValue <= 0 then
+			WipeEntity(entity.UUID)
+		end
+	end)
+	__EnemyRuntime[entity.UUID] = {
+		Entity = entity,
+		MovementEngine = movementEngine,
+		Brain = brain,
+		DeathConnection = deathConnection,
+	}
 
 	-- Start the brain loop
 	brain:Go()
@@ -201,6 +277,20 @@ end
 
 function Enemies.GetByUUID(uuid: string): Entity?
 	return __Enemies[uuid]
+end
+
+function Enemies.RegisterHeavyHit(target: Entity, source: Entity?)
+	local runtime = target and __EnemyRuntime[target.UUID]
+	if not runtime or not runtime.Brain then
+		return false
+	end
+
+	runtime.Brain:QueueStumble(source and source.RootPart and source.RootPart.Position or nil)
+	return true
+end
+
+function Enemies.GetDeaths()
+	return __Deaths
 end
 
 return Enemies

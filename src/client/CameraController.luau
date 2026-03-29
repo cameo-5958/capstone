@@ -95,7 +95,7 @@ local MODE_CONFIGS: {
 		ZoomDefault = 12,
 		LookAtHeight = 2.5,
 		MouseSensitivity = 0.0035,
-		Smoothing = 10,
+		Smoothing = 7,
 		MinPitch = math.rad(-70),
 		MaxPitch = math.rad(70),
 	},
@@ -108,7 +108,7 @@ local MODE_CONFIGS: {
 		ZoomDefault = 3.2,
 		LookAtHeight = 2.2,
 		MouseSensitivity = 0.0022,
-		Smoothing = 14,
+		Smoothing = 10,
 		MinPitch = math.rad(-55),
 		MaxPitch = math.rad(50),
 	},
@@ -117,13 +117,13 @@ local MODE_CONFIGS: {
 		Fov = 62,
 		Offset = Vector3.new(2.5, 3.5, 14),
 		ZoomMin = 10,
-		ZoomMax = 32,
+		ZoomMax = 26,
 		ZoomDefault = 14,
 		LookAtHeight = 2.5,
 		EnemyLookAtHeight = 2,
-		Smoothing = 9,
+		Smoothing = 6,
 		EnemySearchRadius = 80,
-		FramePadding = 1.35,
+		FramePadding = 0.9,
 	},
 }
 
@@ -309,13 +309,18 @@ function CameraController.BuildFocusCamera(self: CameraController, config: Focus
 
 	local forward = if flatDirection.Magnitude > 0.001 then flatDirection.Unit else rootPart.CFrame.LookVector
 	local right = forward:Cross(Vector3.yAxis).Unit
-	local separation = (enemyFocus - playerFocus).Magnitude
+	local separation = flatDirection.Magnitude
 	local halfFovRadians = math.rad(config.Fov * 0.5)
 	local framingDistance = (separation * config.FramePadding) / math.max(math.tan(halfFovRadians), 0.1)
-	local zoomDistance = math.max(self:GetZoomDistance(config.Name), framingDistance)
+	local baseZoomDistance = self:GetZoomDistance(config.Name)
+	local zoomDistance = math.min(
+		config.ZoomMax,
+		math.max(baseZoomDistance, baseZoomDistance + (framingDistance - baseZoomDistance) * 0.45)
+	)
+	local dynamicHeight = math.min(4.5, separation * 0.08)
 	local desiredPosition = midpoint
 		+ right * config.Offset.X
-		+ Vector3.yAxis * config.Offset.Y
+		+ Vector3.yAxis * (config.Offset.Y + dynamicHeight)
 		- forward * zoomDistance
 	local cameraPosition = ResolveCameraCollision(midpoint, desiredPosition, self.Character)
 

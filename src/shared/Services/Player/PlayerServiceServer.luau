@@ -27,6 +27,8 @@ local PlayerStatConnections: { [string]: { Connection } } = {}
 local STAT_NAMES = {
 	"Health",
 	"MaxHealth",
+	"Mana",
+	"MaxMana",
 	"Defense",
 	"Strength",
 	"CritRate",

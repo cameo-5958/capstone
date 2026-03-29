@@ -13,6 +13,8 @@ export type Brain = {
 	RetreatTarget: Model?,
 	RetreatUntil: number,
 	PendingStrafes: number,
+	PendingStumble: boolean,
+	StumbleSourcePosition: Vector3?,
 
 	-- All the neurons this brain has
 	Neurons: { Neuron },
@@ -28,6 +30,8 @@ export type Brain = {
 	-- Go and stop
 	Go: (self: Brain) -> (),
 	Stop: (self: Brain) -> (),
+	Destroy: (self: Brain) -> (),
+	QueueStumble: (self: Brain, sourcePosition: Vector3?) -> (),
 
 	-- Utility methods
 	HitPlayer: (self: Brain, Model, number) -> boolean,

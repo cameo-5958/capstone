@@ -54,6 +54,8 @@ export type AttackContext = {
 	From: Entity,
 	To: Entity,
 	BaseDamage: number,
+	DidCrit: boolean,
+	IsHeavy: boolean,
 
 	Modifiers: CombatModifierContext,
 	FinalStats: FinalStatContext,
@@ -93,6 +95,8 @@ function AttackContext.new(from: Entity, to: Entity): AttackContext
 	self.From = from
 	self.To = to
 	self.BaseDamage = 0
+	self.DidCrit = false
+	self.IsHeavy = false
 	self.Modifiers = {
 		From = CreateModifierBucket(from),
 		To = CreateModifierBucket(to),

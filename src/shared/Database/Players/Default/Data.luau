@@ -7,6 +7,8 @@ return {
 	["__Stats"] = {
 		["Health"] = 100,
 		["MaxHealth"] = 100,
+		["Mana"] = 100,
+		["MaxMana"] = 100,
 		["Defense"] = 0,
 		["Strength"] = 0,
 		["CritRate"] = 0.05,

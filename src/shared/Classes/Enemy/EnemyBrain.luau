@@ -38,6 +38,8 @@ function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
 	self.RetreatTarget = nil
 	self.RetreatUntil = 0
 	self.PendingStrafes = 0
+	self.PendingStumble = false
+	self.StumbleSourcePosition = nil
 
 	return self :: any
 end
@@ -53,7 +55,29 @@ end
 function Brain.Stop(self: Brain)
 	if self.__Thread then
 		self.__Thread:Disconnect()
+		self.__Thread = nil
 	end
+end
+
+function Brain.Destroy(self: Brain)
+	self:Stop()
+
+	if self.CurrentNeuron then
+		self.CurrentNeuron:OnExit()
+		self.CurrentNeuron = nil
+	end
+
+	self.Target = nil
+	self.RetreatTarget = nil
+	self.RetreatUntil = 0
+	self.PendingStrafes = 0
+	self.PendingStumble = false
+	self.StumbleSourcePosition = nil
+end
+
+function Brain.QueueStumble(self: Brain, sourcePosition: Vector3?)
+	self.PendingStumble = true
+	self.StumbleSourcePosition = sourcePosition
 end
 
 -- Brain thread

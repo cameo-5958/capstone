@@ -33,6 +33,7 @@ type ActiveAttack = {
 	Profile: AttackProfile,
 	Weapon: any,
 	ComboBaseDamage: number,
+	IsHeavy: boolean,
 	StopAnimationOnClear: boolean,
 	OriginCFrame: CFrame,
 	AttackContext: AttackContext,
@@ -44,6 +45,7 @@ type ActiveAttack = {
 
 local ActiveAttacks: { [Player]: ActiveAttack } = {}
 local NextAttackAt: { [Player]: number } = {}
+local HIT_CONFIRM_RETRY_DELAY = 0.08
 
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -170,22 +172,22 @@ local function StopComboAnimations(player: Player, weaponClass: string)
 	end
 end
 
-local function ResolveComboAttack(entity, weapon, now: number): (AnimationId?, number, boolean, boolean)
+local function ResolveComboAttack(entity, weapon, now: number): (AnimationId?, number, boolean, boolean, boolean)
 	if not IsComboWeapon(weapon) then
 		entity:ResetComboState()
-		return nil, 1, true, false
+		return nil, 1, false, true, false
 	end
 
 	local comboSet = ClassCombos[weapon.Class] :: ComboSet?
 	if not comboSet then
 		entity:ResetComboState()
-		return nil, 1, true, false
+		return nil, 1, false, true, false
 	end
 
 	local combo = GetDefaultCombo(comboSet)
 	if not combo or #combo.Attacks == 0 then
 		entity:ResetComboState()
-		return nil, 1, true, false
+		return nil, 1, false, true, false
 	end
 
 	local state = entity.__Components.ComboState
@@ -206,7 +208,7 @@ local function ResolveComboAttack(entity, weapon, now: number): (AnimationId?, n
 	state.LastAttackAt = now
 	state.AttackIndex = (attackIndex % #combo.Attacks) + 1
 
-	return attack.AnimationId, attack.PowerScale, attackIndex < #combo.Attacks, startedNewSequence
+	return attack.AnimationId, attack.PowerScale, attack.IsHeavy == true, attackIndex < #combo.Attacks, startedNewSequence
 end
 
 function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: number, swingRange: number?)
@@ -247,7 +249,7 @@ local function BeginPrimaryAttack(player: Player)
 
 	local profile = weapon:GetAttackProfile()
 	local attackContext = GetAttackContext(weapon)
-	local comboAnimationId, powerScale, stopAnimationOnClear, startedNewSequence = ResolveComboAttack(entity, weapon, now)
+	local comboAnimationId, powerScale, isHeavy, stopAnimationOnClear, startedNewSequence = ResolveComboAttack(entity, weapon, now)
 	local animationId = ResolveAnimationId(comboAnimationId or entity.__Animations["Attack"] or profile.AnimationId)
 	local attackId = HttpService:GenerateGUID(false)
 	local activeFrom = now + profile.Windup
@@ -260,6 +262,7 @@ local function BeginPrimaryAttack(player: Player)
 		Profile = profile,
 		Weapon = weapon,
 		ComboBaseDamage = powerScale,
+		IsHeavy = isHeavy,
 		StopAnimationOnClear = stopAnimationOnClear,
 		OriginCFrame = entity.RootPart.CFrame,
 		AttackContext = attackContext,
@@ -324,12 +327,48 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 	end
 
 	if not IsTargetInsideCapturedAttack(entity, target, active) then
+		local attackId = active.Id
+		local targetUUID = payload.TargetUUID
+		task.delay(HIT_CONFIRM_RETRY_DELAY, function()
+			local retryActive = ActiveAttacks[player]
+			if not retryActive or retryActive.Id ~= attackId then
+				return
+			end
+
+			local retryEntity = PlayerServiceServer.GetEntity(player)
+			if not retryEntity or not retryEntity:IsAlive() then
+				return
+			end
+
+			local retryTarget = EnemyServiceServer.GetByUUID(targetUUID)
+			if not retryTarget or not retryTarget:IsAlive() or retryTarget:IsInvincible() then
+				return
+			end
+
+			local retryLastHitAt = retryActive.Hits[targetUUID]
+			local retryNow = workspace:GetServerTimeNow()
+			if retryLastHitAt and retryNow - retryLastHitAt < retryActive.Profile.HitReset then
+				return
+			end
+
+			if not IsTargetInsideCapturedAttack(retryEntity, retryTarget, retryActive) then
+				return
+			end
+
+			print(("Hitbox registered delayed hit: %s -> %s"):format(player.Name, retryTarget.Name))
+			retryActive.Hits[targetUUID] = retryNow
+			retryActive.Weapon:ExecuteAttack(retryTarget, retryActive.ComboBaseDamage, retryEntity, {
+				IsHeavy = retryActive.IsHeavy,
+			})
+		end)
 		return
 	end
 
 	print(("Hitbox registered hit: %s -> %s"):format(player.Name, target.Name))
 	active.Hits[payload.TargetUUID] = now
-	active.Weapon:ExecuteAttack(target, active.ComboBaseDamage, entity)
+	active.Weapon:ExecuteAttack(target, active.ComboBaseDamage, entity, {
+		IsHeavy = active.IsHeavy,
+	})
 end
 
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)

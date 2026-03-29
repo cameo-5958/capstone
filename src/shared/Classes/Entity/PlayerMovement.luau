@@ -128,110 +128,94 @@ local function GetProjectedTargetLocation(target: Entity, leadTime: number): Vec
 	return rootPart.Position + flatVelocity * leadTime
 end
 
-if RunService:IsServer() then
-	function MovementEngine.new(entity: Entity): MovementEngine
-		local self = setmetatable({}, MovementEngine)
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
-		self.States = {}
-		self.Character = entity.Character
-		self.Humanoid = entity.Character:FindFirstChild("Humanoid")
-		self.RootPart = entity.RootPart
-		self.EntityUUID = entity.UUID
-		self.Speed = entity:GetStat("Speed");
-		((self :: any) :: MovementEngine):init()
-
-		return (self :: any) :: MovementEngine
+local function IsTargetAlive(target: Entity): boolean
+	if not target.Character or target.Character.Parent == nil or not target.RootPart then
+		return false
 	end
-else
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	local function IsTargetAlive(target: Entity): boolean
-		if not target.Character or target.Character.Parent == nil or not target.RootPart then
-			return false
+	local humanoid = target.Character:FindFirstChild("Humanoid")
+	if humanoid and humanoid:IsA("Humanoid") and humanoid.Health <= 0 then
+		return false
+	end
+
+	return target:IsAlive()
+end
+
+local function HasLineOfSight(self: MovementEngine, target: Entity): boolean
+	raycastParams.FilterDescendantsInstances = { self.Character }
+
+	local origin = self.RootPart.Position
+	local targetPos = target.RootPart.Position
+	local delta = targetPos - origin
+	local result = workspace:Raycast(origin, delta, raycastParams)
+
+	if not result then
+		return true
+	end
+
+	return result.Instance:IsDescendantOf(target.Character)
+end
+
+function MovementEngine.lnew(): MovementEngine
+	local lp = Players.LocalPlayer
+	local chr = lp.Character or lp.CharacterAdded:Wait()
+	local self = setmetatable({}, MovementEngine)
+	local humanoid = chr:WaitForChild("Humanoid") :: Humanoid
+
+	self.States = {}
+	self.Character = chr
+	self.Humanoid = humanoid
+	self.RootPart = chr.PrimaryPart :: Part
+	self.Player = lp
+	self.Speed = humanoid:GetAttribute("EntitySpeed") or humanoid.WalkSpeed
+	self.__Animations = table.clone(PlayerConfig.__Animations or {});
+	((self :: any) :: MovementEngine):init()
+
+	humanoid:GetAttributeChangedSignal("EntitySpeed"):Connect(function()
+		local nextSpeed = humanoid:GetAttribute("EntitySpeed")
+		if typeof(nextSpeed) ~= "number" then
+			return
 		end
 
-		local humanoid = target.Character:FindFirstChild("Humanoid")
-		if humanoid and humanoid:IsA("Humanoid") and humanoid.Health <= 0 then
-			return false
+		self.Speed = nextSpeed
+		if self:IsMovementEnabled() then
+			self.Humanoid.WalkSpeed = nextSpeed
+		end
+	end)
+
+	self.Humanoid.Running:Connect(function()
+		self:UpdateMovementAnimation()
+	end)
+	self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+		self:UpdateMovementAnimation()
+	end)
+	RunService.RenderStepped:Connect(function()
+		self:UpdateFacingFromCamera()
+	end)
+
+	return (self :: any) :: MovementEngine
+end
+
+function MovementEngine.GetTarget(self: MovementEngine, pos: Vector3, sight: number?): Entity
+	local closest: Entity? = nil
+	local closestDistance = sight or 64
+
+	for _, enemy in pairs(EnemyServiceClient.GetAll()) do
+		if not IsTargetAlive(enemy) then
+			continue
 		end
 
-		return target:IsAlive()
-	end
-
-	local function HasLineOfSight(self: MovementEngine, target: Entity): boolean
-		raycastParams.FilterDescendantsInstances = { self.Character }
-
-		local origin = self.RootPart.Position
-		local targetPos = target.RootPart.Position
-		local delta = targetPos - origin
-		local result = workspace:Raycast(origin, delta, raycastParams)
-
-		if not result then
-			return true
+		local distance = (enemy.RootPart.Position - pos).Magnitude
+		if distance < closestDistance and HasLineOfSight(self, enemy) then
+			closest = enemy
+			closestDistance = distance
 		end
-
-		return result.Instance:IsDescendantOf(target.Character)
 	end
 
-	function MovementEngine.lnew(): MovementEngine
-		local lp = Players.LocalPlayer
-		local chr = lp.Character or lp.CharacterAdded:Wait()
-		local self = setmetatable({}, MovementEngine)
-		local humanoid = chr:WaitForChild("Humanoid") :: Humanoid
-
-		self.States = {}
-		self.Character = chr
-		self.Humanoid = humanoid
-		self.RootPart = chr.PrimaryPart :: Part
-		self.Player = lp
-		self.Speed = humanoid:GetAttribute("EntitySpeed") or humanoid.WalkSpeed
-		self.__Animations = table.clone(PlayerConfig.__Animations or {});
-		((self :: any) :: MovementEngine):init()
-
-		humanoid:GetAttributeChangedSignal("EntitySpeed"):Connect(function()
-			local nextSpeed = humanoid:GetAttribute("EntitySpeed")
-			if typeof(nextSpeed) ~= "number" then
-				return
-			end
-
-			self.Speed = nextSpeed
-			if self:IsMovementEnabled() then
-				self.Humanoid.WalkSpeed = nextSpeed
-			end
-		end)
-
-		self.Humanoid.Running:Connect(function()
-			self:UpdateMovementAnimation()
-		end)
-		self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
-			self:UpdateMovementAnimation()
-		end)
-		RunService.RenderStepped:Connect(function()
-			self:UpdateFacingFromCamera()
-		end)
-
-		return (self :: any) :: MovementEngine
-	end
-
-	function MovementEngine.GetTarget(self: MovementEngine, pos: Vector3, sight: number?): Entity
-		local closest: Entity? = nil
-		local closestDistance = sight or 64
-
-		for _, enemy in pairs(EnemyServiceClient.GetAll()) do
-			if not IsTargetAlive(enemy) then
-				continue
-			end
-
-			local distance = (enemy.RootPart.Position - pos).Magnitude
-			if distance < closestDistance and HasLineOfSight(self, enemy) then
-				closest = enemy
-				closestDistance = distance
-			end
-		end
-
-		return closest :: Entity
-	end
+	return closest :: Entity
 end
 
 function MovementEngine.UpdateFacingFromCamera(self: MovementEngine)
@@ -343,7 +327,10 @@ function MovementEngine.Dash(self: MovementEngine): ()
 
 	local dashDuration = 0.36
 	local dashSpeed = 30
-	local dashDirection = self.RootPart.CFrame.LookVector.Unit
+	local moveDirection = self.Humanoid.MoveDirection
+	local dashDirection = if moveDirection.Magnitude > 0.05
+		then Vector3.new(moveDirection.X, 0, moveDirection.Z).Unit
+		else -self.RootPart.CFrame.LookVector.Unit
 	self:Stop("Attack")
 	self:Play("Dash")
 	self:DisableMovement()

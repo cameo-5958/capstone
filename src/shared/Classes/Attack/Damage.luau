@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AttackContextModule = require(ReplicatedStorage.Classes.Attack.AttackContext)
 local EntityType = require(ReplicatedStorage.Classes.Entity.EntityTypes)
+local EnemyHandler = ReplicatedStorage.Services.Enemy:WaitForChild("EnemyHandler") :: RemoteEvent
+local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 
 type Entity = EntityType.Entity
 type AttackContext = AttackContextModule.AttackContext
@@ -74,9 +76,11 @@ end
 
 local function CritRoll(context: AttackContext, critChance: number): boolean
 	if math.random() >= critChance then
+		context.DidCrit = false
 		return false
 	end
 
+	context.DidCrit = true
 	context.From:TriggerOnCritRoll(context)
 	return true
 end
@@ -95,6 +99,10 @@ local function TriggerTypedDamageHooks(context: AttackContext)
 end
 
 local function ApplyDamage(context: AttackContext, baseDamage: number)
+	if not context.To:IsAlive() then
+		return
+	end
+
 	context.From:TriggerProcureData(context)
 	context.To:TriggerProcureData(context)
 	context.From:TriggerApply(context)
@@ -117,6 +125,7 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 		finalDamage *= ((context.FinalStats.From["Strength"] / 100) + 1)
 
 		-- Roll for a crit
+		context.DidCrit = false
 		if CritRoll(context, context.FinalStats.From["CritRate"]) then
 			-- Increase by crit damage
 			finalDamage *= ((context.FinalStats.From["CritDamage"] / 100) + 1)
@@ -143,6 +152,18 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 	local targetWasAlive = context.To:IsAlive()
 	context.From:TriggerOnAttackEnemy(context)
 	context.To:TakeDamage(finalDamage, context.From)
+	EnemyHandler:FireAllClients("DamageIndicator", {
+		UUID = context.To.UUID,
+		Damage = finalDamage,
+		IsCrit = context.DidCrit,
+		CurrentHealth = context.To:GetStat("Health"),
+		MaxHealth = context.To:GetStat("MaxHealth"),
+	})
+
+	if context.IsHeavy and context.To:IsAlive() then
+		EnemyServiceServer.RegisterHeavyHit(context.To, context.From)
+	end
+
 	context.From:TriggerOnHitSuccess(context)
 
 	if targetWasAlive and not context.To:IsAlive() then

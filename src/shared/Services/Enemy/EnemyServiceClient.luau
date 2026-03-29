@@ -15,6 +15,29 @@ type Entity = EntityTypes.Entity
 local __Enemies: {
 	[string]: Entity,
 } = {}
+local __EnemyTags: {
+	[string]: BillboardGui,
+} = {}
+local __DamageIndicators: {
+	[string]: {
+		Gui: BillboardGui,
+		Label: TextLabel,
+		StartedAt: number,
+		Duration: number,
+		Direction: number,
+		BaseOffset: Vector3,
+		BaseTextSize: number,
+		RotationAmplitude: number,
+	},
+} = {}
+local __AttackPredictors: {
+	[string]: {
+		Part: Part,
+		ChargeStartedAt: number,
+		ChargeEndsAt: number,
+		ClearAt: number,
+	},
+} = {}
 local __LookTargets: {
 	[string]: Vector3?,
 } = {}
@@ -32,6 +55,249 @@ local __AttackHitboxes: {
 	},
 } = {}
 local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
+local DAMAGE_INDICATOR_DURATION = 0.7
+local ClearAttackHitbox: (uuid: string) -> ()
+local ClearAttackPredictor: (uuid: string) -> ()
+local DestroyDamageIndicator: (indicatorId: string) -> ()
+
+local function FormatStatValue(value: number?): string
+	if value == nil then
+		return "--"
+	end
+
+	if value % 1 == 0 then
+		return tostring(value)
+	end
+
+	return tostring(math.round(value * 100) / 100)
+end
+
+local function GetTagAdornee(ent: Entity): Instance?
+	if not ent.Character then
+		return nil
+	end
+
+	local head = ent.Character:FindFirstChild("Head")
+	if head then
+		return head
+	end
+
+	return ent.RootPart
+end
+
+local function DestroyEnemyTag(uuid: string)
+	local tag = __EnemyTags[uuid]
+	if not tag then
+		return
+	end
+
+	tag:Destroy()
+	__EnemyTags[uuid] = nil
+end
+
+local function DestroyEnemyArtifacts(uuid: string)
+	DestroyEnemyTag(uuid)
+	ClearAttackHitbox(uuid)
+	ClearAttackPredictor(uuid)
+end
+
+local function DestroyEnemyDamageIndicators(uuid: string)
+	for indicatorId in pairs(__DamageIndicators) do
+		if string.sub(indicatorId, 1, #uuid) == uuid then
+			DestroyDamageIndicator(indicatorId)
+		end
+	end
+end
+
+function DestroyDamageIndicator(indicatorId: string)
+	local indicator = __DamageIndicators[indicatorId]
+	if not indicator then
+		return
+	end
+
+	indicator.Gui:Destroy()
+	__DamageIndicators[indicatorId] = nil
+end
+
+local function CreateTextLabel(name: string, size: UDim2, position: UDim2, textSize: number): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Size = size
+	label.Position = position
+	label.Font = Enum.Font.Code
+	label.TextColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextSize = textSize
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	return label
+end
+
+local function CreateSeparator(name: string, y: number): Frame
+	local separator = Instance.new("Frame")
+	separator.Name = name
+	separator.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	separator.BorderSizePixel = 0
+	separator.Position = UDim2.fromOffset(0, y)
+	separator.Size = UDim2.new(1, 0, 0, 2)
+	return separator
+end
+
+local function EnsureEnemyTag(uuid: string, ent: Entity): BillboardGui?
+	if not ent.Character or ent.Character.Parent == nil then
+		DestroyEnemyTag(uuid)
+		return nil
+	end
+
+	local adornee = GetTagAdornee(ent)
+	if not adornee then
+		DestroyEnemyTag(uuid)
+		return nil
+	end
+
+	local existing = __EnemyTags[uuid]
+	if existing and existing.Parent and existing.Adornee == adornee then
+		return existing
+	end
+
+	if existing then
+		existing:Destroy()
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "EnemyTag"
+	billboard.Size = UDim2.fromOffset(112, 18)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 120
+	billboard.Adornee = adornee
+	billboard.Parent = adornee
+
+	local container = Instance.new("Frame")
+	container.Name = "Container"
+	container.BackgroundTransparency = 1
+	container.Size = UDim2.fromScale(1, 1)
+	container.Parent = billboard
+
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.AnchorPoint = Vector2.new(0.5, 0)
+	panel.Position = UDim2.fromScale(0.5, 0)
+	panel.Size = UDim2.fromOffset(108, 18)
+	panel.BackgroundTransparency = 1
+	panel.BorderSizePixel = 0
+	panel.Parent = container
+
+	local title = CreateTextLabel("Title", UDim2.new(1, -2, 0, 7), UDim2.fromOffset(1, 0), 8)
+	title.Parent = panel
+
+	local titleSeparator = CreateSeparator("TitleSeparator", 7)
+	titleSeparator.Size = UDim2.new(1, -2, 0, 1)
+	titleSeparator.Position = UDim2.fromOffset(1, 7)
+	titleSeparator.Parent = panel
+
+	local healthText = CreateTextLabel("HealthText", UDim2.fromOffset(36, 7), UDim2.fromOffset(1, 10), 7)
+	healthText.Parent = panel
+
+	local barBackground = Instance.new("Frame")
+	barBackground.Name = "HealthBarBackground"
+	barBackground.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	barBackground.BorderSizePixel = 0
+	barBackground.Position = UDim2.fromOffset(39, 10)
+	barBackground.Size = UDim2.fromOffset(50, 4)
+	barBackground.Parent = panel
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "HealthBarFill"
+	barFill.BackgroundColor3 = Color3.fromRGB(198, 58, 58)
+	barFill.BorderSizePixel = 0
+	barFill.Position = UDim2.fromOffset(1, 1)
+	barFill.Size = UDim2.new(1, -2, 1, -2)
+	barFill.Parent = barBackground
+
+	__EnemyTags[uuid] = billboard
+	return billboard
+end
+
+local function ShowDamageIndicator(uuid: string, ent: Entity, damage: number, isCrit: boolean?)
+	local adornee = GetTagAdornee(ent)
+	if not adornee then
+		return
+	end
+
+	local indicatorId = ("%s:%0.6f"):format(uuid, workspace:GetServerTimeNow())
+	local baseOffset = Vector3.new(math.random(-24, 24) / 20, 2.25 + (math.random(0, 10) / 20), math.random(-8, 8) / 20)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "DamageIndicator"
+	billboard.Adornee = adornee
+	billboard.Size = UDim2.fromOffset(104, 40)
+	billboard.StudsOffsetWorldSpace = baseOffset
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 120
+	billboard.Parent = adornee
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Value"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.Code
+	label.Text = FormatStatValue(damage)
+	label.TextColor3 = if isCrit then Color3.fromRGB(150, 84, 255) else Color3.fromRGB(185, 22, 22)
+	label.TextStrokeTransparency = 0.4
+	label.TextStrokeColor3 = Color3.fromRGB(255, 245, 245)
+	label.TextSize = 24
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Parent = billboard
+
+	__DamageIndicators[indicatorId] = {
+		Gui = billboard,
+		Label = label,
+		StartedAt = workspace:GetServerTimeNow(),
+		Duration = DAMAGE_INDICATOR_DURATION,
+		Direction = math.random(0, 1) == 0 and -1 or 1,
+		BaseOffset = baseOffset,
+		BaseTextSize = 24,
+		RotationAmplitude = if isCrit then 11 else 4,
+	}
+end
+
+local function UpdateEnemyTag(uuid: string, ent: Entity)
+	local tag = EnsureEnemyTag(uuid, ent)
+	if not tag then
+		return
+	end
+
+	local container = tag:FindFirstChild("Container")
+	if not container then
+		return
+	end
+
+	local panel = container:FindFirstChild("Panel") :: Frame?
+	if not panel then
+		return
+	end
+
+	local title = panel:FindFirstChild("Title") :: TextLabel?
+	local healthText = panel:FindFirstChild("HealthText") :: TextLabel?
+	local healthBarBackground = panel:FindFirstChild("HealthBarBackground") :: Frame?
+	local healthBarFill = healthBarBackground and healthBarBackground:FindFirstChild("HealthBarFill") :: Frame?
+	if not title or not healthText or not healthBarBackground or not healthBarFill then
+		return
+	end
+
+	local currentHealth = ent.__Stats.Health
+	local maxHealth = ent.__Stats.MaxHealth
+	local healthRatio = if maxHealth > 0 then math.clamp(currentHealth / maxHealth, 0, 1) else 0
+
+	title.Text = ("[%s] %s"):format(FormatStatValue(ent.Level), ent.Name)
+	healthText.Text = ("%s/%s"):format(FormatStatValue(currentHealth), FormatStatValue(maxHealth))
+	healthBarFill.Visible = healthRatio > 0
+	if healthRatio > 0 then
+		healthBarFill.Size = UDim2.new(healthRatio, -2, 1, -2)
+	end
+end
 
 local function IsEnemyAlive(ent: Entity?): boolean
 	if not ent or not ent.Character or ent.Character.Parent == nil or not ent.RootPart then
@@ -46,7 +312,7 @@ local function IsEnemyAlive(ent: Entity?): boolean
 	return ent:IsAlive()
 end
 
-local function ClearAttackHitbox(uuid: string)
+function ClearAttackHitbox(uuid: string)
 	local state = __AttackHitboxes[uuid]
 	if not state then
 		return
@@ -54,6 +320,16 @@ local function ClearAttackHitbox(uuid: string)
 
 	state.Part:Destroy()
 	__AttackHitboxes[uuid] = nil
+end
+
+function ClearAttackPredictor(uuid: string)
+	local state = __AttackPredictors[uuid]
+	if not state then
+		return
+	end
+
+	state.Part:Destroy()
+	__AttackPredictors[uuid] = nil
 end
 
 local function EnsureAttackHitbox(uuid: string): Part
@@ -71,6 +347,26 @@ local function EnsureAttackHitbox(uuid: string): Part
 	part.Material = Enum.Material.ForceField
 	part.Color = Color3.fromRGB(255, 90, 90)
 	part.Transparency = 0.82
+	part.Parent = workspace
+
+	return part
+end
+
+local function EnsureAttackPredictor(uuid: string): Part
+	local existing = __AttackPredictors[uuid]
+	if existing and existing.Part.Parent then
+		return existing.Part
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "EnemyAttackPredictor"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Material = Enum.Material.Neon
+	part.Color = Color3.fromHSV(0, 0.2, 0.95)
+	part.Transparency = 0.35
 	part.Parent = workspace
 
 	return part
@@ -133,10 +429,19 @@ API.OnClientEvent:Connect(function(ds: { [string]: { [string]: Entity } })
 	-- Delay the task to ensure that the models are all
 	-- loaded in
 	task.delay(0.5, function()
+		if ds["Remove"] then
+			for uuid in pairs(ds["Remove"]) do
+				__Enemies[uuid] = nil
+				DestroyEnemyArtifacts(uuid)
+			end
+		end
+
 		-- Create
-		for uuid, ent in pairs(ds["Create"]) do
+		for uuid, ent in pairs(ds["Create"] or {}) do
 			-- Cast to Entity to give functionality back
-			__Enemies[uuid] = Entity.Inflate(ent)
+			local inflated = Entity.Inflate(ent)
+			__Enemies[uuid] = inflated
+			UpdateEnemyTag(uuid, inflated)
 		end
 	end)
 end)
@@ -166,6 +471,12 @@ end
 
 function Enemies.GetAll()
 	return __Enemies
+end
+
+function Enemies.RequestSpawnEnemy(enemyPath: string?)
+	API:FireServer("RequestSpawnEnemy", {
+		EnemyPath = enemyPath or "Tests.Sword",
+	})
 end
 
 -- Handle movement etc.
@@ -201,6 +512,28 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 			HitboxSize = data.HitboxSize,
 			HitboxOffset = data.HitboxOffset,
 		}
+	elseif action == "AttackPredictor" then
+		local predictor = EnsureAttackPredictor(data.UUID)
+		predictor.Size = data.PredictorSize
+		predictor.CFrame = data.PredictorCFrame
+		__AttackPredictors[data.UUID] = {
+			Part = predictor,
+			ChargeStartedAt = data.ChargeStartedAt,
+			ChargeEndsAt = data.ChargeEndsAt,
+			ClearAt = data.ClearAt,
+		}
+	elseif action == "DamageIndicator" then
+		local ent = __Enemies[data.UUID]
+		if ent then
+			if data.CurrentHealth ~= nil then
+				ent.__Stats.Health = data.CurrentHealth
+			end
+			if data.MaxHealth ~= nil then
+				ent.__Stats.MaxHealth = data.MaxHealth
+			end
+			ShowDamageIndicator(data.UUID, ent, data.Damage, data.IsCrit)
+			UpdateEnemyTag(data.UUID, ent)
+		end
 	end
 end)
 
@@ -212,7 +545,46 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
+	for uuid, ent in pairs(__Enemies) do
+		if IsEnemyAlive(ent) then
+			UpdateEnemyTag(uuid, ent)
+		else
+			DestroyEnemyArtifacts(uuid)
+		end
+	end
+
 	local now = workspace:GetServerTimeNow()
+	for indicatorId, indicator in pairs(__DamageIndicators) do
+		local elapsed = now - indicator.StartedAt
+		local alpha = math.clamp(elapsed / indicator.Duration, 0, 1)
+		if alpha >= 1 then
+			DestroyDamageIndicator(indicatorId)
+			continue
+		end
+
+		indicator.Gui.StudsOffsetWorldSpace = Vector3.new(
+			indicator.BaseOffset.X,
+			indicator.BaseOffset.Y + (elapsed * 0.45),
+			indicator.BaseOffset.Z
+		)
+		indicator.Label.Rotation = math.sin(elapsed * 12) * indicator.RotationAmplitude * indicator.Direction
+		indicator.Label.TextTransparency = alpha
+		indicator.Label.TextStrokeTransparency = math.min(1, 0.4 + alpha)
+		indicator.Label.TextSize = indicator.BaseTextSize - (6 * alpha)
+	end
+
+	for uuid, state in pairs(__AttackPredictors) do
+		if now > state.ClearAt then
+			ClearAttackPredictor(uuid)
+			continue
+		end
+
+		local duration = math.max(state.ChargeEndsAt - state.ChargeStartedAt, 0.001)
+		local alpha = math.clamp((now - state.ChargeStartedAt) / duration, 0, 1)
+		state.Part.Color = Color3.fromHSV(0, 0.2 + (0.8 * alpha), 0.95)
+		state.Part.Transparency = 0.55 - (0.25 * alpha)
+	end
+
 	for uuid, state in pairs(__AttackHitboxes) do
 		local ent = __Enemies[uuid]
 		if now > state.ClearAt or not ent or not ent.Character or not ent.Character.PrimaryPart then

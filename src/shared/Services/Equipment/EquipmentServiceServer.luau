@@ -25,13 +25,14 @@ end
 
 local function BuildAttackProfile(data): WeaponTypes.AttackProfile?
 	local attackContext = data.AttackContext
-	if not attackContext then
+	local configuredProfile = data.AttackProfile
+	if not attackContext and not configuredProfile then
 		return nil
 	end
 
-	local swordRange = attackContext.SwingRange or 6
+	local swordRange = (attackContext and attackContext.SwingRange) or 6
 	local hitRange = swordRange + 1.5
-	return {
+	local profile = {
 		AnimationId = "",
 		Windup = 0.12,
 		ActiveDuration = 0.16,
@@ -41,6 +42,14 @@ local function BuildAttackProfile(data): WeaponTypes.AttackProfile?
 		HitboxSize = Vector3.new(3.25, 4.5, hitRange),
 		HitboxOffset = CFrame.new(0, 0, -(hitRange * 0.5)),
 	}
+
+	if configuredProfile then
+		for key, value in pairs(configuredProfile) do
+			profile[key] = value
+		end
+	end
+
+	return profile
 end
 
 local function GetBackpack(entity: Entity): Backpack?

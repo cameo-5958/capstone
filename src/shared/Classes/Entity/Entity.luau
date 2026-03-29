@@ -23,6 +23,8 @@ Entity.__index = Entity
 local DEFAULT_STATS: EntityTypes.StatBlock = {
 	Health = 100,
 	MaxHealth = 100,
+	Mana = 100,
+	MaxMana = 100,
 	Defense = 0,
 	Strength = 10,
 	CritRate = 0.05,
@@ -58,6 +60,20 @@ local function ClampHealthToMax(self: Entity)
 	end
 end
 
+local function ClampManaToMax(self: Entity)
+	local stats = RuntimeStats[self]
+	if not stats then
+		return
+	end
+
+	local maxMana = stats:Get("MaxMana")
+	local currentMana = stats:GetBase("Mana")
+	local clampedMana = math.clamp(currentMana, 0, maxMana)
+	if currentMana ~= clampedMana then
+		stats:SetBase("Mana", clampedMana)
+	end
+end
+
 local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
 	local stats = RuntimeStats[self]
 	if stats then
@@ -69,6 +85,7 @@ local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
 	end)
 	RuntimeStats[self] = stats
 	ClampHealthToMax(self)
+	ClampManaToMax(self)
 	self.__Alive = stats:Get("Health") > 0
 
 	for statName, value in pairs(self.__Stats) do
@@ -108,6 +125,8 @@ function OnStatChanged(self: Entity, statName: string, newValue: number, _: numb
 
 	if statName == "MaxHealth" then
 		ClampHealthToMax(self)
+	elseif statName == "MaxMana" then
+		ClampManaToMax(self)
 	elseif statName == "Health" then
 		self.__Alive = newValue > 0
 	elseif statName == "Speed" then
@@ -156,6 +175,8 @@ function Entity.new(Model: Model, Name: string): Entity
 end
 
 function Entity.Inflate(ent: Entity): Entity
+	setmetatable(ent, Entity)
+
 	local uuid = ent.UUID
 	local char = workspace.EntitiesFolder:FindFirstChild(uuid)
 	if not char then
@@ -186,11 +207,15 @@ function Entity.SetStat(self: Entity, stat: Stat, to: number): number
 	local nextValue = to
 	if stat == "Health" then
 		nextValue = math.clamp(to, 0, self:GetStat("MaxHealth"))
+	elseif stat == "Mana" then
+		nextValue = math.clamp(to, 0, self:GetStat("MaxMana"))
 	end
 
 	local result = EnsureRuntimeStats(self):SetBase(stat, nextValue)
 	if stat == "MaxHealth" then
 		ClampHealthToMax(self)
+	elseif stat == "MaxMana" then
+		ClampManaToMax(self)
 	end
 
 	return result

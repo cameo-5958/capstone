@@ -29,6 +29,7 @@ export type ComboAttack = {
 	AnimationId: AnimationId,
 	PowerScale: number,
 	MovementLockedUntil: number,
+	IsHeavy: boolean?,
 }
 export type ComboDefinition = {
 	Id: string,
@@ -77,8 +78,20 @@ export type Weapon = {
 	SetToolInstance: (self: Weapon, tool: Tool?) -> Tool?,
 	CloneTool: (self: Weapon) -> Tool?,
 	GetDamage: (self: Weapon, owner: Entity?) -> number,
-	CreateAttackContext: (self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?) -> AttackContext,
-	ExecuteAttack: (self: Weapon, target: Entity, comboBaseDamage: number?, owner: Entity?) -> AttackContext,
+	CreateAttackContext: (
+		self: Weapon,
+		target: Entity,
+		comboBaseDamage: number?,
+		owner: Entity?,
+		attackFlags: { IsHeavy: boolean? }?
+	) -> AttackContext,
+	ExecuteAttack: (
+		self: Weapon,
+		target: Entity,
+		comboBaseDamage: number?,
+		owner: Entity?,
+		attackFlags: { IsHeavy: boolean? }?
+	) -> AttackContext,
 	GetAttackProfile: (self: Weapon) -> AttackProfile,
 	GetAttackContext: (self: Weapon) -> { [string]: any },
 	UseRightClick: (self: Weapon, owner: Entity?, context: { [string]: any }?) -> boolean,

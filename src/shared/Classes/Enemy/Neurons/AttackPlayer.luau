@@ -37,6 +37,18 @@ local function GetEnemyHitboxData(self: Neuron): (Vector3, CFrame)
 	return Vector3.new(3.25, 4.5, hitRange), CFrame.new(0, 0, -(hitRange * 0.5))
 end
 
+local function GetPredictorData(self: Neuron, flatTarget: Vector3, hitboxWidth: number): (Vector3, CFrame)
+	local myPos = self.Brain.RootPart.Position
+	local startPos = Vector3.new(myPos.X, myPos.Y - (self.Brain.RootPart.Size.Y * 0.5), myPos.Z)
+	local delta = flatTarget - Vector3.new(startPos.X, flatTarget.Y, startPos.Z)
+	local distance = math.max(delta.Magnitude + (self.__Attributes["PredictorReachPadding"] or 0), 0.5)
+	local direction = if delta.Magnitude > 0.001 then delta.Unit else self.Brain.RootPart.CFrame.LookVector
+	local midpoint = startPos + direction * (distance * 0.5)
+	local size = Vector3.new(math.max(hitboxWidth, 2.4), 0.35, distance)
+	local cframe = CFrame.lookAt(midpoint, midpoint + Vector3.new(direction.X, 0, direction.Z))
+	return size, cframe
+end
+
 local function CanEnter(self: Neuron): boolean
 	local target = self.Brain.Target
 	if not target then
@@ -68,12 +80,13 @@ local function OnEnter(self: Neuron): ()
 	local targetPos = target.PrimaryPart.Position
 	local attacker = self.Brain.MovementEngine.Entity
 	local targetEntity = PlayerServiceServer.GetEntityFromCharacter(target)
-	local totalAttackTime = self.__Attributes["Windup"] + self.__Attributes["AttackDuration"] + self.__Attributes["ApexPause"]
+	local attackStartAt = workspace:GetServerTimeNow() + self.__Attributes["ChargeDuration"]
+	local totalAttackTime = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"] + self.__Attributes["ApexPause"]
 
 	self.__Attributes["ExitAt"] = os.clock() + totalAttackTime
 	self.__Attributes["CooldownUntil"] = os.clock() + self.__Attributes["Cooldown"]
 	self.Brain.RetreatTarget = target
-	self.Brain.RetreatUntil = os.clock() + self.__Attributes["RetreatDuration"]
+	self.Brain.RetreatUntil = os.clock() + totalAttackTime + self.__Attributes["RetreatDuration"]
 
 	local myPos = self.Brain.RootPart.Position
 	local flatTarget = Vector3.new(targetPos.X, myPos.Y, targetPos.Z)
@@ -88,23 +101,43 @@ local function OnEnter(self: Neuron): ()
 	self.Brain.MovementEngine:DisableMovement()
 	self.Brain.MovementEngine:ScheduleDeferTask(totalAttackTime)
 	self.Brain.MovementEngine:LookAt(flatTarget)
-	if lungeDistance > 0 then
-		self.Brain.MovementEngine:ApplyLinearVelocity(attackDirection * lungeVelocity, self.__Attributes["AttackDuration"])
-	end
 
 	local hitboxSize, hitboxOffset = GetEnemyHitboxData(self)
+	local predictorSize, predictorCFrame = GetPredictorData(self, flatTarget, hitboxSize.X)
+	EnemyHandler:FireAllClients("AttackPredictor", {
+		UUID = attacker.UUID,
+		ChargeStartedAt = workspace:GetServerTimeNow(),
+		ChargeEndsAt = attackStartAt,
+		ClearAt = attackStartAt,
+		PredictorSize = predictorSize,
+		PredictorCFrame = predictorCFrame,
+	})
 	EnemyHandler:FireAllClients("AttackHitbox", {
 		UUID = attacker.UUID,
-		ActiveFrom = workspace:GetServerTimeNow() + self.__Attributes["Windup"],
-		ActiveUntil = workspace:GetServerTimeNow() + self.__Attributes["Windup"] + self.__Attributes["AttackDuration"],
+		ActiveFrom = attackStartAt,
+		ActiveUntil = attackStartAt + self.__Attributes["AttackDuration"],
 		ClearAt = workspace:GetServerTimeNow() + totalAttackTime,
 		HitboxSize = hitboxSize,
 		HitboxOffset = hitboxOffset,
 	})
 
+	task.delay(self.__Attributes["ChargeDuration"], function()
+		if not attacker:IsAlive() then
+			return
+		end
+
+		if self.Brain.MovementEngine.__Animations["Attack"] then
+			self.Brain.MovementEngine:Play("Attack")
+		end
+
+		if lungeDistance > 0 then
+			self.Brain.MovementEngine:ApplyLinearVelocity(attackDirection * lungeVelocity, self.__Attributes["AttackDuration"])
+		end
+	end)
+
 	if attacker and targetEntity then
 		local damage = attacker:GetStat("PhysicalAttack")
-		local hitDelay = self.__Attributes["Windup"] + self.__Attributes["AttackDuration"]
+		local hitDelay = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"]
 		task.delay(hitDelay, function()
 			if not attacker:IsAlive() or not targetEntity:IsAlive() then
 				return
@@ -114,9 +147,6 @@ local function OnEnter(self: Neuron): ()
 		end)
 	end
 
-	if self.Brain.MovementEngine.__Animations["Attack"] then
-		self.Brain.MovementEngine:Play("Attack")
-	end
 end
 
 local function OnExit(self: Neuron): ()
@@ -128,12 +158,7 @@ local function OnExit(self: Neuron): ()
 end
 
 local function OnUpdate(self: Neuron, _: number): ()
-	local target = self.Brain.Target
-	if not target or not target.PrimaryPart then
-		return
-	end
-
-	self.Brain.MovementEngine:LookAt(target.PrimaryPart.Position)
+	return
 end
 
 function AttackPlayer.new(): Neuron
@@ -144,10 +169,12 @@ function AttackPlayer.new(): Neuron
 	self.__Attributes["MaxLungeDistance"] = 2.5
 	self.__Attributes["AttackRangeBuffer"] = 0.5
 	self.__Attributes["Cooldown"] = 1.2
-	self.__Attributes["Windup"] = 0.35
+	self.__Attributes["ChargeDuration"] = 0.6
+	self.__Attributes["Windup"] = 0
 	self.__Attributes["RetreatDuration"] = 0.65
 	self.__Attributes["AttackDuration"] = 0.08
 	self.__Attributes["ApexPause"] = 0.12
+	self.__Attributes["PredictorReachPadding"] = 2
 	self.__Attributes["CooldownUntil"] = 0
 	self.__Attributes["ExitAt"] = 0
 

@@ -9,6 +9,8 @@ local AttackModifierApplierType = require(script.Parent.Parent.Attack.AttackModi
 export type Stat =
 	"Health"
 	| "MaxHealth"
+	| "Mana"
+	| "MaxMana"
 	| "Defense"
 	| "Strength"
 	| "CritRate"
