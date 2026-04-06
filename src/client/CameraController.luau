@@ -73,6 +73,7 @@ type CameraController = {
 	AdjustZoom: (self: CameraController, delta: number) -> number,
 	BuildOrbitCamera: (self: CameraController, config: OrbitModeConfig) -> (CFrame, number),
 	BuildFocusCamera: (self: CameraController, config: FocusModeConfig, deltaTime: number) -> (CFrame, number),
+	SnapAimingToNearestEnemy: (self: CameraController) -> (),
 	ApplyMouseLock: (self: CameraController) -> (),
 	new: () -> CameraController,
 }
@@ -129,6 +130,7 @@ local MODE_CONFIGS: {
 
 local CameraController = {}
 CameraController.__index = CameraController
+local SharedController: CameraController? = nil
 
 local function GetRootPart(character: Model?): BasePart?
 	if not character then
@@ -327,6 +329,39 @@ function CameraController.BuildFocusCamera(self: CameraController, config: Focus
 	return CFrame.lookAt(cameraPosition, midpoint), config.Fov
 end
 
+function CameraController.SnapAimingToNearestEnemy(self: CameraController)
+	local rootPart = self.RootPart
+	if not rootPart then
+		return
+	end
+
+	local target = EnemyServiceClient.GetClosest(rootPart.Position, 96)
+	if not target or not target.RootPart then
+		return
+	end
+
+	local playerFocus = GetCharacterPivot(self, (self.Modes.Aiming :: OrbitModeConfig).LookAtHeight)
+	if not playerFocus then
+		return
+	end
+
+	local enemyFocus = target.RootPart.Position + Vector3.new(0, 1.75, 0)
+	local delta = enemyFocus - playerFocus
+	local flatDelta = Vector3.new(delta.X, 0, delta.Z)
+	if flatDelta.Magnitude <= 0.001 then
+		return
+	end
+
+	self.Yaw = math.atan2(-flatDelta.Unit.X, -flatDelta.Unit.Z)
+	local distance = math.max(delta.Magnitude, 0.001)
+	self.Pitch = math.clamp(
+		math.asin(math.clamp(delta.Y / distance, -1, 1)),
+		(self.Modes.Aiming :: OrbitModeConfig).MinPitch,
+		(self.Modes.Aiming :: OrbitModeConfig).MaxPitch
+	)
+	self.LastCameraCFrame = nil
+end
+
 function CameraController.GetMode(self: CameraController): CameraModeName
 	return self.CurrentModeName
 end
@@ -462,6 +497,14 @@ function CameraController.new(): CameraController
 	self.InputChangedConnection = nil
 
 	return (self :: any) :: CameraController
+end
+
+function CameraController.SetSharedController(controller: CameraController)
+	SharedController = controller
+end
+
+function CameraController.GetSharedController(): CameraController?
+	return SharedController
 end
 
 return CameraController

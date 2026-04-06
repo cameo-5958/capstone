@@ -5,7 +5,7 @@ local ModifierType = require(ReplicatedStorage.Classes.Modifier.Modifier)
 local StatBlock = require(ReplicatedStorage.Classes.Modifier.StatBlock)
 
 export type AttackType = "Melee" | "Ranged" | "Magic"
-export type WeaponType = "Sword" | "Claymore" | "Bow" | "Scroll" | "Staff" | "Shield"
+export type WeaponType = "Sword" | "Claymore" | "Spear" | "Bow" | "Scroll" | "Staff" | "Shield"
 export type SpellType = "Amplification" | "Healing" | "Damage" | "Tanking"
 
 type Entity = EntityType.Entity
@@ -56,6 +56,7 @@ export type AttackContext = {
 	BaseDamage: number,
 	DidCrit: boolean,
 	IsHeavy: boolean,
+	DoesKnockback: boolean,
 
 	Modifiers: CombatModifierContext,
 	FinalStats: FinalStatContext,
@@ -97,6 +98,7 @@ function AttackContext.new(from: Entity, to: Entity): AttackContext
 	self.BaseDamage = 0
 	self.DidCrit = false
 	self.IsHeavy = false
+	self.DoesKnockback = false
 	self.Modifiers = {
 		From = CreateModifierBucket(from),
 		To = CreateModifierBucket(to),

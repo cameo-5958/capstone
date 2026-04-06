@@ -11,15 +11,20 @@ local EntitiesFolder = workspace:WaitForChild("EntitiesFolder")
 
 type ActiveAttack = {
 	AttackId: string,
-	ActiveFrom: number,
-	ActiveUntil: number,
+	HitWindows: {
+		{
+			Index: number,
+			ActiveFrom: number,
+			ActiveUntil: number,
+		},
+	},
 	ClearAt: number,
 	Profile: {
 		HitReset: number,
 		HitboxSize: Vector3,
 		HitboxOffset: CFrame,
 	},
-	LastReportedAt: { [string]: number },
+	LastReportedAt: { [number]: { [string]: number } },
 }
 
 local ActiveAttackState: ActiveAttack? = nil
@@ -80,6 +85,20 @@ local function ReportOverlapHits(attack: ActiveAttack)
 	end
 
 	local now = workspace:GetServerTimeNow()
+	local activeHitWindow = nil
+	for _, hitWindow in ipairs(attack.HitWindows) do
+		if now >= hitWindow.ActiveFrom and now <= hitWindow.ActiveUntil then
+			activeHitWindow = hitWindow
+			break
+		end
+	end
+
+	if not activeHitWindow then
+		return
+	end
+
+	attack.LastReportedAt[activeHitWindow.Index] = attack.LastReportedAt[activeHitWindow.Index] or {}
+	local lastReportedAt = attack.LastReportedAt[activeHitWindow.Index]
 	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(character.PrimaryPart, attack), attack.Profile.HitboxSize, overlapParams)
 	local seenThisFrame = {}
 
@@ -96,21 +115,30 @@ local function ReportOverlapHits(attack: ActiveAttack)
 
 		seenThisFrame[targetUUID] = true
 
-		local lastReported = attack.LastReportedAt[targetUUID]
+		local lastReported = lastReportedAt[targetUUID]
 		if lastReported and now - lastReported < attack.Profile.HitReset then
 			continue
 		end
 
-		attack.LastReportedAt[targetUUID] = now
+		lastReportedAt[targetUUID] = now
 		API:FireServer("ReportHit", {
 			AttackId = attack.AttackId,
 			TargetUUID = targetUUID,
+			HitWindowIndex = activeHitWindow.Index,
 		})
 	end
 end
 
 function AttackServiceClient.PrimaryAttack(): ()
 	API:FireServer("RequestPrimaryAttack", {})
+end
+
+function AttackServiceClient.BeginBowCharge(): ()
+	API:FireServer("BeginBowCharge", {})
+end
+
+function AttackServiceClient.ReleaseBowCharge(payload: { [string]: any }?): ()
+	API:FireServer("ReleaseBowCharge", payload or {})
 end
 
 API.OnClientEvent:Connect(function(action: string, payload: { [string]: any })
@@ -120,8 +148,7 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any })
 
 	ActiveAttackState = {
 		AttackId = payload.AttackId,
-		ActiveFrom = payload.ActiveFrom,
-		ActiveUntil = payload.ActiveUntil,
+		HitWindows = payload.HitWindows,
 		ClearAt = payload.ClearAt,
 		Profile = payload.Profile,
 		LastReportedAt = {},
@@ -141,7 +168,15 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	if now < attack.ActiveFrom or now > attack.ActiveUntil then
+	local isAnyHitWindowActive = false
+	for _, hitWindow in ipairs(attack.HitWindows) do
+		if now >= hitWindow.ActiveFrom and now <= hitWindow.ActiveUntil then
+			isAnyHitWindowActive = true
+			break
+		end
+	end
+
+	if not isAnyHitWindowActive then
 		HideHitboxVisualizer()
 		return
 	end

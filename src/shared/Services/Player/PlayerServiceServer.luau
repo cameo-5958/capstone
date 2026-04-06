@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local AttackModifierApplier = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
@@ -24,16 +25,38 @@ type Connection = {
 -- Store player Characters here
 local PlayerCharacters: { [string]: Entity } = {}
 local PlayerStatConnections: { [string]: { Connection } } = {}
+local PlayerRuntimeState: {
+	[string]: {
+		AttackUntil: number,
+		IsHeavyAttackActive: boolean,
+		HeavyAttackUntil: number,
+		DashUntil: number,
+		RunningEligibleUntil: number,
+		IsRightClickHeld: boolean,
+		IsRunning: boolean,
+		RunLockedUntilRelease: boolean,
+		StaminaRampStartAt: number,
+		StaminaRampEndAt: number,
+		RunningSpeedHandle: EntityTypes.ModifierHandle?,
+	},
+} = {}
 local STAT_NAMES = {
 	"Health",
 	"MaxHealth",
 	"Mana",
 	"MaxMana",
+	"Stamina",
+	"MaxStamina",
 	"Defense",
 	"Strength",
 	"CritRate",
 	"CritDamage",
 	"Intelligence",
+	"ManaRegen",
+	"StaminaRegen",
+	"ManaConsumptionRate",
+	"StaminaConsumptionRate",
+	"ArrowTravelDistance",
 	"PhysicalAttack",
 	"MagicalAttack",
 	"PhysicalDamage",
@@ -48,11 +71,33 @@ if not endpoint then
 	endpoint.Parent = script.Parent
 end
 local API = endpoint :: RemoteEvent
-local DASH_IFRAME_DURATION = 0.3
+local DASH_IFRAME_DURATION = 0.48
 local DASH_IFRAME_COOLDOWN = 0.3
+local DASH_STAMINA_COST = 20
+local LIGHT_ATTACK_STAMINA_COST = 15
+local HEAVY_ATTACK_STAMINA_COST = 25
+local BASE_MANA_REGEN = 5
+local BASE_STAMINA_REGEN = 30
+local ATTACKING_STAMINA_REGEN = 4
+local RUNNING_STAMINA_DRAIN = 10
+local STAMINA_RAMP_DURATION = 0.4
+local RUN_SPEED_MULTIPLIER = 2.5
+local RUNNING_SPEED_MODIFIER_ID = "system:running:speed"
 local PlayerNextDashIframeAt: { [string]: number } = {}
 local TEST_KILL_STRENGTH_MODIFIER_ID = "test:on_defeat_enemy:strength"
 local TEST_KILL_STRENGTH_DURATION = 15
+
+local function HideHumanoidOverhead(character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayDistance = 0
+	humanoid.NameDisplayDistance = 0
+	humanoid.DisplayName = ""
+end
 
 local function EnsureTestAttackModifier(entity: Entity)
 	entity:RemoveAttackModifierById(TEST_KILL_STRENGTH_MODIFIER_ID)
@@ -82,6 +127,136 @@ local function EnsureTestAttackModifier(entity: Entity)
 	}, nil, {
 		ActiveStacks = {},
 	}))
+end
+
+local function GetRuntimeState(playerName: string)
+	local state = PlayerRuntimeState[playerName]
+	if state then
+		return state
+	end
+
+	state = {
+		AttackUntil = 0,
+		IsHeavyAttackActive = false,
+		HeavyAttackUntil = 0,
+		DashUntil = 0,
+		RunningEligibleUntil = 0,
+		IsRightClickHeld = false,
+		IsRunning = false,
+		RunLockedUntilRelease = false,
+		StaminaRampStartAt = 0,
+		StaminaRampEndAt = 0,
+		RunningSpeedHandle = nil,
+	}
+	PlayerRuntimeState[playerName] = state
+	return state
+end
+
+local function StopRunning(entity: Entity, state): ()
+	if not state.IsRunning then
+		return
+	end
+
+	state.IsRunning = false
+	if state.RunningSpeedHandle then
+		entity:RemoveModifierHandle(state.RunningSpeedHandle)
+		state.RunningSpeedHandle = nil
+	end
+end
+
+local function BeginStaminaRamp(state, now: number): ()
+	state.StaminaRampStartAt = now
+	state.StaminaRampEndAt = now + STAMINA_RAMP_DURATION
+end
+
+local function TryConsumeStat(entity: Entity, statName: string, amount: number): boolean
+	if amount <= 0 then
+		return true
+	end
+
+	local current = entity:GetStat(statName)
+	if current < amount then
+		return false
+	end
+
+	entity:ModifyStat(statName, -amount)
+	return true
+end
+
+local function TryConsumeStamina(entity: Entity, amount: number): boolean
+	local scaledAmount = amount * entity:GetStat("StaminaConsumptionRate")
+	return TryConsumeStat(entity, "Stamina", scaledAmount)
+end
+
+local function UpdateDerivedResourceStats(entity: Entity)
+	local expectedMaxMana = 100 + entity:GetStat("Intelligence")
+	if entity:GetStat("MaxMana") ~= expectedMaxMana then
+		entity:SetStat("MaxMana", expectedMaxMana)
+	end
+end
+
+local function GetStaminaRegenPerSecond(entity: Entity, state, now: number): number
+	local regenScale = entity:GetStat("StaminaRegen")
+	local baseRegen = BASE_STAMINA_REGEN * regenScale
+
+	if state.IsRunning or now < state.DashUntil or now < state.HeavyAttackUntil then
+		return 0
+	end
+
+	if state.StaminaRampEndAt > now then
+		local duration = math.max(state.StaminaRampEndAt - state.StaminaRampStartAt, 0.001)
+		local alpha = math.clamp((now - state.StaminaRampStartAt) / duration, 0, 1)
+		return baseRegen * alpha
+	end
+
+	if now < state.AttackUntil then
+		return ATTACKING_STAMINA_REGEN * regenScale
+	end
+
+	return baseRegen
+end
+
+local function UpdateRunningState(entity: Entity, state, now: number)
+	local humanoid = entity.Character and entity.Character:FindFirstChildOfClass("Humanoid")
+	local currentStamina = entity:GetStat("Stamina")
+	local minimumRunStamina = RUNNING_STAMINA_DRAIN * entity:GetStat("StaminaConsumptionRate") * 0.15
+	local canRun = humanoid ~= nil
+		and humanoid.MoveDirection.Magnitude > 0.05
+		and state.IsRightClickHeld
+		and not state.RunLockedUntilRelease
+		and currentStamina > minimumRunStamina
+		and now >= state.DashUntil
+		and state.RunningEligibleUntil > 0
+		and now <= state.RunningEligibleUntil
+		and state.AttackUntil <= now
+		and state.HeavyAttackUntil <= now
+
+	if canRun then
+		if not state.IsRunning then
+			state.IsRunning = true
+			state.RunningSpeedHandle = entity:AddModifier("Speed", Entity.Modifier.new(
+				RUNNING_SPEED_MODIFIER_ID,
+				"Multiplicative",
+				RUN_SPEED_MULTIPLIER,
+				"system:running"
+			))
+		end
+	else
+		local wasRunning = state.IsRunning
+		StopRunning(entity, state)
+		if wasRunning then
+			BeginStaminaRamp(state, now)
+		end
+	end
+end
+
+local function GetAttackStaminaCost(entity: Entity, isHeavy: boolean, noStamina: boolean): number
+	if noStamina then
+		return 0
+	end
+
+	local baseCost = if isHeavy then HEAVY_ATTACK_STAMINA_COST else LIGHT_ATTACK_STAMINA_COST
+	return baseCost * entity:GetStat("StaminaConsumptionRate")
 end
 
 local function DisconnectStatConnections(playerName: string)
@@ -133,6 +308,8 @@ local function BindCharacter(player: Player, character: Model): Entity
 		animateScript:Destroy()
 	end
 
+	HideHumanoidOverhead(character)
+
 	CollisionServiceServer.AssignModel(character, "Player")
 
 	local entity = PlayerCharacters[player.Name]
@@ -158,6 +335,19 @@ local function BindCharacter(player: Player, character: Model): Entity
 		end
 		PlayerCharacters[player.Name] = entity
 	end
+
+	local runtimeState = GetRuntimeState(player.Name)
+	StopRunning(entity, runtimeState)
+	runtimeState.AttackUntil = 0
+	runtimeState.IsHeavyAttackActive = false
+	runtimeState.HeavyAttackUntil = 0
+	runtimeState.DashUntil = 0
+	runtimeState.RunningEligibleUntil = 0
+	runtimeState.IsRightClickHeld = false
+	runtimeState.RunLockedUntilRelease = false
+	runtimeState.StaminaRampStartAt = 0
+	runtimeState.StaminaRampEndAt = 0
+	UpdateDerivedResourceStats(entity)
 
 	EnsureTestAttackModifier(entity)
 	BindStatReplication(player, entity)
@@ -185,7 +375,13 @@ end
 -- Player removing method
 local function PlayerRemoving(player: Player)
 	-- Remove player from the table
+	local runtimeState = PlayerRuntimeState[player.Name]
+	local entity = PlayerCharacters[player.Name]
+	if runtimeState and entity then
+		StopRunning(entity, runtimeState)
+	end
 	PlayerCharacters[player.Name] = nil
+	PlayerRuntimeState[player.Name] = nil
 	DisconnectStatConnections(player.Name)
 	PlayerNextDashIframeAt[player.Name] = nil
 	WeaponServiceServer.UnregisterEntity(player)
@@ -201,6 +397,40 @@ for _, player in pairs(Players:GetPlayers()) do
 	PlayerAdded(player)
 end
 
+RunService.Heartbeat:Connect(function(dt: number)
+	local now = workspace:GetServerTimeNow()
+	for playerName, entity in pairs(PlayerCharacters) do
+		local state = GetRuntimeState(playerName)
+		UpdateDerivedResourceStats(entity)
+		UpdateRunningState(entity, state, now)
+
+		if state.IsRunning then
+			local drained = RUNNING_STAMINA_DRAIN * entity:GetStat("StaminaConsumptionRate") * dt
+			if drained > 0 then
+				local currentStamina = entity:GetStat("Stamina")
+				if currentStamina <= drained then
+					entity:SetStat("Stamina", 0)
+					StopRunning(entity, state)
+					state.RunLockedUntilRelease = true
+					BeginStaminaRamp(state, now)
+				else
+					entity:ModifyStat("Stamina", -drained)
+				end
+			end
+		end
+
+		local manaRegenPerSecond = BASE_MANA_REGEN * entity:GetStat("ManaRegen")
+		if manaRegenPerSecond > 0 then
+			entity:ModifyStat("Mana", manaRegenPerSecond * dt)
+		end
+
+		local staminaRegenPerSecond = GetStaminaRegenPerSecond(entity, state, now)
+		if staminaRegenPerSecond > 0 then
+			entity:ModifyStat("Stamina", staminaRegenPerSecond * dt)
+		end
+	end
+end)
+
 API.OnServerEvent:Connect(function(player: Player, action: string)
 	local entity = PlayerCharacters[player.Name]
 	if action == "RequestSnapshot" then
@@ -212,6 +442,9 @@ API.OnServerEvent:Connect(function(player: Player, action: string)
 			return
 		end
 
+		local state = GetRuntimeState(player.Name)
+		StopRunning(entity, state)
+
 		local now = workspace:GetServerTimeNow()
 		if now < (PlayerNextDashIframeAt[player.Name] or 0) then
 			return
@@ -222,8 +455,35 @@ API.OnServerEvent:Connect(function(player: Player, action: string)
 			return
 		end
 
+		if not TryConsumeStamina(entity, DASH_STAMINA_COST) then
+			return
+		end
+
 		PlayerNextDashIframeAt[player.Name] = now + DASH_IFRAME_COOLDOWN
+		state.DashUntil = now + DASH_IFRAME_DURATION
+		state.RunningEligibleUntil = math.huge
+		BeginStaminaRamp(state, state.DashUntil)
 		entity:SetInvincibleFor(DASH_IFRAME_DURATION)
+	elseif action == "SetRightClickHeld" then
+		if not entity then
+			return
+		end
+
+		local state = GetRuntimeState(player.Name)
+		state.IsRightClickHeld = true
+	elseif action == "SetRightClickReleased" then
+		if not entity then
+			return
+		end
+
+		local state = GetRuntimeState(player.Name)
+		state.IsRightClickHeld = false
+		state.RunLockedUntilRelease = false
+		local wasRunning = state.IsRunning
+		StopRunning(entity, state)
+		if wasRunning then
+			BeginStaminaRamp(state, workspace:GetServerTimeNow())
+		end
 	end
 end)
 
@@ -245,6 +505,47 @@ function PlayerServiceServer.GetEntityFromCharacter(character: Model): Entity?
 	end
 
 	return nil
+end
+
+function PlayerServiceServer.CanStartPrimaryAttack(player: Player, isHeavy: boolean, noStamina: boolean): boolean
+	local entity = PlayerCharacters[player.Name]
+	if not entity or not entity:IsAlive() then
+		return false
+	end
+
+	if noStamina then
+		return true
+	end
+
+	return entity:GetStat("Stamina") >= GetAttackStaminaCost(entity, isHeavy, noStamina)
+end
+
+function PlayerServiceServer.RegisterPrimaryAttack(player: Player, clearAt: number, isHeavy: boolean, noStamina: boolean)
+	local entity = PlayerCharacters[player.Name]
+	if not entity then
+		return false
+	end
+
+	local state = GetRuntimeState(player.Name)
+	StopRunning(entity, state)
+	state.AttackUntil = clearAt
+	state.RunningEligibleUntil = 0
+
+	if not noStamina then
+		if not TryConsumeStat(entity, "Stamina", GetAttackStaminaCost(entity, isHeavy, noStamina)) then
+			return false
+		end
+	end
+
+	if isHeavy then
+		state.IsHeavyAttackActive = true
+		state.HeavyAttackUntil = clearAt
+		BeginStaminaRamp(state, clearAt)
+	else
+		state.IsHeavyAttackActive = false
+	end
+
+	return true
 end
 
 return table.freeze(PlayerServiceServer)

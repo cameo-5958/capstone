@@ -5,7 +5,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AttackContextModule = require(ReplicatedStorage.Classes.Attack.AttackContext)
 local EntityType = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local EnemyHandler = ReplicatedStorage.Services.Enemy:WaitForChild("EnemyHandler") :: RemoteEvent
-local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 
 type Entity = EntityType.Entity
 type AttackContext = AttackContextModule.AttackContext
@@ -15,6 +14,10 @@ export type Damage = {
 }
 
 local Damage = {} :: Damage
+
+local function GetEnemyServiceServer()
+	return require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
+end
 
 local function SumModifiers(modifiers): number
 	local total = 0
@@ -160,8 +163,8 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 		MaxHealth = context.To:GetStat("MaxHealth"),
 	})
 
-	if context.IsHeavy and context.To:IsAlive() then
-		EnemyServiceServer.RegisterHeavyHit(context.To, context.From)
+	if context.DoesKnockback and context.To:IsAlive() then
+		GetEnemyServiceServer().RegisterHeavyHit(context.To, context.From)
 	end
 
 	context.From:TriggerOnHitSuccess(context)

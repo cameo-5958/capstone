@@ -77,6 +77,9 @@ local function OnEnter(self: Neuron): ()
 		return
 	end
 
+	self.__Attributes["AttackToken"] += 1
+	local attackToken = self.__Attributes["AttackToken"]
+
 	local targetPos = target.PrimaryPart.Position
 	local attacker = self.Brain.MovementEngine.Entity
 	local targetEntity = PlayerServiceServer.GetEntityFromCharacter(target)
@@ -122,6 +125,10 @@ local function OnEnter(self: Neuron): ()
 	})
 
 	task.delay(self.__Attributes["ChargeDuration"], function()
+		if self.__Attributes["AttackToken"] ~= attackToken then
+			return
+		end
+
 		if not attacker:IsAlive() then
 			return
 		end
@@ -139,6 +146,10 @@ local function OnEnter(self: Neuron): ()
 		local damage = attacker:GetStat("PhysicalAttack")
 		local hitDelay = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"]
 		task.delay(hitDelay, function()
+			if self.__Attributes["AttackToken"] ~= attackToken then
+				return
+			end
+
 			if not attacker:IsAlive() or not targetEntity:IsAlive() then
 				return
 			end
@@ -150,6 +161,8 @@ local function OnEnter(self: Neuron): ()
 end
 
 local function OnExit(self: Neuron): ()
+	self.__Attributes["AttackToken"] += 1
+	self.Brain.MovementEngine:CancelLinearVelocity()
 	self.Brain.MovementEngine:ClearLookAt()
 
 	if self.Brain.MovementEngine.__Animations["Attack"] then
@@ -177,6 +190,7 @@ function AttackPlayer.new(): Neuron
 	self.__Attributes["PredictorReachPadding"] = 2
 	self.__Attributes["CooldownUntil"] = 0
 	self.__Attributes["ExitAt"] = 0
+	self.__Attributes["AttackToken"] = 0
 
 	return self :: any
 end

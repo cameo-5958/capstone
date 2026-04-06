@@ -55,4 +55,12 @@ function PlayerServiceClient.RequestDashIFrames(): ()
 	API:FireServer("RequestDashIFrames")
 end
 
+function PlayerServiceClient.SetRightClickHeld(): ()
+	API:FireServer("SetRightClickHeld")
+end
+
+function PlayerServiceClient.SetRightClickReleased(): ()
+	API:FireServer("SetRightClickReleased")
+end
+
 return table.freeze(PlayerServiceClient)

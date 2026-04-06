@@ -27,26 +27,40 @@ local function OnEnter(self: Neuron): ()
 	self.Brain.StumbleSourcePosition = nil
 	self.__Attributes["ExitAt"] = os.clock() + self.__Attributes["Duration"]
 
+	movementEngine:Stop("Attack")
+	movementEngine:Stop("StrafeLeft")
+	movementEngine:Stop("StrafeRight")
+
+	if movementEngine.__Animations["Stumble"] then
+		movementEngine:Play("Stumble")
+	end
+
 	movementEngine.Humanoid:MoveTo(rootPosition)
 	movementEngine:CancelLinearVelocity()
 	movementEngine:DisableMovement()
 	movementEngine:ClearLookAt()
 	movementEngine:ScheduleDeferTask(self.__Attributes["Duration"])
 
-	local flatDirection = if sourcePosition
-		then Vector3.new(rootPosition.X - sourcePosition.X, 0, rootPosition.Z - sourcePosition.Z)
-		else -Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z)
-	local stumbleDirection = if flatDirection.Magnitude > 0.001
-		then flatDirection.Unit
-		else -Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z).Unit
+	local fallbackDirection = -Vector3.new(rootPart.CFrame.LookVector.X, 0, rootPart.CFrame.LookVector.Z).Unit
+	local flatDirection = fallbackDirection
+	if sourcePosition then
+		local sourceDelta = Vector3.new(rootPosition.X - sourcePosition.X, 0, rootPosition.Z - sourcePosition.Z)
+		if sourceDelta.Magnitude > 0.001 then
+			flatDirection = sourceDelta.Unit
+		end
+	end
 
 	movementEngine:ApplyLinearVelocity(
-		stumbleDirection * self.__Attributes["BackwardSpeed"],
+		flatDirection * self.__Attributes["BackwardSpeed"],
 		self.__Attributes["Duration"]
 	)
 end
 
 local function OnExit(self: Neuron): ()
+	if self.Brain.MovementEngine.__Animations["Stumble"] then
+		self.Brain.MovementEngine:Stop("Stumble")
+	end
+
 	return
 end
 
@@ -58,7 +72,7 @@ function Stumble.new(): Neuron
 	local self = SuperNeuron.new(CanEnter, CanExit, OnEnter, OnExit, OnUpdate, "Interrupting", "Stumble")
 	setmetatable(self, Stumble)
 
-	self.__Attributes["Duration"] = 0.22
+	self.__Attributes["Duration"] = 0.32
 	self.__Attributes["BackwardSpeed"] = 12
 	self.__Attributes["ExitAt"] = 0
 

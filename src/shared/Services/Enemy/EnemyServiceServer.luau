@@ -54,6 +54,18 @@ local __Deaths: {
 
 local Enemies = {}
 
+local function HideHumanoidOverhead(character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayDistance = 0
+	humanoid.NameDisplayDistance = 0
+	humanoid.DisplayName = ""
+end
+
 local function RemoveEnemyForClients(uuid: string)
 	API:FireAllClients({
 		Remove = {
@@ -174,6 +186,7 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	end
 
 	model.Parent = EnemyFolder
+	HideHumanoidOverhead(model)
 	CollisionServiceServer.AssignModel(model, "Enemy")
 
 	-- Create the entity here

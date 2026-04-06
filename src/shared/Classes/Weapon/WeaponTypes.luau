@@ -25,11 +25,18 @@ export type AttackProfile = {
 	HitboxSize: Vector3,
 	HitboxOffset: CFrame,
 }
+export type HitWindow = {
+	Delay: number,
+	Duration: number?,
+}
 export type ComboAttack = {
 	AnimationId: AnimationId,
 	PowerScale: number,
 	MovementLockedUntil: number,
 	IsHeavy: boolean?,
+	DoesKnockback: boolean?,
+	NoStamina: boolean?,
+	HitWindows: { HitWindow }?,
 }
 export type ComboDefinition = {
 	Id: string,
@@ -83,14 +90,14 @@ export type Weapon = {
 		target: Entity,
 		comboBaseDamage: number?,
 		owner: Entity?,
-		attackFlags: { IsHeavy: boolean? }?
+		attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
 	) -> AttackContext,
 	ExecuteAttack: (
 		self: Weapon,
 		target: Entity,
 		comboBaseDamage: number?,
 		owner: Entity?,
-		attackFlags: { IsHeavy: boolean? }?
+		attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
 	) -> AttackContext,
 	GetAttackProfile: (self: Weapon) -> AttackProfile,
 	GetAttackContext: (self: Weapon) -> { [string]: any },

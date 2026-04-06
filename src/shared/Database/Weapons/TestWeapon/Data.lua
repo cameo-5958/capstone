@@ -1,7 +1,7 @@
 return {
-	["Name"] = "Test Sword",
-	["Type"] = "Sword",
-	["Family"] = "Sword",
+	["Name"] = "Test Claymore",
+	["Type"] = "Claymore",
+	["Family"] = "Claymore",
 	["Rarity"] = "COMMON",
 
 	["BaseDamage"] = 10,
@@ -11,18 +11,18 @@ return {
 		["CritDamage"] = 0.2,
 	},
 	["AttackProfile"] = {
-		["HitboxSize"] = Vector3.new(2.6, 4.2, 3.8),
-		["HitboxOffset"] = CFrame.new(0, 0, -2.05),
+		["Cooldown"] = 0.8,
+		["Recovery"] = 0.3,
+		["HitboxSize"] = Vector3.new(9.2, 4.6, 6.8),
+		["HitboxOffset"] = CFrame.new(0, 0, -3.45),
 	},
-	["Weight"] = 4,
+	["Weight"] = 7,
 	["AttackContext"] = {
-		["MaxDashRange"] = 10,
-		["SwingRange"] = 6,
+		["MaxDashRange"] = 8,
+		["SwingRange"] = 8.53,
 	},
 	["WeaponPassive"] = nil,
 
-	-- No need for animations, as those
-	-- are linked to the weapon family/type.
 	["WeaponAbility"] = nil,
 	["RightClickAbility"] = nil,
 

@@ -2,9 +2,11 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
+local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local MovementShared = require(script.Parent.MovementShared)
 local ClassCombos = require(ReplicatedStorage.Database.Weapons.Default.Combos)
@@ -17,6 +19,10 @@ type SharedMovementEngine = MovementShared.SharedMovementEngine
 local MovementEngine = {}
 MovementEngine.__index = MovementEngine
 setmetatable(MovementEngine, { __index = MovementShared })
+
+local LIGHT_ATTACK_STAMINA_COST = 15
+local HEAVY_ATTACK_STAMINA_COST = 25
+local DASH_STAMINA_COST = 20
 
 export type MovementEngine = SharedMovementEngine & {
 	Character: Model,
@@ -39,6 +45,8 @@ export type MovementEngine = SharedMovementEngine & {
 	Stop: (MovementEngine, string) -> (),
 	UpdateFacingFromCamera: (MovementEngine) -> (),
 	UpdateMovementAnimation: (MovementEngine) -> (),
+	Attack: (MovementEngine) -> boolean,
+	Dash: (MovementEngine) -> boolean,
 	new: (Entity) -> (),
 	lnew: (Player) -> (),
 	init: (MovementEngine) -> (),
@@ -61,7 +69,7 @@ function MovementEngine.init(self: MovementEngine): ()
 end
 
 local function IsComboWeapon(weaponClass: string?): boolean
-	return weaponClass == "Sword" or weaponClass == "Claymore"
+	return weaponClass == "Sword" or weaponClass == "Claymore" or weaponClass == "Spear"
 end
 
 local function GetDefaultCombo(comboSet): any
@@ -116,9 +124,83 @@ local function GetMovementLockDuration(
 	return attack.MovementLockedUntil or fallbackDuration
 end
 
+local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [string]: any }?): any
+	if not equippedWeapon or not IsComboWeapon(equippedWeapon.Class) then
+		return nil
+	end
+
+	local comboSet = ClassCombos[equippedWeapon.Class]
+	if not comboSet then
+		return nil
+	end
+
+	local combo = GetDefaultCombo(comboSet)
+	if not combo or #combo.Attacks == 0 then
+		return nil
+	end
+
+	local now = workspace:GetServerTimeNow()
+	local state = self.__ComboState
+	local attackIndex = state.AttackIndex
+	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
+	if state.WeaponId ~= equippedWeapon.WeaponId or state.ComboId ~= combo.Id or expired then
+		attackIndex = 1
+	end
+
+	return combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
+end
+
+local function GetScaledStat(statName: string, fallback: number): number
+	local statValue = PlayerServiceClient.GetStat(statName)
+	if typeof(statValue) ~= "number" then
+		return fallback
+	end
+
+	return statValue
+end
+
 local function IsBowEquipped(): boolean
 	local character = Players.LocalPlayer.Character
 	return character ~= nil and character:GetAttribute("ForceFaceCamera") == true
+end
+
+local function GetCameraRelativeDashDirection(rootPart: BasePart): (Vector3, boolean)
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return -rootPart.CFrame.LookVector.Unit, false
+	end
+
+	local inputX = 0
+	local inputZ = 0
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+		inputX -= 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+		inputX += 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+		inputZ += 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+		inputZ -= 1
+	end
+
+	if inputX == 0 and inputZ == 0 then
+		return -rootPart.CFrame.LookVector.Unit, false
+	end
+
+	local cameraForward = Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z)
+	local cameraRight = Vector3.new(camera.CFrame.RightVector.X, 0, camera.CFrame.RightVector.Z)
+	if cameraForward.Magnitude <= 0.001 or cameraRight.Magnitude <= 0.001 then
+		return -rootPart.CFrame.LookVector.Unit, false
+	end
+
+	local dashDirection = (cameraForward.Unit * inputZ) + (cameraRight.Unit * inputX)
+	if dashDirection.Magnitude <= 0.001 then
+		return -rootPart.CFrame.LookVector.Unit, false
+	end
+
+	return dashDirection.Unit, true
 end
 
 local function GetProjectedTargetLocation(target: Entity, leadTime: number): Vector3
@@ -236,7 +318,13 @@ function MovementEngine.UpdateFacingFromCamera(self: MovementEngine)
 	end
 
 	self.Humanoid.AutoRotate = false
-	self.RootPart.CFrame = CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + flatLook.Unit)
+	local desiredLook = flatLook.Unit
+	local currentLook = Vector3.new(self.RootPart.CFrame.LookVector.X, 0, self.RootPart.CFrame.LookVector.Z)
+	if currentLook.Magnitude > 0.001 and currentLook.Unit:Dot(desiredLook) > 0.999 then
+		return
+	end
+
+	self.RootPart:PivotTo(CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + desiredLook))
 end
 
 function MovementEngine.DisableAllMovement(self: MovementEngine)
@@ -250,14 +338,14 @@ function MovementEngine.EnableAllMovement(self: MovementEngine)
 	self:DeferTask()
 end
 
-function MovementEngine.Attack(self: MovementEngine): ()
+function MovementEngine.Attack(self: MovementEngine): boolean
 	if not self:IsMovementEnabled() then
-		return
+		return false
 	end
 
 	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
 	if not equippedWeapon then
-		return
+		return false
 	end
 
 	local weaponClass = equippedWeapon.Class or "Sword"
@@ -294,7 +382,17 @@ function MovementEngine.Attack(self: MovementEngine): ()
 	local attackSwingRange = attackContext.SwingRange
 	local maxLungeDistance = attackContext.MaxDashRange
 	local lungeDuration = attackContext.LungeDuration
+	local nextAttack = PeekNextComboAttack(self, equippedWeapon)
 	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.LockDuration)
+	local isHeavyAttack = nextAttack ~= nil and nextAttack.IsHeavy == true
+	local isNoStaminaAttack = nextAttack ~= nil and nextAttack.NoStamina == true
+	local stamina = PlayerServiceClient.GetStat("Stamina") or 0
+	local staminaConsumptionRate = GetScaledStat("StaminaConsumptionRate", 1)
+	local attackStaminaCost = (isHeavyAttack and HEAVY_ATTACK_STAMINA_COST or LIGHT_ATTACK_STAMINA_COST) * staminaConsumptionRate
+
+	if not isNoStaminaAttack and stamina < attackStaminaCost then
+		return false
+	end
 
 	local target = self:GetTarget(self.RootPart.Position, attackSightRange)
 	local targetLocation = Vector3.zero
@@ -318,28 +416,38 @@ function MovementEngine.Attack(self: MovementEngine): ()
 	if lungeDistance > 0 then
 		self:ApplyLinearVelocity(unit * lungeVelocity, lungeDuration)
 	end
+
+	return true
 end
 
-function MovementEngine.Dash(self: MovementEngine): ()
+function MovementEngine.Dash(self: MovementEngine): boolean
 	if not self:IsMovementEnabled() or not self:IsGrounded() then
-		return
+		return false
 	end
 
-	local dashDuration = 0.36
-	local dashSpeed = 30
-	local moveDirection = self.Humanoid.MoveDirection
-	local dashDirection = if moveDirection.Magnitude > 0.05
-		then Vector3.new(moveDirection.X, 0, moveDirection.Z).Unit
-		else -self.RootPart.CFrame.LookVector.Unit
+	local stamina = PlayerServiceClient.GetStat("Stamina") or 0
+	local staminaConsumptionRate = GetScaledStat("StaminaConsumptionRate", 1)
+	if stamina < (DASH_STAMINA_COST * staminaConsumptionRate) then
+		return false
+	end
+
+	local dashDuration = 0.48
+	local dashSpeed = 16
+	local dashDirection, usedDirectionalInput = GetCameraRelativeDashDirection(self.RootPart)
+	local facingDirection = Vector3.new(self.RootPart.CFrame.LookVector.X, 0, self.RootPart.CFrame.LookVector.Z).Unit
+	local isBackstep = (not usedDirectionalInput) or dashDirection:Dot(facingDirection) < -0.8
+	local dashAnimation = if isBackstep then "Backstep" else "Dash"
 	self:Stop("Attack")
-	self:Play("Dash")
+	self:Play(dashAnimation)
 	self:DisableMovement()
 	self:SetInvincibilityStatus(true)
 	self:ScheduleDeferTask(dashDuration)
 	self:ApplyLinearVelocity(dashDirection * dashSpeed, dashDuration)
 	task.delay(dashDuration, function()
-		self:Stop("Dash")
+		self:Stop(dashAnimation)
 	end)
+
+	return true
 end
 
 function MovementEngine.GetAnimation(self: MovementEngine, animation: string): string

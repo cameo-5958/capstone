@@ -1,21 +1,19 @@
 return {
-	["Name"] = "Sword3",
+	["Name"] = "Skeleton's Saber",
 	["Type"] = "Sword",
-	["Family"] = "Sword",
-	["Rarity"] = "COMMON",
+	["Family"] = "Skeletal",
+	["Rarity"] = "REFINED",
 
-	["BaseDamage"] = 10,
+	["BaseDamage"] = 52,
 	["__Stats"] = {
-		["Strength"] = 1,
-		["PhysicalAttack"] = 6,
-		["CritRate"] = 0.08,
-		["CritDamage"] = 40,
+		["Strength"] = 30,
+		["CritDamage"] = 120,
 	},
 	["AttackProfile"] = {
 		["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
 		["HitboxOffset"] = CFrame.new(0, 0, -2.5),
 	},
-	["Weight"] = 4,
+	["Weight"] = 8,
 	["AttackContext"] = {
 		["MaxDashRange"] = 10,
 		["SwingRange"] = 7.2,
@@ -25,5 +23,5 @@ return {
 	["WeaponAbility"] = nil,
 	["RightClickAbility"] = nil,
 
-	["Desc"] = "SWORD3_DESC",
+	["Desc"] = "The Saber used by Skeletons to stab you. Who knew such frail creatures could handle such strong weapons?",
 }

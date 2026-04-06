@@ -25,16 +25,23 @@ local DEFAULT_STATS: EntityTypes.StatBlock = {
 	MaxHealth = 100,
 	Mana = 100,
 	MaxMana = 100,
+	Stamina = 100,
+	MaxStamina = 100,
 	Defense = 0,
 	Strength = 10,
 	CritRate = 0.05,
 	CritDamage = 1.5,
 	Intelligence = 0,
+	ManaRegen = 1,
+	StaminaRegen = 1,
+	ManaConsumptionRate = 1,
+	StaminaConsumptionRate = 1,
+	ArrowTravelDistance = 1,
 	PhysicalAttack = 10,
 	MagicalAttack = 10,
 	PhysicalDamage = 1,
 	MagicDamage = 1,
-	Speed = 8,
+	Speed = 6,
 }
 
 local FINALIZE_MAP = {
@@ -74,6 +81,20 @@ local function ClampManaToMax(self: Entity)
 	end
 end
 
+local function ClampStaminaToMax(self: Entity)
+	local stats = RuntimeStats[self]
+	if not stats then
+		return
+	end
+
+	local maxStamina = stats:Get("MaxStamina")
+	local currentStamina = stats:GetBase("Stamina")
+	local clampedStamina = math.clamp(currentStamina, 0, maxStamina)
+	if currentStamina ~= clampedStamina then
+		stats:SetBase("Stamina", clampedStamina)
+	end
+end
+
 local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
 	local stats = RuntimeStats[self]
 	if stats then
@@ -86,6 +107,7 @@ local function EnsureRuntimeStats(self: Entity): RuntimeStatBlock
 	RuntimeStats[self] = stats
 	ClampHealthToMax(self)
 	ClampManaToMax(self)
+	ClampStaminaToMax(self)
 	self.__Alive = stats:Get("Health") > 0
 
 	for statName, value in pairs(self.__Stats) do
@@ -127,8 +149,12 @@ function OnStatChanged(self: Entity, statName: string, newValue: number, _: numb
 		ClampHealthToMax(self)
 	elseif statName == "MaxMana" then
 		ClampManaToMax(self)
+	elseif statName == "MaxStamina" then
+		ClampStaminaToMax(self)
 	elseif statName == "Health" then
 		self.__Alive = newValue > 0
+	elseif statName == "Intelligence" then
+		EnsureRuntimeStats(self):SetBase("MaxMana", 100 + newValue)
 	elseif statName == "Speed" then
 		SyncSpeedToCharacter(self)
 	end
@@ -209,6 +235,8 @@ function Entity.SetStat(self: Entity, stat: Stat, to: number): number
 		nextValue = math.clamp(to, 0, self:GetStat("MaxHealth"))
 	elseif stat == "Mana" then
 		nextValue = math.clamp(to, 0, self:GetStat("MaxMana"))
+	elseif stat == "Stamina" then
+		nextValue = math.clamp(to, 0, self:GetStat("MaxStamina"))
 	end
 
 	local result = EnsureRuntimeStats(self):SetBase(stat, nextValue)
@@ -216,6 +244,8 @@ function Entity.SetStat(self: Entity, stat: Stat, to: number): number
 		ClampHealthToMax(self)
 	elseif stat == "MaxMana" then
 		ClampManaToMax(self)
+	elseif stat == "MaxStamina" then
+		ClampStaminaToMax(self)
 	end
 
 	return result

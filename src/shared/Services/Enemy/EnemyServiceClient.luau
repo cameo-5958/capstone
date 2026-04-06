@@ -167,7 +167,7 @@ local function EnsureEnemyTag(uuid: string, ent: Entity): BillboardGui?
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "EnemyTag"
-	billboard.Size = UDim2.fromOffset(112, 18)
+	billboard.Size = UDim2.fromOffset(128, 18)
 	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 120
@@ -184,7 +184,7 @@ local function EnsureEnemyTag(uuid: string, ent: Entity): BillboardGui?
 	panel.Name = "Panel"
 	panel.AnchorPoint = Vector2.new(0.5, 0)
 	panel.Position = UDim2.fromScale(0.5, 0)
-	panel.Size = UDim2.fromOffset(108, 18)
+	panel.Size = UDim2.fromOffset(124, 18)
 	panel.BackgroundTransparency = 1
 	panel.BorderSizePixel = 0
 	panel.Parent = container
@@ -197,15 +197,16 @@ local function EnsureEnemyTag(uuid: string, ent: Entity): BillboardGui?
 	titleSeparator.Position = UDim2.fromOffset(1, 7)
 	titleSeparator.Parent = panel
 
-	local healthText = CreateTextLabel("HealthText", UDim2.fromOffset(36, 7), UDim2.fromOffset(1, 10), 7)
+	local healthText = CreateTextLabel("HealthText", UDim2.fromOffset(1, 1), UDim2.fromOffset(0, 0), 1)
+	healthText.Visible = false
 	healthText.Parent = panel
 
 	local barBackground = Instance.new("Frame")
 	barBackground.Name = "HealthBarBackground"
 	barBackground.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	barBackground.BorderSizePixel = 0
-	barBackground.Position = UDim2.fromOffset(39, 10)
-	barBackground.Size = UDim2.fromOffset(50, 4)
+	barBackground.Position = UDim2.fromOffset(2, 10)
+	barBackground.Size = UDim2.fromOffset(120, 4)
 	barBackground.Parent = panel
 
 	local barFill = Instance.new("Frame")
@@ -292,7 +293,6 @@ local function UpdateEnemyTag(uuid: string, ent: Entity)
 	local healthRatio = if maxHealth > 0 then math.clamp(currentHealth / maxHealth, 0, 1) else 0
 
 	title.Text = ("[%s] %s"):format(FormatStatValue(ent.Level), ent.Name)
-	healthText.Text = ("%s/%s"):format(FormatStatValue(currentHealth), FormatStatValue(maxHealth))
 	healthBarFill.Visible = healthRatio > 0
 	if healthRatio > 0 then
 		healthBarFill.Size = UDim2.new(healthRatio, -2, 1, -2)

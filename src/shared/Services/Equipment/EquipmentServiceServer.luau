@@ -149,10 +149,10 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 	entity:SetEquippedIndex(nil)
 
 	local defaultWeapons = {
-		"Sword1",
+		"Bone.Sword.Bone_Sword_1",
+		"Bow1",
 		"Sword2",
 		"Sword3",
-		"TestWeapon",
 	}
 
 	for slot, weaponPath in ipairs(defaultWeapons) do
@@ -163,6 +163,3 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 end
 
 return table.freeze(EquipmentServiceServer)
-
-
-

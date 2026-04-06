@@ -116,7 +116,7 @@ function Weapon.CreateAttackContext(
 	target: Entity,
 	comboBaseDamage: number?,
 	owner: Entity?,
-	attackFlags: { IsHeavy: boolean? }?
+	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
 ): AttackContext
 	local wielder = owner or self.Owner
 	assert(wielder ~= nil, "Weapon.CreateAttackContext requires an owner")
@@ -129,6 +129,7 @@ function Weapon.CreateAttackContext(
 	context.StaminaCost = attackContextData.StaminaCost or 0
 	context.Range = attackContextData.Range or attackContextData.SwingRange or 0
 	context.IsHeavy = attackFlags ~= nil and attackFlags.IsHeavy == true or false
+	context.DoesKnockback = attackFlags ~= nil and attackFlags.DoesKnockback == true or false
 
 	if self.Type == "Bow" then
 		context.AttackType = "Ranged"
@@ -146,7 +147,7 @@ function Weapon.ExecuteAttack(
 	target: Entity,
 	comboBaseDamage: number?,
 	owner: Entity?,
-	attackFlags: { IsHeavy: boolean? }?
+	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
 ): AttackContext
 	local context = self:CreateAttackContext(target, comboBaseDamage, owner, attackFlags)
 	context:Attack()

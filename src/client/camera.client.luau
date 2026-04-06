@@ -5,6 +5,7 @@ local CameraController = require(script.Parent.CameraController)
 
 local controller = CameraController.new()
 controller:Init()
+CameraController.SetSharedController(controller)
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
