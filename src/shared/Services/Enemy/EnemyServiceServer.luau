@@ -122,7 +122,7 @@ local function SerializeEntityForClient(entity: Entity): { [string]: any }
 			EquippedIndex = nil,
 			ToolbarWeapons = { nil, nil, nil, nil },
 			ComboState = {
-				WeaponUUID = nil,
+				WeaponClass = nil,
 				ComboId = nil,
 				AttackIndex = entity.__Components.ComboState.AttackIndex,
 				LastAttackAt = entity.__Components.ComboState.LastAttackAt,

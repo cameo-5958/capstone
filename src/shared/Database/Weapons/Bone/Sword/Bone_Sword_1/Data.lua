@@ -9,15 +9,7 @@ return {
 		["Strength"] = 30,
 		["CritDamage"] = 120,
 	},
-	["AttackProfile"] = {
-		["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
-		["HitboxOffset"] = CFrame.new(0, 0, -2.5),
-	},
 	["Weight"] = 8,
-	["AttackContext"] = {
-		["MaxDashRange"] = 10,
-		["SwingRange"] = 7.2,
-	},
 	["WeaponPassive"] = nil,
 
 	["WeaponAbility"] = nil,
@@ -25,3 +17,5 @@ return {
 
 	["Desc"] = "The Saber used by Skeletons to stab you. Who knew such frail creatures could handle such strong weapons?",
 }
+
+

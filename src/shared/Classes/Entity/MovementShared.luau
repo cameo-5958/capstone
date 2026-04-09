@@ -54,12 +54,22 @@ function MovementShared.Init(self: SharedMovementEngine)
 end
 
 function MovementShared.ApplyLinearVelocity(self: SharedMovementEngine, force: Vector3, time_: number)
-	local lv = self.Character:FindFirstChild("LinearVelocity") :: LinearVelocity or Instance.new("LinearVelocity")
-	lv.Parent = self.Character
-	self.RootPart.AssemblyLinearVelocity = Vector3.zero
+	local lv = self.RootPart:FindFirstChild("LinearVelocity") :: LinearVelocity? or self.Character:FindFirstChild("LinearVelocity") :: LinearVelocity? or Instance.new("LinearVelocity")
+	local rootAttachment = self.RootPart:FindFirstChild("RootAttachment")
+	if not rootAttachment or not rootAttachment:IsA("Attachment") then
+		rootAttachment = Instance.new("Attachment")
+		rootAttachment.Name = "RootAttachment"
+		rootAttachment.Parent = self.RootPart
+	end
+
+	lv.Name = "LinearVelocity"
+	lv.Parent = self.RootPart
+	lv.Enabled = true
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
 	lv.VectorVelocity = force
-	lv.Attachment0 = self.RootPart:FindFirstChild("RootAttachment") :: Attachment
+	lv.Attachment0 = rootAttachment
 	lv.MaxForce = 999999
+	self.RootPart.AssemblyLinearVelocity = force
 
 	if self.DeferredVelocityCancelTask then
 		task.cancel(self.DeferredVelocityCancelTask)
@@ -68,7 +78,7 @@ function MovementShared.ApplyLinearVelocity(self: SharedMovementEngine, force: V
 	self.DeferredVelocityCancelTask = task.delay(time_, function()
 		self.DeferredVelocityCancelTask = nil
 
-		local activeLv = self.Character:FindFirstChild("LinearVelocity")
+		local activeLv = self.RootPart:FindFirstChild("LinearVelocity") or self.Character:FindFirstChild("LinearVelocity")
 		if activeLv then
 			activeLv:Destroy()
 		end
@@ -86,7 +96,7 @@ function MovementShared.CancelLinearVelocity(self: SharedMovementEngine)
 		self.DeferredVelocityCancelTask = nil
 	end
 
-	local lv = self.Character:FindFirstChild("LinearVelocity")
+	local lv = self.RootPart:FindFirstChild("LinearVelocity") or self.Character:FindFirstChild("LinearVelocity")
 	if lv then
 		lv:Destroy()
 	end

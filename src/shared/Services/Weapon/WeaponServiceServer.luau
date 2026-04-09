@@ -19,6 +19,7 @@ type WeaponType = WeaponTypes.Weapon
 
 local WeaponServiceServer = {}
 local EQUIPPED_WEAPON_SOURCE = "weapon:equipped"
+local EquippedWeaponPassiveIds = setmetatable({}, { __mode = "k" }) :: { [Entity]: string? }
 
 local PlayerEntities: { [Player]: Entity } = {}
 local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
@@ -158,6 +159,12 @@ end
 local function ApplyEquippedWeaponStats(entity: Entity): ()
 	entity:RemoveModifiersFromSource(EQUIPPED_WEAPON_SOURCE)
 
+	local previousPassiveId = EquippedWeaponPassiveIds[entity]
+	if previousPassiveId then
+		entity:RemoveAttackModifierById(previousPassiveId)
+		EquippedWeaponPassiveIds[entity] = nil
+	end
+
 	local equippedWeapon = entity:GetEquippedWeapon()
 	if not equippedWeapon then
 		return
@@ -170,6 +177,11 @@ local function ApplyEquippedWeaponStats(entity: Entity): ()
 			statValue,
 			EQUIPPED_WEAPON_SOURCE
 		))
+	end
+
+	if equippedWeapon.WeaponPassive then
+		entity:AddAttackModifier(equippedWeapon.WeaponPassive)
+		EquippedWeaponPassiveIds[entity] = equippedWeapon.WeaponPassive.Id
 	end
 end
 
@@ -310,6 +322,8 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 		WeaponServiceServer.SetEquippedSlot(player, payload and payload.Slot or nil)
 	elseif action == "Unequip" then
 		WeaponServiceServer.SetEquippedSlot(player, nil)
+	elseif action == "RequestEquippedWeapon" then
+		WeaponServiceServer.SyncEquippedWeapon(player)
 	end
 end)
 

@@ -29,7 +29,7 @@ export type MovementEngine = SharedMovementEngine & {
 	WalkAnimationPlaying: boolean,
 	__Animations: { string: string },
 	__ComboState: {
-		WeaponId: string?,
+		WeaponClass: string?,
 		ComboId: string?,
 		AttackIndex: number,
 		LastAttackAt: number,
@@ -55,7 +55,7 @@ function MovementEngine.init(self: MovementEngine): ()
 	self.AllMovementDisabled = false
 	self.WalkAnimationPlaying = false
 	self.__ComboState = {
-		WeaponId = nil,
+		WeaponClass = nil,
 		ComboId = nil,
 		AttackIndex = 1,
 		LastAttackAt = 0,
@@ -85,7 +85,7 @@ local function GetMovementLockDuration(
 	fallbackDuration: number
 ): number
 	if not equippedWeapon or not IsComboWeapon(equippedWeapon.Class) then
-		self.__ComboState.WeaponId = nil
+		self.__ComboState.WeaponClass = nil
 		self.__ComboState.ComboId = nil
 		self.__ComboState.AttackIndex = 1
 		self.__ComboState.LastAttackAt = 0
@@ -106,12 +106,12 @@ local function GetMovementLockDuration(
 	local state = self.__ComboState
 	local attackIndex = state.AttackIndex
 	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
-	if state.WeaponId ~= equippedWeapon.WeaponId or state.ComboId ~= combo.Id or expired then
+	if state.WeaponClass ~= equippedWeapon.Class or state.ComboId ~= combo.Id or expired then
 		attackIndex = 1
 	end
 
 	local attack = combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
-	state.WeaponId = equippedWeapon.WeaponId
+	state.WeaponClass = equippedWeapon.Class
 	state.ComboId = combo.Id
 	state.AttackIndex = (attackIndex % #combo.Attacks) + 1
 	state.LastAttackAt = now
@@ -119,18 +119,52 @@ local function GetMovementLockDuration(
 	return attack.MovementLockedUntil or fallbackDuration
 end
 
+local function GetDefaultAttackContext(): { [string]: any }
+	return {
+		SightRange = 32,
+		SwingRange = 4.5,
+		MaxDashRange = 2.5,
+		LungeDuration = 0.08,
+		LockDuration = 0.35,
+	}
+end
+
+local function MergeAttackContext(baseContext: { [string]: any }?, overrideContext: { [string]: any }?): { [string]: any }
+	local merged = table.clone(baseContext or {})
+	if overrideContext then
+		for key, value in pairs(overrideContext) do
+			merged[key] = value
+		end
+	end
+	return merged
+end
+
 local function GetAttackLockDurations(
 	self: MovementEngine,
 	equippedWeapon: { [string]: any }?,
 	attackContext: { [string]: any }
 ): (number, number)
-	if equippedWeapon and equippedWeapon.Class == "Spear" then
-		return attackContext.MovementLockDuration or 1.4, attackContext.ActionLockDuration or 1.0
-	end
-
 	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.MovementLockDuration or attackContext.LockDuration)
 	local actionLockDuration = attackContext.ActionLockDuration or movementLockDuration
 	return movementLockDuration, actionLockDuration
+end
+
+local function GetResolvedComboAttackContext(
+	equippedWeapon: { [string]: any }?,
+	comboAttack: { [string]: any }?
+): { [string]: any }
+	local resolvedContext = MergeAttackContext(GetDefaultAttackContext(), equippedWeapon and equippedWeapon.AttackContext or nil)
+	if comboAttack == nil then
+		return resolvedContext
+	end
+
+	resolvedContext = MergeAttackContext(resolvedContext, comboAttack.AttackContext)
+	local hitWindows = comboAttack.HitWindows
+	if hitWindows and #hitWindows > 0 then
+		resolvedContext = MergeAttackContext(resolvedContext, hitWindows[1].AttackContext)
+	end
+
+	return resolvedContext
 end
 
 local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [string]: any }?): any
@@ -152,7 +186,7 @@ local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [stri
 	local state = self.__ComboState
 	local attackIndex = state.AttackIndex
 	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
-	if state.WeaponId ~= equippedWeapon.WeaponId or state.ComboId ~= combo.Id or expired then
+	if state.WeaponClass ~= equippedWeapon.Class or state.ComboId ~= combo.Id or expired then
 		attackIndex = 1
 	end
 
@@ -348,50 +382,8 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 		return false
 	end
 
-	local weaponClass = equippedWeapon.Class or "Sword"
-	local attackContext = equippedWeapon.AttackContext or {}
-
-	if weaponClass == "Spear" then
-		local spearDefaults = {
-			SightRange = 32,
-			SwingRange = 4.5,
-			MaxDashRange = 2.5,
-			LungeDuration = 0.08,
-			MovementLockDuration = 1.4,
-			ActionLockDuration = 1.0,
-			LockDuration = 1.4,
-		}
-		for key, value in pairs(spearDefaults) do
-			if attackContext[key] == nil then
-				attackContext[key] = value
-			end
-		end
-	elseif weaponClass == "Sword" or weaponClass == nil then
-		local swordDefaults = {
-			SightRange = 32,
-			SwingRange = 4.5,
-			MaxDashRange = 2.5,
-			LungeDuration = 0.08,
-			LockDuration = 0.35,
-		}
-		for key, value in pairs(swordDefaults) do
-			if attackContext[key] == nil then
-				attackContext[key] = value
-			end
-		end
-	else
-		for key, value in pairs({
-			SightRange = 32,
-			SwingRange = 4.5,
-			MaxDashRange = 2.5,
-			LungeDuration = 0.08,
-			LockDuration = 0.35,
-		}) do
-			if attackContext[key] == nil then
-				attackContext[key] = value
-			end
-		end
-	end
+	local comboAttack = PeekNextComboAttack(self, equippedWeapon)
+	local attackContext = GetResolvedComboAttackContext(equippedWeapon, comboAttack)
 
 	local attackSightRange = attackContext.SightRange
 	local attackSwingRange = attackContext.SwingRange
@@ -456,7 +448,7 @@ function MovementEngine.GetAnimation(self: MovementEngine, animation: string): s
 		return self.__Animations[animation]
 	end
 
-	return self.__Animations["Walk"] or ""
+	return ""
 end
 
 function MovementEngine.Play(self: MovementEngine, animation: string)

@@ -39,7 +39,7 @@ export type RuntimeStatBlock = StatBlockModule.StatBlock
 export type AttackModifierApplier = AttackModifierApplierType.AttackModifierApplier
 export type AttackModifierHookName = AttackModifierApplierType.HookName
 export type ComboState = {
-	WeaponUUID: string?,
+	WeaponClass: string?,
 	ComboId: string?,
 	AttackIndex: number,
 	LastAttackAt: number,

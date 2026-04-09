@@ -16,14 +16,14 @@ type ActiveAttack = {
 			Index: number,
 			ActiveFrom: number,
 			ActiveUntil: number,
+			Profile: {
+				HitReset: number,
+				HitboxSize: Vector3,
+				HitboxOffset: CFrame,
+			},
 		},
 	},
 	ClearAt: number,
-	Profile: {
-		HitReset: number,
-		HitboxSize: Vector3,
-		HitboxOffset: CFrame,
-	},
 	LastReportedAt: { [number]: { [string]: number } },
 }
 
@@ -35,8 +35,8 @@ overlapParams.FilterType = Enum.RaycastFilterType.Include
 overlapParams.FilterDescendantsInstances = { EntitiesFolder }
 overlapParams.MaxParts = 32
 
-local function GetHitboxCFrame(rootPart: BasePart, attack: ActiveAttack): CFrame
-	return rootPart.CFrame * attack.Profile.HitboxOffset
+local function GetHitboxCFrame(rootPart: BasePart, hitWindow): CFrame
+	return rootPart.CFrame * hitWindow.Profile.HitboxOffset
 end
 
 local function EnsureHitboxVisualizer(): Part
@@ -60,15 +60,15 @@ local function EnsureHitboxVisualizer(): Part
 	return hitbox
 end
 
-local function UpdateHitboxVisualizer(attack: ActiveAttack)
+local function UpdateHitboxVisualizer(attack: ActiveAttack, hitWindow)
 	local character = LocalPlayer.Character
 	if not character or not character.PrimaryPart then
 		return
 	end
 
 	local hitbox = EnsureHitboxVisualizer()
-	hitbox.Size = attack.Profile.HitboxSize
-	hitbox.CFrame = GetHitboxCFrame(character.PrimaryPart, attack)
+	hitbox.Size = hitWindow.Profile.HitboxSize
+	hitbox.CFrame = GetHitboxCFrame(character.PrimaryPart, hitWindow)
 end
 
 local function HideHitboxVisualizer()
@@ -99,7 +99,7 @@ local function ReportOverlapHits(attack: ActiveAttack)
 
 	attack.LastReportedAt[activeHitWindow.Index] = attack.LastReportedAt[activeHitWindow.Index] or {}
 	local lastReportedAt = attack.LastReportedAt[activeHitWindow.Index]
-	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(character.PrimaryPart, attack), attack.Profile.HitboxSize, overlapParams)
+	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(character.PrimaryPart, activeHitWindow), activeHitWindow.Profile.HitboxSize, overlapParams)
 	local seenThisFrame = {}
 
 	for _, part in ipairs(parts) do
@@ -116,7 +116,7 @@ local function ReportOverlapHits(attack: ActiveAttack)
 		seenThisFrame[targetUUID] = true
 
 		local lastReported = lastReportedAt[targetUUID]
-		if lastReported and now - lastReported < attack.Profile.HitReset then
+		if lastReported and now - lastReported < activeHitWindow.Profile.HitReset then
 			continue
 		end
 
@@ -150,7 +150,6 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any })
 		AttackId = payload.AttackId,
 		HitWindows = payload.HitWindows,
 		ClearAt = payload.ClearAt,
-		Profile = payload.Profile,
 		LastReportedAt = {},
 	}
 end)
@@ -168,20 +167,20 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	local isAnyHitWindowActive = false
+	local activeHitWindow = nil
 	for _, hitWindow in ipairs(attack.HitWindows) do
 		if now >= hitWindow.ActiveFrom and now <= hitWindow.ActiveUntil then
-			isAnyHitWindowActive = true
+			activeHitWindow = hitWindow
 			break
 		end
 	end
 
-	if not isAnyHitWindowActive then
+	if not activeHitWindow then
 		HideHitboxVisualizer()
 		return
 	end
 
-	UpdateHitboxVisualizer(attack)
+	UpdateHitboxVisualizer(attack, activeHitWindow)
 	ReportOverlapHits(attack)
 end)
 

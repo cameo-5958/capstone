@@ -24,14 +24,11 @@ local function ResolveWeaponFolder(weaponPath: string): Instance
 end
 
 local function BuildAttackProfile(data): WeaponTypes.AttackProfile?
-	local attackContext = data.AttackContext
 	local configuredProfile = data.AttackProfile
-	if not attackContext and not configuredProfile then
+	if not configuredProfile then
 		return nil
 	end
 
-	local swordRange = (attackContext and attackContext.SwingRange) or 6
-	local hitRange = swordRange + 1.5
 	local profile = {
 		AnimationId = "",
 		Windup = 0.12,
@@ -39,8 +36,8 @@ local function BuildAttackProfile(data): WeaponTypes.AttackProfile?
 		Recovery = 0.22,
 		Cooldown = 0.55,
 		HitReset = 0.12,
-		HitboxSize = Vector3.new(3.25, 4.5, hitRange),
-		HitboxOffset = CFrame.new(0, 0, -(hitRange * 0.5)),
+		HitboxSize = Vector3.new(3.25, 4.5, 7.5),
+		HitboxOffset = CFrame.new(0, 0, -3.75),
 	}
 
 	if configuredProfile then
@@ -118,9 +115,17 @@ local function GetTrailEndpoints(handle: BasePart): (Vector3, Vector3)
 	end
 end
 
-local function EnsureWeaponTrail(tool: Tool)
+local function EnsureWeaponTrail(tool: Tool, weaponClass: string?)
 	local handle = tool:FindFirstChild("Handle")
 	if not handle or not handle:IsA("BasePart") then
+		return
+	end
+
+	if weaponClass == "Staff" then
+		local existingTrail = handle:FindFirstChild("WeaponTrail")
+		if existingTrail and existingTrail:IsA("Trail") then
+			existingTrail.Enabled = false
+		end
 		return
 	end
 
@@ -140,26 +145,45 @@ local function EnsureWeaponTrail(tool: Tool)
 	trail.Attachment0 = attachment0
 	trail.Attachment1 = attachment1
 	trail.FaceCamera = false
-	trail.Lifetime = 0.14
-	trail.MinLength = 0.12
-	trail.Brightness = 3
-	trail.LightEmission = 1
+	trail.Lifetime = if weaponClass == "Spear" then 0.09 else 0.14
+	trail.MinLength = if weaponClass == "Spear" then 0.08 else 0.12
+	trail.Brightness = if weaponClass == "Spear" then 1.75 else 3
+	trail.LightEmission = if weaponClass == "Spear" then 0.65 else 1
 	trail.LightInfluence = 0
-	trail.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.02),
-		NumberSequenceKeypoint.new(0.35, 0.08),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	trail.WidthScale = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1.8),
-		NumberSequenceKeypoint.new(0.45, 1.1),
-		NumberSequenceKeypoint.new(1, 0.3),
-	})
-	trail.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-		ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 245, 200)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 120, 90)),
-	})
+	trail.Transparency = if weaponClass == "Spear"
+		then NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.12),
+			NumberSequenceKeypoint.new(0.45, 0.22),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		else NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.02),
+			NumberSequenceKeypoint.new(0.35, 0.08),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+	trail.WidthScale = if weaponClass == "Spear"
+		then NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1.1),
+			NumberSequenceKeypoint.new(0.45, 0.75),
+			NumberSequenceKeypoint.new(1, 0.2),
+		})
+		else NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1.8),
+			NumberSequenceKeypoint.new(0.45, 1.1),
+			NumberSequenceKeypoint.new(1, 0.3),
+		})
+	trail.Color = if weaponClass == "Spear"
+		then ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(245, 245, 245)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 225, 235)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 180, 200)),
+		})
+		else ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 245, 200)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 120, 90)),
+		})
+	trail.Enabled = true
 	trail.Parent = handle
 end
 
@@ -186,7 +210,7 @@ local function GiveToolClone(entity: Entity, weapon: WeaponType, toolbarSlot: nu
 		return nil
 	end
 
-	EnsureWeaponTrail(tool)
+	EnsureWeaponTrail(tool, weapon.Class)
 
 	tool:SetAttribute("ManagedByEquipmentService", true)
 	tool:SetAttribute("WeaponId", weapon.WeaponId)
@@ -209,6 +233,13 @@ function EquipmentServiceServer.CreateWeaponFromDatabase(weaponPath: string): We
 	local folder = ResolveWeaponFolder(weaponPath)
 	local data = require(folder:WaitForChild("Data"))
 	local toolTemplate = folder:FindFirstChild("Model") :: Tool?
+	local weaponClass = data.Type or data.Family or "Sword"
+	local attackContext = data.AttackContext or {}
+	local attackProfile = BuildAttackProfile(data)
+	if weaponClass == "Sword" or weaponClass == "Claymore" or weaponClass == "Spear" then
+		attackContext = {}
+		attackProfile = nil
+	end
 
 	return Weapon.new(
 		data.Name or weaponPath,
@@ -218,10 +249,10 @@ function EquipmentServiceServer.CreateWeaponFromDatabase(weaponPath: string): We
 		data.WeaponAbility or data.RightClickAbility,
 		data.RightClickAbility,
 		weaponPath,
-		BuildAttackProfile(data),
+		attackProfile,
 		toolTemplate,
-		data.Type or data.Family or "Sword",
-		data.AttackContext or {},
+		weaponClass,
+		attackContext,
 		data.WeaponPassive
 	)
 end
@@ -255,8 +286,8 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 	local defaultWeapons = {
 		"Bone.Sword.Bone_Sword_1",
 		"Bow1",
-		"Sword2",
-		"Sword3",
+		"Skeletal.Lance",
+		"TestWeapon",
 	}
 
 	for slot, weaponPath in ipairs(defaultWeapons) do
@@ -267,3 +298,5 @@ function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
 end
 
 return table.freeze(EquipmentServiceServer)
+
+

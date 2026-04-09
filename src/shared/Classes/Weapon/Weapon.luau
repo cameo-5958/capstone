@@ -116,12 +116,12 @@ function Weapon.CreateAttackContext(
 	target: Entity,
 	comboBaseDamage: number?,
 	owner: Entity?,
-	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
+	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean?, AttackContext: { [string]: any }? }?
 ): AttackContext
 	local wielder = owner or self.Owner
 	assert(wielder ~= nil, "Weapon.CreateAttackContext requires an owner")
 
-	local attackContextData = self:GetAttackContext()
+	local attackContextData = if attackFlags and attackFlags.AttackContext then attackFlags.AttackContext else self:GetAttackContext()
 	local context = self.Damage.Build(wielder, target, self.BaseDamage * (comboBaseDamage or 1))
 	context.WeaponType = self.Type :: any
 	context.WeaponWeight = self.Weight
@@ -147,7 +147,7 @@ function Weapon.ExecuteAttack(
 	target: Entity,
 	comboBaseDamage: number?,
 	owner: Entity?,
-	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean? }?
+	attackFlags: { IsHeavy: boolean?, DoesKnockback: boolean?, AttackContext: { [string]: any }? }?
 ): AttackContext
 	local context = self:CreateAttackContext(target, comboBaseDamage, owner, attackFlags)
 	context:Attack()

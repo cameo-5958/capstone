@@ -17,6 +17,10 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any }?)
 	end
 end)
 
+task.defer(function()
+	API:FireServer("RequestEquippedWeapon", {})
+end)
+
 function WeaponServiceClient.UseAbility(payload: { [string]: any }?): ()
 	API:FireServer("UseAbility", payload or {})
 end

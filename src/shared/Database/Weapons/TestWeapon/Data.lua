@@ -10,12 +10,6 @@ return {
 		["PhysicalAttack"] = 4,
 		["CritDamage"] = 0.2,
 	},
-	["AttackProfile"] = {
-		["Cooldown"] = 0.8,
-		["Recovery"] = 0.3,
-		["HitboxSize"] = Vector3.new(9.2, 4.6, 6.8),
-		["HitboxOffset"] = CFrame.new(0, 0, -3.45),
-	},
 	["Weight"] = 7,
 	["AttackContext"] = {
 		["MaxDashRange"] = 8,
@@ -28,3 +22,4 @@ return {
 
 	["Desc"] = "SWORD_TEST_DESC",
 }
+

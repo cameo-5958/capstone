@@ -144,6 +144,10 @@ local function Animate(character: Model, animId: AnimationId, playOnce: boolean?
 	if playOnce then
 		track.Looped = false
 		track.TimePosition = 0
+	else
+		if track.IsPlaying then
+			return
+		end
 	end
 
 	-- Play the animation

@@ -24,16 +24,18 @@ local AttackServiceServer = {}
 type AttackProfile = WeaponTypes.AttackProfile
 type AnimationId = WeaponTypes.AnimationId
 type ComboAttack = WeaponTypes.ComboAttack
+type ComboAttackContext = WeaponTypes.ComboAttackContext
+type ComboAttackProfile = WeaponTypes.ComboAttackProfile
+type HitWindow = WeaponTypes.HitWindow
 type ComboDefinition = WeaponTypes.ComboDefinition
 type ComboSet = WeaponTypes.ComboSet
-type AttackContext = {
-	SwingRange: number,
-	MaxDashRange: number,
-}
+type AttackContext = ComboAttackContext
 type ActiveHitWindow = {
 	Index: number,
 	ActiveFrom: number,
 	ActiveUntil: number,
+	AttackContext: AttackContext,
+	Profile: AttackProfile,
 }
 type ActiveAttack = {
 	Id: string,
@@ -92,9 +94,37 @@ end
 local function GetAttackContext(weapon: any): AttackContext
 	local context = weapon and weapon:GetAttackContext() or {}
 	return {
+		SightRange = context.SightRange or 32,
 		SwingRange = context.SwingRange or 4.5,
 		MaxDashRange = context.MaxDashRange or 2.5,
+		LungeDuration = context.LungeDuration or 0.08,
+		LockDuration = context.LockDuration or 0.35,
+		MovementLockDuration = context.MovementLockDuration,
+		ActionLockDuration = context.ActionLockDuration,
+		ManaCost = context.ManaCost,
+		StaminaCost = context.StaminaCost,
+		Range = context.Range,
 	}
+end
+
+local function MergeAttackContext(baseContext: AttackContext?, overrideContext: ComboAttackContext?): AttackContext
+	local merged = table.clone(baseContext or {})
+	if overrideContext then
+		for key, value in pairs(overrideContext) do
+			merged[key] = value
+		end
+	end
+	return merged
+end
+
+local function MergeAttackProfile(baseProfile: AttackProfile, overrideProfile: ComboAttackProfile?): AttackProfile
+	local merged = table.clone(baseProfile)
+	if overrideProfile then
+		for key, value in pairs(overrideProfile) do
+			(merged :: any)[key] = value
+		end
+	end
+	return merged
 end
 
 local function GetNearestBowTarget(entity, acquireRange: number?): any?
@@ -193,7 +223,7 @@ local function IsTargetInsideHitbox(entity, target, profile: AttackProfile, root
 	return false
 end
 
-local function IsTargetInsideCapturedAttack(entity, target, active: ActiveAttack): boolean
+local function IsTargetInsideCapturedAttack(entity, target, active: ActiveAttack, attackContext: AttackContext): boolean
 	if IsTargetInsideHitbox(entity, target, active.Profile, entity.RootPart.CFrame) then
 		return true
 	end
@@ -204,7 +234,7 @@ local function IsTargetInsideCapturedAttack(entity, target, active: ActiveAttack
 	local flatTarget = Vector3.new(targetPos.X, origin.Position.Y, targetPos.Z)
 	local delta = flatTarget - origin.Position
 	local distanceToTarget = delta.Magnitude
-	local lungeDistance = math.min(active.AttackContext.MaxDashRange, math.max(0, distanceToTarget - active.AttackContext.SwingRange))
+	local lungeDistance = math.min(attackContext.MaxDashRange or 2.5, math.max(0, distanceToTarget - (attackContext.SwingRange or 4.5)))
 	local endPosition = origin.Position + origin.LookVector * lungeDistance
 	local endCFrame = CFrame.lookAt(endPosition, endPosition + origin.LookVector)
 
@@ -247,25 +277,32 @@ local function GetDefaultCombo(comboSet: ComboSet): ComboDefinition?
 	return nil
 end
 
-local function BuildActiveHitWindows(now: number, profile: AttackProfile, comboAttack: ComboAttack?): { ActiveHitWindow }
+local function BuildActiveHitWindows(now: number, profile: AttackProfile, baseAttackContext: AttackContext, comboAttack: ComboAttack?): { ActiveHitWindow }
 	local configuredWindows = comboAttack and comboAttack.HitWindows
+	local comboAttackContext = MergeAttackContext(baseAttackContext, comboAttack and comboAttack.AttackContext)
+	local comboAttackProfile = MergeAttackProfile(profile, comboAttack and comboAttack.AttackProfile)
 	local activeHitWindows = {}
 
 	if configuredWindows and #configuredWindows > 0 then
 		for index, window in ipairs(configuredWindows) do
 			local delay = math.max(0, window.Delay or 0)
-			local duration = math.max(0, window.Duration or profile.ActiveDuration)
+			local windowProfile = MergeAttackProfile(comboAttackProfile, window.AttackProfile)
+			local duration = math.max(0, window.Duration or windowProfile.ActiveDuration)
 			table.insert(activeHitWindows, {
 				Index = index,
 				ActiveFrom = now + delay,
 				ActiveUntil = now + delay + duration,
+				AttackContext = MergeAttackContext(comboAttackContext, window.AttackContext),
+				Profile = windowProfile,
 			})
 		end
 	else
 		table.insert(activeHitWindows, {
 			Index = 1,
-			ActiveFrom = now + profile.Windup,
-			ActiveUntil = now + profile.Windup + profile.ActiveDuration,
+			ActiveFrom = now + comboAttackProfile.Windup,
+			ActiveUntil = now + comboAttackProfile.Windup + comboAttackProfile.ActiveDuration,
+			AttackContext = comboAttackContext,
+			Profile = comboAttackProfile,
 		})
 	end
 
@@ -304,7 +341,7 @@ local function ResolveComboAttack(entity, weapon, now: number): (ComboAttack?, b
 	local attackIndex = state.AttackIndex
 	local expired = now - state.LastAttackAt > comboSet.ExpireAfter
 	local startedNewSequence = false
-	if state.WeaponUUID ~= weapon.UUID or state.ComboId ~= combo.Id or expired then
+	if state.WeaponClass ~= weapon.Class or state.ComboId ~= combo.Id or expired then
 		attackIndex = 1
 		startedNewSequence = true
 	end
@@ -313,7 +350,7 @@ local function ResolveComboAttack(entity, weapon, now: number): (ComboAttack?, b
 	end
 
 	local attack = combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
-	state.WeaponUUID = weapon.UUID
+	state.WeaponClass = weapon.Class
 	state.ComboId = combo.Id
 	state.LastAttackAt = now
 	state.AttackIndex = (attackIndex % #combo.Attacks) + 1
@@ -357,9 +394,9 @@ local function BeginPrimaryAttack(player: Player)
 		return
 	end
 
-	local profile = weapon:GetAttackProfile()
-	local attackContext = GetAttackContext(weapon)
 	local comboAttack, stopAnimationOnClear, startedNewSequence = ResolveComboAttack(entity, weapon, now)
+	local profile = MergeAttackProfile(weapon:GetAttackProfile(), comboAttack and comboAttack.AttackProfile)
+	local attackContext = GetAttackContext(weapon)
 	local powerScale = if comboAttack then comboAttack.PowerScale else 1
 	local isHeavy = comboAttack ~= nil and comboAttack.IsHeavy == true
 	local doesKnockback = comboAttack ~= nil and comboAttack.DoesKnockback == true
@@ -375,7 +412,7 @@ local function BeginPrimaryAttack(player: Player)
 		else profile.AnimationId
 	local animationId = ResolveAnimationId(animationSource)
 	local attackId = HttpService:GenerateGUID(false)
-	local hitWindows = BuildActiveHitWindows(now, profile, comboAttack)
+	local hitWindows = BuildActiveHitWindows(now, profile, attackContext, comboAttack)
 	local lastHitWindow = hitWindows[#hitWindows]
 	local clearAt = (lastHitWindow and lastHitWindow.ActiveUntil or now) + profile.Recovery
 	if not PlayerServiceServer.RegisterPrimaryAttack(player, clearAt, isHeavy, noStamina) then
@@ -452,11 +489,11 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 	active.Hits[hitWindowIndex] = active.Hits[hitWindowIndex] or {}
 	local hitWindowHits = active.Hits[hitWindowIndex]
 	local lastHitAt = hitWindowHits[payload.TargetUUID]
-	if lastHitAt and now - lastHitAt < active.Profile.HitReset then
+	if lastHitAt and now - lastHitAt < hitWindow.Profile.HitReset then
 		return
 	end
 
-	if not IsTargetInsideCapturedAttack(entity, target, active) then
+	if not IsTargetInsideCapturedAttack(entity, target, active, hitWindow.AttackContext) then
 		local attackId = active.Id
 		local targetUUID = payload.TargetUUID
 		task.delay(HIT_CONFIRM_RETRY_DELAY, function()
@@ -484,11 +521,11 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 			retryActive.Hits[hitWindowIndex] = retryActive.Hits[hitWindowIndex] or {}
 			local retryWindowHits = retryActive.Hits[hitWindowIndex]
 			local retryLastHitAt = retryWindowHits[targetUUID]
-			if retryLastHitAt and retryNow - retryLastHitAt < retryActive.Profile.HitReset then
+			if retryLastHitAt and retryNow - retryLastHitAt < retryWindow.Profile.HitReset then
 				return
 			end
 
-			if not IsTargetInsideCapturedAttack(retryEntity, retryTarget, retryActive) then
+			if not IsTargetInsideCapturedAttack(retryEntity, retryTarget, retryActive, retryWindow.AttackContext) then
 				return
 			end
 
@@ -497,6 +534,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 			retryActive.Weapon:ExecuteAttack(retryTarget, retryActive.ComboBaseDamage, retryEntity, {
 				IsHeavy = retryActive.IsHeavy,
 				DoesKnockback = retryActive.DoesKnockback,
+				AttackContext = retryWindow.AttackContext,
 			})
 		end)
 		return
@@ -507,6 +545,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 	active.Weapon:ExecuteAttack(target, active.ComboBaseDamage, entity, {
 		IsHeavy = active.IsHeavy,
 		DoesKnockback = active.DoesKnockback,
+		AttackContext = hitWindow.AttackContext,
 	})
 end
 

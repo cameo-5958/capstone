@@ -183,7 +183,7 @@ function Entity.new(Model: Model, Name: string): Entity
 		EquippedIndex = nil,
 		ToolbarWeapons = { nil, nil, nil, nil },
 		ComboState = {
-			WeaponUUID = nil,
+			WeaponClass = nil,
 			ComboId = nil,
 			AttackIndex = 1,
 			LastAttackAt = 0,
@@ -517,7 +517,7 @@ function Entity.GetToolbarWeapons(self: Entity)
 end
 
 function Entity.ResetComboState(self: Entity): ()
-	self.__Components.ComboState.WeaponUUID = nil
+	self.__Components.ComboState.WeaponClass = nil
 	self.__Components.ComboState.ComboId = nil
 	self.__Components.ComboState.AttackIndex = 1
 	self.__Components.ComboState.LastAttackAt = 0
