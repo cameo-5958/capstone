@@ -9,19 +9,30 @@ export type SharedMovementEngine = {
 	RootPart: BasePart,
 	Speed: number,
 	MovementEnabled: boolean,
+	ActionEnabled: boolean,
 	AllMovementDisabled: boolean?,
 	Invincible: boolean,
 	DeferredCancelTask: thread?,
+	DeferredMovementTask: thread?,
+	DeferredActionTask: thread?,
 	DeferredVelocityCancelTask: thread?,
 	ApplyLinearVelocity: (SharedMovementEngine, Vector3, number) -> (),
 	CancelLinearVelocity: (SharedMovementEngine) -> (),
 	DeferTask: (SharedMovementEngine) -> (),
 	ScheduleDeferTask: (SharedMovementEngine, number) -> (),
+	ScheduleMovementTask: (SharedMovementEngine, number) -> (),
+	ScheduleActionTask: (SharedMovementEngine, number) -> (),
 	SetInvincibilityStatus: (SharedMovementEngine, boolean) -> (),
 	DisableMovement: (SharedMovementEngine) -> (),
+	EnableMovement: (SharedMovementEngine) -> (),
+	DisableAction: (SharedMovementEngine) -> (),
+	EnableAction: (SharedMovementEngine) -> (),
 	LockMovement: (SharedMovementEngine, number) -> (),
+	LockAction: (SharedMovementEngine, number) -> (),
 	UnlockMovement: (SharedMovementEngine) -> (),
+	UnlockAction: (SharedMovementEngine) -> (),
 	IsMovementEnabled: (SharedMovementEngine) -> boolean,
+	IsActionEnabled: (SharedMovementEngine) -> boolean,
 	IsGrounded: (SharedMovementEngine) -> boolean,
 	OnLinearVelocityApplied: ((SharedMovementEngine, Vector3, number) -> ())?,
 	OnLinearVelocityCancelled: ((SharedMovementEngine) -> ())?,
@@ -34,6 +45,7 @@ end
 
 function MovementShared.Init(self: SharedMovementEngine)
 	self.MovementEnabled = true
+	self.ActionEnabled = true
 	self.Invincible = false
 	if self.AllMovementDisabled == nil then
 		self.AllMovementDisabled = false
@@ -97,9 +109,32 @@ function MovementShared.DisableMovement(self: SharedMovementEngine)
 	end
 end
 
+function MovementShared.EnableMovement(self: SharedMovementEngine)
+	if self.AllMovementDisabled then
+		self.MovementEnabled = false
+		self.Humanoid.WalkSpeed = 0
+	else
+		self.MovementEnabled = true
+		self.Humanoid.WalkSpeed = self.Speed
+	end
+
+	if self.UpdateMovementAnimation then
+		self:UpdateMovementAnimation()
+	end
+end
+
+function MovementShared.DisableAction(self: SharedMovementEngine)
+	self.ActionEnabled = false
+end
+
+function MovementShared.EnableAction(self: SharedMovementEngine)
+	self.ActionEnabled = not self.AllMovementDisabled
+end
+
 function MovementShared.DeferTask(self: SharedMovementEngine)
 	if self.AllMovementDisabled then
 		self.MovementEnabled = false
+		self.ActionEnabled = false
 		self.Humanoid.WalkSpeed = 0
 		self:SetInvincibilityStatus(false)
 		self:CancelLinearVelocity()
@@ -110,6 +145,7 @@ function MovementShared.DeferTask(self: SharedMovementEngine)
 	end
 
 	self.MovementEnabled = true
+	self.ActionEnabled = true
 	self:SetInvincibilityStatus(false)
 	self.Humanoid.WalkSpeed = self.Speed
 	self:CancelLinearVelocity()
@@ -129,17 +165,52 @@ function MovementShared.ScheduleDeferTask(self: SharedMovementEngine, time: numb
 	end)
 end
 
+function MovementShared.ScheduleMovementTask(self: SharedMovementEngine, time: number)
+	if self.DeferredMovementTask then
+		task.cancel(self.DeferredMovementTask)
+	end
+
+	self.DeferredMovementTask = task.delay(time, function()
+		self.DeferredMovementTask = nil
+		self:EnableMovement()
+	end)
+end
+
+function MovementShared.ScheduleActionTask(self: SharedMovementEngine, time: number)
+	if self.DeferredActionTask then
+		task.cancel(self.DeferredActionTask)
+	end
+
+	self.DeferredActionTask = task.delay(time, function()
+		self.DeferredActionTask = nil
+		self:EnableAction()
+	end)
+end
+
 function MovementShared.LockMovement(self: SharedMovementEngine, duration: number)
 	self:DisableMovement()
-	self:ScheduleDeferTask(duration)
+	self:ScheduleMovementTask(duration)
+end
+
+function MovementShared.LockAction(self: SharedMovementEngine, duration: number)
+	self:DisableAction()
+	self:ScheduleActionTask(duration)
 end
 
 function MovementShared.UnlockMovement(self: SharedMovementEngine)
-	self:DeferTask()
+	self:EnableMovement()
+end
+
+function MovementShared.UnlockAction(self: SharedMovementEngine)
+	self:EnableAction()
 end
 
 function MovementShared.IsMovementEnabled(self: SharedMovementEngine): boolean
 	return self.MovementEnabled and not (self.AllMovementDisabled == true)
+end
+
+function MovementShared.IsActionEnabled(self: SharedMovementEngine): boolean
+	return self.ActionEnabled and not (self.AllMovementDisabled == true)
 end
 
 function MovementShared.IsGrounded(self: SharedMovementEngine): boolean

@@ -61,6 +61,108 @@ local function GetBackpack(entity: Entity): Backpack?
 	return player:FindFirstChildOfClass("Backpack")
 end
 
+local function EnsureTrailAttachment(handle: BasePart, name: string, position: Vector3): Attachment
+	local attachment = handle:FindFirstChild(name)
+	if attachment and attachment:IsA("Attachment") then
+		attachment.Position = position
+		return attachment
+	end
+
+	attachment = Instance.new("Attachment")
+	attachment.Name = name
+	attachment.Position = position
+	attachment.Parent = handle
+	return attachment
+end
+
+local function GetTrailEndpoints(handle: BasePart): (Vector3, Vector3)
+	local size = handle.Size
+	local mesh = handle:FindFirstChildWhichIsA("DataModelMesh")
+	if mesh then
+		size = Vector3.new(
+			math.max(size.X, math.abs(mesh.Scale.X)),
+			math.max(size.Y, math.abs(mesh.Scale.Y)),
+			math.max(size.Z, math.abs(mesh.Scale.Z))
+		)
+	end
+
+	local xExtent = size.X * 0.48
+	local yExtent = size.Y * 0.48
+	local zExtent = size.Z * 0.48
+	local axes = {
+		{ Name = "X", Size = size.X, Extent = xExtent },
+		{ Name = "Y", Size = size.Y, Extent = yExtent },
+		{ Name = "Z", Size = size.Z, Extent = zExtent },
+	}
+	table.sort(axes, function(left, right)
+		return left.Size > right.Size
+	end)
+
+	local primaryAxis = axes[1]
+	local secondaryAxis = axes[2]
+	local tertiaryAxis = axes[3]
+
+	-- For flat, elongated blades, the trail looks better spanning the blade face
+	-- instead of the full blade length.
+	local chosenAxis = primaryAxis
+	if primaryAxis.Size >= (secondaryAxis.Size * 1.2) and tertiaryAxis.Size <= (secondaryAxis.Size * 0.6) then
+		chosenAxis = secondaryAxis
+	end
+
+	if chosenAxis.Name == "Z" then
+		return Vector3.new(0, 0, -chosenAxis.Extent), Vector3.new(0, 0, chosenAxis.Extent)
+	elseif chosenAxis.Name == "Y" then
+		return Vector3.new(0, -chosenAxis.Extent, 0), Vector3.new(0, chosenAxis.Extent, 0)
+	else
+		return Vector3.new(-chosenAxis.Extent, 0, 0), Vector3.new(chosenAxis.Extent, 0, 0)
+	end
+end
+
+local function EnsureWeaponTrail(tool: Tool)
+	local handle = tool:FindFirstChild("Handle")
+	if not handle or not handle:IsA("BasePart") then
+		return
+	end
+
+	local endpoint0, endpoint1 = GetTrailEndpoints(handle)
+	local attachment0 = EnsureTrailAttachment(handle, "TrailAttachment0", endpoint0)
+	local attachment1 = EnsureTrailAttachment(handle, "TrailAttachment1", endpoint1)
+
+	local trail = handle:FindFirstChild("WeaponTrail")
+	if trail and trail:IsA("Trail") then
+		trail.Attachment0 = attachment0
+		trail.Attachment1 = attachment1
+		return
+	end
+
+	trail = Instance.new("Trail")
+	trail.Name = "WeaponTrail"
+	trail.Attachment0 = attachment0
+	trail.Attachment1 = attachment1
+	trail.FaceCamera = false
+	trail.Lifetime = 0.14
+	trail.MinLength = 0.12
+	trail.Brightness = 3
+	trail.LightEmission = 1
+	trail.LightInfluence = 0
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.02),
+		NumberSequenceKeypoint.new(0.35, 0.08),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.8),
+		NumberSequenceKeypoint.new(0.45, 1.1),
+		NumberSequenceKeypoint.new(1, 0.3),
+	})
+	trail.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 245, 200)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 120, 90)),
+	})
+	trail.Parent = handle
+end
+
 local function ClearManagedTools(entity: Entity)
 	local backpack = GetBackpack(entity)
 	if backpack then
@@ -83,6 +185,8 @@ local function GiveToolClone(entity: Entity, weapon: WeaponType, toolbarSlot: nu
 	if not tool then
 		return nil
 	end
+
+	EnsureWeaponTrail(tool)
 
 	tool:SetAttribute("ManagedByEquipmentService", true)
 	tool:SetAttribute("WeaponId", weapon.WeaponId)

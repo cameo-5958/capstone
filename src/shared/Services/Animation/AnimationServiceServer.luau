@@ -38,6 +38,10 @@ function AnimationService.PlayPlayer(player: Player, animID: AnimationId)
 	BroadcastPlayerAnimation(player, animID, "Start", true)
 end
 
+function AnimationService.PlayPlayerOnce(player: Player, animID: AnimationId)
+	BroadcastPlayerAnimation(player, animID, "StartOnce", true)
+end
+
 function AnimationService.StopPlayer(player: Player, animID: AnimationId)
 	BroadcastPlayerAnimation(player, animID, "Stop", true)
 end

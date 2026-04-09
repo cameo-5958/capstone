@@ -6,7 +6,6 @@ local UserInputService = game:GetService("UserInputService")
 
 local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
-local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local MovementShared = require(script.Parent.MovementShared)
 local ClassCombos = require(ReplicatedStorage.Database.Weapons.Default.Combos)
@@ -19,10 +18,6 @@ type SharedMovementEngine = MovementShared.SharedMovementEngine
 local MovementEngine = {}
 MovementEngine.__index = MovementEngine
 setmetatable(MovementEngine, { __index = MovementShared })
-
-local LIGHT_ATTACK_STAMINA_COST = 15
-local HEAVY_ATTACK_STAMINA_COST = 25
-local DASH_STAMINA_COST = 20
 
 export type MovementEngine = SharedMovementEngine & {
 	Character: Model,
@@ -124,6 +119,20 @@ local function GetMovementLockDuration(
 	return attack.MovementLockedUntil or fallbackDuration
 end
 
+local function GetAttackLockDurations(
+	self: MovementEngine,
+	equippedWeapon: { [string]: any }?,
+	attackContext: { [string]: any }
+): (number, number)
+	if equippedWeapon and equippedWeapon.Class == "Spear" then
+		return attackContext.MovementLockDuration or 1.4, attackContext.ActionLockDuration or 1.0
+	end
+
+	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.MovementLockDuration or attackContext.LockDuration)
+	local actionLockDuration = attackContext.ActionLockDuration or movementLockDuration
+	return movementLockDuration, actionLockDuration
+end
+
 local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [string]: any }?): any
 	if not equippedWeapon or not IsComboWeapon(equippedWeapon.Class) then
 		return nil
@@ -148,15 +157,6 @@ local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [stri
 	end
 
 	return combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
-end
-
-local function GetScaledStat(statName: string, fallback: number): number
-	local statValue = PlayerServiceClient.GetStat(statName)
-	if typeof(statValue) ~= "number" then
-		return fallback
-	end
-
-	return statValue
 end
 
 local function IsBowEquipped(): boolean
@@ -324,7 +324,7 @@ function MovementEngine.UpdateFacingFromCamera(self: MovementEngine)
 		return
 	end
 
-	self.RootPart:PivotTo(CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + desiredLook))
+	self.RootPart.CFrame = CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + desiredLook)
 end
 
 function MovementEngine.DisableAllMovement(self: MovementEngine)
@@ -339,7 +339,7 @@ function MovementEngine.EnableAllMovement(self: MovementEngine)
 end
 
 function MovementEngine.Attack(self: MovementEngine): boolean
-	if not self:IsMovementEnabled() then
+	if not self:IsActionEnabled() then
 		return false
 	end
 
@@ -351,7 +351,22 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 	local weaponClass = equippedWeapon.Class or "Sword"
 	local attackContext = equippedWeapon.AttackContext or {}
 
-	if weaponClass == "Sword" or weaponClass == nil then
+	if weaponClass == "Spear" then
+		local spearDefaults = {
+			SightRange = 32,
+			SwingRange = 4.5,
+			MaxDashRange = 2.5,
+			LungeDuration = 0.08,
+			MovementLockDuration = 1.4,
+			ActionLockDuration = 1.0,
+			LockDuration = 1.4,
+		}
+		for key, value in pairs(spearDefaults) do
+			if attackContext[key] == nil then
+				attackContext[key] = value
+			end
+		end
+	elseif weaponClass == "Sword" or weaponClass == nil then
 		local swordDefaults = {
 			SightRange = 32,
 			SwingRange = 4.5,
@@ -382,17 +397,7 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 	local attackSwingRange = attackContext.SwingRange
 	local maxLungeDistance = attackContext.MaxDashRange
 	local lungeDuration = attackContext.LungeDuration
-	local nextAttack = PeekNextComboAttack(self, equippedWeapon)
-	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.LockDuration)
-	local isHeavyAttack = nextAttack ~= nil and nextAttack.IsHeavy == true
-	local isNoStaminaAttack = nextAttack ~= nil and nextAttack.NoStamina == true
-	local stamina = PlayerServiceClient.GetStat("Stamina") or 0
-	local staminaConsumptionRate = GetScaledStat("StaminaConsumptionRate", 1)
-	local attackStaminaCost = (isHeavyAttack and HEAVY_ATTACK_STAMINA_COST or LIGHT_ATTACK_STAMINA_COST) * staminaConsumptionRate
-
-	if not isNoStaminaAttack and stamina < attackStaminaCost then
-		return false
-	end
+	local movementLockDuration, actionLockDuration = GetAttackLockDurations(self, equippedWeapon, attackContext)
 
 	local target = self:GetTarget(self.RootPart.Position, attackSightRange)
 	local targetLocation = Vector3.zero
@@ -404,6 +409,7 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 	end
 
 	self:LockMovement(movementLockDuration)
+	self:LockAction(actionLockDuration)
 
 	local flatTargetLocation = Vector3.new(targetLocation.X, self.RootPart.Position.Y, targetLocation.Z)
 	local delta = (flatTargetLocation - self.RootPart.Position)
@@ -421,13 +427,7 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 end
 
 function MovementEngine.Dash(self: MovementEngine): boolean
-	if not self:IsMovementEnabled() or not self:IsGrounded() then
-		return false
-	end
-
-	local stamina = PlayerServiceClient.GetStat("Stamina") or 0
-	local staminaConsumptionRate = GetScaledStat("StaminaConsumptionRate", 1)
-	if stamina < (DASH_STAMINA_COST * staminaConsumptionRate) then
+	if not self:IsActionEnabled() or not self:IsGrounded() then
 		return false
 	end
 
@@ -439,11 +439,12 @@ function MovementEngine.Dash(self: MovementEngine): boolean
 	local dashAnimation = if isBackstep then "Backstep" else "Dash"
 	self:Stop("Attack")
 	self:Play(dashAnimation)
-	self:DisableMovement()
+	self:LockMovement(dashDuration)
+	self:LockAction(dashDuration)
 	self:SetInvincibilityStatus(true)
-	self:ScheduleDeferTask(dashDuration)
 	self:ApplyLinearVelocity(dashDirection * dashSpeed, dashDuration)
 	task.delay(dashDuration, function()
+		self:SetInvincibilityStatus(false)
 		self:Stop(dashAnimation)
 	end)
 

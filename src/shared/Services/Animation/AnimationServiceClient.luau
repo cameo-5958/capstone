@@ -6,11 +6,24 @@
 local API = script.Parent:WaitForChild("AnimationHandler") :: RemoteEvent
 local EntitiesFolder = workspace:WaitForChild("EntitiesFolder")
 local Players = game:GetService("Players")
+local ContentProvider = game:GetService("ContentProvider")
 
 local AnimationServiceClient = {}
 
 local LocalPlayer = Players.LocalPlayer
 type AnimationId = string | { string }
+local LoadedTracks = setmetatable({}, { __mode = "k" }) :: { [Animator]: { [string]: AnimationTrack } }
+
+local function GetTrackCache(animator: Animator): { [string]: AnimationTrack }
+	local cache = LoadedTracks[animator]
+	if cache then
+		return cache
+	end
+
+	cache = {}
+	LoadedTracks[animator] = cache
+	return cache
+end
 
 local function ResolveAnimationId(animId: AnimationId): string?
 	if type(animId) == "string" then
@@ -55,10 +68,16 @@ end
 
 -- GetTrack
 local function GetAnimationTrack(animator: Animator, animId: string): AnimationTrack?
+	local cachedTrack = GetTrackCache(animator)[animId]
+	if cachedTrack then
+		return cachedTrack
+	end
+
 	-- Grab loaded track if possible
 	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
 		if track.Animation.AnimationId == animId then
 			-- Return this track
+			GetTrackCache(animator)[animId] = track
 			return track
 		end
 	end
@@ -71,25 +90,61 @@ local function LoadTrack(animator: Animator, animId: string): AnimationTrack
 	-- Create a new animation, load and play
 	local anim = Instance.new("Animation")
 	anim.AnimationId = animId
+	ContentProvider:PreloadAsync({ anim })
+	local track = animator:LoadAnimation(anim)
+	GetTrackCache(animator)[animId] = track
+	return track
+end
 
-	return animator:LoadAnimation(anim)
+local function GetAnimator(character: Model): Animator?
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid or not humanoid:IsA("Humanoid") then
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChild("Animator")
+	if animator and animator:IsA("Animator") then
+		return animator
+	end
+
+	animator = Instance.new("Animator")
+	animator.Parent = humanoid
+	return animator
+end
+
+local function EnsureAnimationTrack(character: Model, animId: string): AnimationTrack?
+	local animator = GetAnimator(character)
+	if not animator then
+		return nil
+	end
+
+	return GetAnimationTrack(animator, animId) or LoadTrack(animator, animId)
+end
+
+local function PreloadAnimations(character: Model, animIds: { string })
+	for _, animId in ipairs(animIds) do
+		if animId ~= "" then
+			EnsureAnimationTrack(character, animId)
+		end
+	end
 end
 
 -- Animating
-local function Animate(character: Model, animId: AnimationId)
+local function Animate(character: Model, animId: AnimationId, playOnce: boolean?)
 	local resolvedAnimId = ResolveAnimationId(animId)
 	if not resolvedAnimId then
 		return
 	end
 
-	-- Ensure the character has an animator already
-	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid
-	local animator: Animator = humanoid:FindFirstChild("Animator") :: Animator or Instance.new("Animator")
+	local track = EnsureAnimationTrack(character, resolvedAnimId)
+	if not track then
+		return
+	end
 
-	animator.Parent = humanoid
-
-	-- Confirm the animation isn't loaded
-	local track = GetAnimationTrack(animator, resolvedAnimId) or LoadTrack(animator, resolvedAnimId)
+	if playOnce then
+		track.Looped = false
+		track.TimePosition = 0
+	end
 
 	-- Play the animation
 	track:Play()
@@ -131,9 +186,12 @@ local function GetEntity(uuid: string): Model
 end
 
 -- Handle animation from a PLAYER
-local function GetPlayer(player: Player): Model
+local function GetPlayer(player: Player): Model?
 	-- Grab the character of the player
-	local character = player.Character or player.CharacterAdded:Wait()
+	local character = player.Character
+	if not character or character.Parent == nil then
+		return nil
+	end
 
 	-- Animate the found model
 	return character --Animate(character, animId)
@@ -141,16 +199,22 @@ end
 
 -- Handle animation generally
 API.OnClientEvent:Connect(function(identifier: Player | string, manageType: string, animId: AnimationId, status: string)
-	local model: Model
+	local model: Model?
 	if manageType == "UUID" then
 		model = GetEntity(identifier :: string)
 	elseif manageType == "Player" then
 		model = GetPlayer(identifier :: Player)
 	end
 
+	if not model then
+		return
+	end
+
 	-- stop the animation
 	if status == "Stop" then
 		Stop(model, animId)
+	elseif status == "StartOnce" then
+		Animate(model, animId, true)
 	else
 		-- Play the animation
 		Animate(model, animId)
@@ -166,6 +230,15 @@ function AnimationServiceClient.Animate(animId: AnimationId)
 
 	-- Call API with my animId
 	API:FireServer(animId, "Start")
+end
+
+function AnimationServiceClient.PreloadLocalAnimations(animIds: { string })
+	local character = LocalPlayer.Character
+	if not character or character.Parent == nil then
+		return
+	end
+
+	PreloadAnimations(character, animIds)
 end
 
 function AnimationServiceClient.StopAnimation(animId: AnimationId)

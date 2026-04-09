@@ -76,7 +76,7 @@ return {
 				["Id"] = "polearm_chain",
 				["Attacks"] = {
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://139475664738055",
 						["PowerScale"] = 0.55,
 						["MovementLockedUntil"] = 0.62,
 						["HitWindows"] = {
@@ -84,7 +84,7 @@ return {
 						},
 					},
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://120272323117203",
 						["PowerScale"] = 0.62,
 						["MovementLockedUntil"] = 0.66,
 						["HitWindows"] = {
@@ -93,7 +93,7 @@ return {
 						},
 					},
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://77631012695666",
 						["PowerScale"] = 0.7,
 						["MovementLockedUntil"] = 0.7,
 						["HitWindows"] = {
@@ -101,7 +101,7 @@ return {
 						},
 					},
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://109822730522380",
 						["PowerScale"] = 0.82,
 						["MovementLockedUntil"] = 0.74,
 						["HitWindows"] = {
@@ -110,7 +110,7 @@ return {
 						},
 					},
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://132830532945806",
 						["PowerScale"] = 0.94,
 						["MovementLockedUntil"] = 0.82,
 						["HitWindows"] = {
@@ -118,7 +118,7 @@ return {
 						},
 					},
 					{
-						["AnimationId"] = "",
+						["AnimationId"] = "rbxassetid://103039946478115",
 						["PowerScale"] = 1.3,
 						["MovementLockedUntil"] = 1.02,
 						["IsHeavy"] = true,

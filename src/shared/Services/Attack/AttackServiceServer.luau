@@ -165,7 +165,7 @@ local function ReleaseBowCharge(player: Player, payload: { [string]: any }?)
 	})
 end
 
-local function ClearAttackLater(player: Player, attackId: string, clearAt: number, animationId: string)
+local function ClearAttackLater(player: Player, attackId: string, clearAt: number)
 	local delayTime = math.max(0, clearAt - workspace:GetServerTimeNow())
 	task.delay(delayTime, function()
 		local active = ActiveAttacks[player]
@@ -174,10 +174,6 @@ local function ClearAttackLater(player: Player, attackId: string, clearAt: numbe
 		end
 
 		ActiveAttacks[player] = nil
-
-		if active.StopAnimationOnClear and animationId ~= "" then
-			AnimationServiceServer.StopPlayer(player, animationId)
-		end
 	end)
 end
 
@@ -249,21 +245,6 @@ local function GetDefaultCombo(comboSet: ComboSet): ComboDefinition?
 	end
 
 	return nil
-end
-
-local function StopComboAnimations(player: Player, weaponClass: string)
-	local comboSet = ClassCombos[weaponClass] :: ComboSet?
-	if not comboSet then
-		return
-	end
-
-	for _, combo in pairs(comboSet.Combos) do
-		for _, attack in ipairs(combo.Attacks) do
-			if HasAnimationId(attack.AnimationId) then
-				AnimationServiceServer.StopPlayer(player, ResolveAnimationId(attack.AnimationId))
-			end
-		end
-	end
 end
 
 local function BuildActiveHitWindows(now: number, profile: AttackProfile, comboAttack: ComboAttack?): { ActiveHitWindow }
@@ -418,12 +399,8 @@ local function BeginPrimaryAttack(player: Player)
 		Hits = {},
 	}
 
-	if startedNewSequence then
-		StopComboAnimations(player, weapon.Class)
-	end
-
 	if animationId ~= "" then
-		AnimationServiceServer.PlayPlayer(player, animationId)
+		AnimationServiceServer.PlayPlayerOnce(player, animationId)
 	end
 
 	API:FireClient(player, "AttackStarted", {
@@ -433,7 +410,7 @@ local function BeginPrimaryAttack(player: Player)
 		Profile = profile,
 	})
 
-	ClearAttackLater(player, attackId, clearAt, animationId)
+	ClearAttackLater(player, attackId, clearAt)
 end
 
 local function ReportHit(player: Player, payload: { [string]: any }?)
