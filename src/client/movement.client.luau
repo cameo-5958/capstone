@@ -7,6 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local AttackServiceClient = require(ReplicatedStorage.Services.Attack.AttackServiceClient)
 local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
+local WardrobeViewport = require(ReplicatedStorage.Viewports.WardrobeViewport)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local CameraController = require(script.Parent.CameraController)
 local Movement = require(ReplicatedStorage.Classes.Entity.PlayerMovement)
@@ -19,6 +20,8 @@ local IsChargingBow = false
 local IsBowAiming = false
 local BowHoldToken = 0
 local BOW_AIM_HOLD_DELAY = 0.2
+local PreloadedWeaponAnimationClasses: { [string]: boolean } = {}
+local IsWardrobeOpen = false
 
 local function CollectComboAnimationIds(weaponClass: string?): { string }
 	if not weaponClass then
@@ -71,6 +74,11 @@ local function PreloadEquippedWeaponAnimations()
 		return
 	end
 
+	if PreloadedWeaponAnimationClasses[equippedWeapon.Class] then
+		return
+	end
+
+	PreloadedWeaponAnimationClasses[equippedWeapon.Class] = true
 	AnimationServiceClient.PreloadLocalAnimations(CollectComboAnimationIds(equippedWeapon.Class))
 end
 
@@ -92,16 +100,25 @@ local function SetBowCameraEnabled(enabled: boolean)
 	end
 end
 
+local function RecreateMovementEngine()
+	engine = Movement.lnew()
+	if IsWardrobeOpen then
+		engine:DisableAllMovement()
+	end
+end
+
 PreloadLocalPlayerAnimations()
 PreloadEquippedWeaponAnimations()
 game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
 	task.defer(function()
+		RecreateMovementEngine()
 		PreloadLocalPlayerAnimations()
 		PreloadEquippedWeaponAnimations()
 	end)
 end)
 WeaponServiceClient.GetEquippedWeaponChangedSignal():Connect(function()
-	PreloadEquippedWeaponAnimations()
+	engine:UpdateMovementAnimation()
+	task.defer(PreloadEquippedWeaponAnimations)
 end)
 
 local function GetBowReleasePayload(): { [string]: any }
@@ -116,9 +133,49 @@ local function GetBowReleasePayload(): { [string]: any }
 	}
 end
 
+local function CancelBowCharge()
+	if not IsChargingBow then
+		return
+	end
+
+	IsChargingBow = false
+	BowHoldToken += 1
+	if IsBowAiming then
+		IsBowAiming = false
+		SetBowCameraEnabled(false)
+	end
+	AttackServiceClient.ReleaseBowCharge(GetBowReleasePayload())
+end
+
+local function SetWardrobeOpen(isOpen: boolean)
+	if IsWardrobeOpen == isOpen then
+		return
+	end
+
+	IsWardrobeOpen = isOpen
+	if isOpen then
+		CancelBowCharge()
+		PlayerServiceClient.SetRightClickReleased()
+		engine:DisableAllMovement()
+		WardrobeViewport.Show()
+	else
+		WardrobeViewport.Hide()
+		engine:EnableAllMovement()
+	end
+end
+
 -- Attach to UserInputService
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.B then
+		SetWardrobeOpen(not IsWardrobeOpen)
+		return
+	end
+
+	if IsWardrobeOpen then
 		return
 	end
 
@@ -161,16 +218,12 @@ UserInputService.InputEnded:Connect(function(input, processed)
 		return
 	end
 
+	if IsWardrobeOpen then
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			if IsChargingBow then
-				IsChargingBow = false
-				BowHoldToken += 1
-				if IsBowAiming then
-					IsBowAiming = false
-					SetBowCameraEnabled(false)
-				end
-				AttackServiceClient.ReleaseBowCharge(GetBowReleasePayload())
-			end
+		CancelBowCharge()
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 		PlayerServiceClient.SetRightClickReleased()
 	end

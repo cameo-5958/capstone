@@ -3,6 +3,9 @@ return {
 	["__Animations"] = {
 		["Backstep"] = "rbxassetid://127716827513435",
 		["Dash"] = "rbxassetid://129646378332732",
+		["Idle"] = "rbxassetid://136309039087373",
+		["IdleClaymore"] = "rbxassetid://85891353109660",
+		["IdleSpear"] = "rbxassetid://86995338874823",
 		["Walk"] = "rbxassetid://100786776050944",
 	},
 	["__Stats"] = {

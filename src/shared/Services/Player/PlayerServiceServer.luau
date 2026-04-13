@@ -7,11 +7,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local AttackModifierApplier = require(ReplicatedStorage.Classes.Attack.AttackModifierApplier)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
-local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
 local WeaponServiceServer = require(ReplicatedStorage.Services.Weapon.WeaponServiceServer)
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
 
@@ -71,7 +69,7 @@ if not endpoint then
 	endpoint.Parent = script.Parent
 end
 local API = endpoint :: RemoteEvent
-local DASH_IFRAME_DURATION = 0.48
+local DASH_IFRAME_DURATION = 0.32
 local DASH_IFRAME_COOLDOWN = 0.3
 local DASH_STAMINA_COST = 20
 local LIGHT_ATTACK_STAMINA_COST = 15
@@ -84,9 +82,6 @@ local STAMINA_RAMP_DURATION = 0.4
 local RUN_SPEED_MULTIPLIER = 2.5
 local RUNNING_SPEED_MODIFIER_ID = "system:running:speed"
 local PlayerNextDashIframeAt: { [string]: number } = {}
-local TEST_KILL_STRENGTH_MODIFIER_ID = "test:on_defeat_enemy:strength"
-local TEST_KILL_STRENGTH_DURATION = 15
-
 local function HideHumanoidOverhead(character: Model)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -97,36 +92,6 @@ local function HideHumanoidOverhead(character: Model)
 	humanoid.HealthDisplayDistance = 0
 	humanoid.NameDisplayDistance = 0
 	humanoid.DisplayName = ""
-end
-
-local function EnsureTestAttackModifier(entity: Entity)
-	entity:RemoveAttackModifierById(TEST_KILL_STRENGTH_MODIFIER_ID)
-	entity:AddAttackModifier(AttackModifierApplier.new(TEST_KILL_STRENGTH_MODIFIER_ID, {
-		OnDefeatEnemy = function(self, attackContext)
-			local owner = attackContext.From
-			local defeated = attackContext.To
-			local stackId = ("%s:%s:%.6f"):format(
-				self.Id,
-				defeated.UUID,
-				workspace:GetServerTimeNow()
-			)
-			local activeStacks = self.Components.ActiveStacks :: { [string]: string }
-			activeStacks[stackId] = defeated.UUID
-			owner:AddModifier("Strength", Entity.Modifier.new(
-				stackId,
-				"BaseFlat",
-				100000,
-				self.Id
-			))
-			task.delay(TEST_KILL_STRENGTH_DURATION, function()
-				activeStacks[stackId] = nil
-				owner:RemoveModifier("Strength", stackId)
-			end)
-			print(("OnDefeatEnemy test modifier fired for %s against %s"):format(owner.Name, defeated.Name))
-		end,
-	}, nil, {
-		ActiveStacks = {},
-	}))
 end
 
 local function GetRuntimeState(playerName: string)
@@ -302,6 +267,22 @@ local function BindStatReplication(player: Player, entity: Entity)
 	PlayerStatConnections[player.Name] = connections
 end
 
+local function ApplyPlayerConfigToEntity(entity: Entity)
+	for key, value in pairs(PlayerConfig) do
+		if key == "__Stats" then
+			for statName, statValue in pairs(value) do
+				entity:SetStat(statName, statValue)
+			end
+		elseif typeof(entity[key]) == typeof(table) then
+			for nestedKey, nestedValue in pairs(value) do
+				entity[key][nestedKey] = nestedValue
+			end
+		else
+			entity[key] = value
+		end
+	end
+end
+
 local function BindCharacter(player: Player, character: Model): Entity
 	local animateScript = character:FindFirstChild("Animate")
 	if animateScript then
@@ -320,21 +301,10 @@ local function BindCharacter(player: Player, character: Model): Entity
 		entity:SyncCharacterStats()
 	else
 		entity = Entity.new(character, player.Name)
-		for key, value in pairs(PlayerConfig) do
-			if key == "__Stats" then
-				for statName, statValue in pairs(value) do
-					entity:SetStat(statName, statValue)
-				end
-			elseif typeof(entity[key]) == typeof(table) then
-				for nestedKey, nestedValue in pairs(value) do
-					entity[key][nestedKey] = nestedValue
-				end
-			else
-				entity[key] = value
-			end
-		end
 		PlayerCharacters[player.Name] = entity
 	end
+
+	ApplyPlayerConfigToEntity(entity)
 
 	local runtimeState = GetRuntimeState(player.Name)
 	StopRunning(entity, runtimeState)
@@ -349,12 +319,10 @@ local function BindCharacter(player: Player, character: Model): Entity
 	runtimeState.StaminaRampEndAt = 0
 	UpdateDerivedResourceStats(entity)
 
-	EnsureTestAttackModifier(entity)
 	BindStatReplication(player, entity)
 	SyncStatsToClient(player, entity)
 
 	WeaponServiceServer.RegisterEntity(player, entity)
-	EquipmentServiceServer.GiveDefaultLoadout(entity)
 	WeaponServiceServer.SyncEquippedWeapon(player)
 
 	return entity

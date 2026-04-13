@@ -13,6 +13,12 @@ local function ensureGroup(name: string)
 	end)
 end
 
+local function setGroupsCollidable(groupA: string, groupB: string, canCollide: boolean)
+	pcall(function()
+		PhysicsService:CollisionGroupSetCollidable(groupA, groupB, canCollide)
+	end)
+end
+
 local function applyGroupRecursive(instance: Instance, groupName: string)
 	if instance:IsA("BasePart") then
 		instance.CollisionGroup = groupName
@@ -30,6 +36,8 @@ function CollisionServiceServer.init()
 
 	ensureGroup("Enemy")
 	ensureGroup("Player")
+	setGroupsCollidable("Enemy", "Enemy", false)
+	setGroupsCollidable("Enemy", "Player", false)
 	REGISTERED = true
 end
 

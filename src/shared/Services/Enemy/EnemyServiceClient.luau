@@ -72,6 +72,22 @@ local function FormatStatValue(value: number?): string
 	return tostring(math.round(value * 100) / 100)
 end
 
+local function GetEnemyDisplayLevel(ent: Entity): number
+	if ent.Character then
+		local attributeLevel = ent.Character:GetAttribute("EnemyLevel")
+		if type(attributeLevel) == "number" then
+			return attributeLevel
+		end
+	end
+
+	local scaledLevel = ent.__ScaledLevel
+	if type(scaledLevel) == "number" then
+		return scaledLevel
+	end
+
+	return ent.Level or 1
+end
+
 local function GetTagAdornee(ent: Entity): Instance?
 	if not ent.Character then
 		return nil
@@ -292,7 +308,7 @@ local function UpdateEnemyTag(uuid: string, ent: Entity)
 	local maxHealth = ent.__Stats.MaxHealth
 	local healthRatio = if maxHealth > 0 then math.clamp(currentHealth / maxHealth, 0, 1) else 0
 
-	title.Text = ("[%s] %s"):format(FormatStatValue(ent.Level), ent.Name)
+	title.Text = ("[%s] %s"):format(FormatStatValue(GetEnemyDisplayLevel(ent)), ent.Name)
 	healthBarFill.Visible = healthRatio > 0
 	if healthRatio > 0 then
 		healthBarFill.Size = UDim2.new(healthRatio, -2, 1, -2)
@@ -475,7 +491,7 @@ end
 
 function Enemies.RequestSpawnEnemy(enemyPath: string?)
 	API:FireServer("RequestSpawnEnemy", {
-		EnemyPath = enemyPath or "Tests.Sword",
+		EnemyPath = enemyPath or "Skeletal.Korblox",
 	})
 end
 
@@ -542,6 +558,13 @@ RunService.Heartbeat:Connect(function()
 		local ent = __Enemies[uuid]
 		if not target or not ent or not ent.Character or not ent.Character.PrimaryPart then
 			continue
+		end
+
+		local rootPart = ent.Character.PrimaryPart
+		local rootPosition = rootPart.Position
+		local flatTarget = Vector3.new(target.X, rootPosition.Y, target.Z)
+		if (flatTarget - rootPosition).Magnitude > 0.001 then
+			rootPart.CFrame = CFrame.lookAt(rootPosition, flatTarget)
 		end
 	end
 

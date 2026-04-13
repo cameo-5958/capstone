@@ -140,48 +140,48 @@ local function EnsureWeaponTrail(tool: Tool, weaponClass: string?)
 		return
 	end
 
-	trail = Instance.new("Trail")
+	trail = Instance.new("Trail") :: Trail
 	trail.Name = "WeaponTrail"
 	trail.Attachment0 = attachment0
 	trail.Attachment1 = attachment1
 	trail.FaceCamera = false
-	trail.Lifetime = if weaponClass == "Spear" then 0.09 else 0.14
-	trail.MinLength = if weaponClass == "Spear" then 0.08 else 0.12
-	trail.Brightness = if weaponClass == "Spear" then 1.75 else 3
-	trail.LightEmission = if weaponClass == "Spear" then 0.65 else 1
-	trail.LightInfluence = 0
+	trail.Lifetime = if weaponClass == "Spear" then 0.07 else 0.09
+	trail.MinLength = if weaponClass == "Spear" then 0.06 else 0.08
+	trail.Brightness = 0
+	trail.LightEmission = 0
+	trail.LightInfluence = 1
 	trail.Transparency = if weaponClass == "Spear"
 		then NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.12),
-			NumberSequenceKeypoint.new(0.45, 0.22),
+			NumberSequenceKeypoint.new(0, 0.4),
+			NumberSequenceKeypoint.new(0.4, 0.65),
 			NumberSequenceKeypoint.new(1, 1),
 		})
 		else NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.02),
-			NumberSequenceKeypoint.new(0.35, 0.08),
+			NumberSequenceKeypoint.new(0, 0.3),
+			NumberSequenceKeypoint.new(0.35, 0.58),
 			NumberSequenceKeypoint.new(1, 1),
 		})
 	trail.WidthScale = if weaponClass == "Spear"
 		then NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1.1),
-			NumberSequenceKeypoint.new(0.45, 0.75),
-			NumberSequenceKeypoint.new(1, 0.2),
+			NumberSequenceKeypoint.new(0, 0.5),
+			NumberSequenceKeypoint.new(0.45, 0.25),
+			NumberSequenceKeypoint.new(1, 0),
 		})
 		else NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1.8),
-			NumberSequenceKeypoint.new(0.45, 1.1),
-			NumberSequenceKeypoint.new(1, 0.3),
+			NumberSequenceKeypoint.new(0, 0.65),
+			NumberSequenceKeypoint.new(0.4, 0.35),
+			NumberSequenceKeypoint.new(1, 0),
 		})
 	trail.Color = if weaponClass == "Spear"
 		then ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(245, 245, 245)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 225, 235)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 180, 200)),
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(215, 220, 230)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(170, 178, 195)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(125, 135, 155)),
 		})
 		else ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-			ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 245, 200)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 120, 90)),
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 220, 225)),
+			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(175, 180, 190)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 125, 135)),
 		})
 	trail.Enabled = true
 	trail.Parent = handle
@@ -279,24 +279,17 @@ function EquipmentServiceServer.AssignEquippedWeapon(entity: Entity, weaponPath:
 	return weapon
 end
 
-function EquipmentServiceServer.GiveDefaultLoadout(entity: Entity)
+function EquipmentServiceServer.ApplyLoadout(entity: Entity, weaponPaths: { string })
 	ClearManagedTools(entity)
 	entity:SetEquippedIndex(nil)
 
-	local defaultWeapons = {
-		"Bone.Sword.Bone_Sword_1",
-		"Bow1",
-		"Skeletal.Lance",
-		"TestWeapon",
-	}
-
-	for slot, weaponPath in ipairs(defaultWeapons) do
+	for slot, weaponPath in ipairs(weaponPaths) do
 		EquipmentServiceServer.AssignToolbarWeapon(entity, weaponPath, slot)
 	end
 
-	entity:SetEquippedIndex(1)
+	if #weaponPaths > 0 then
+		entity:SetEquippedIndex(1)
+	end
 end
 
 return table.freeze(EquipmentServiceServer)
-
-

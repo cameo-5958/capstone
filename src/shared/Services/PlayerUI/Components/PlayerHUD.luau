@@ -67,7 +67,7 @@ local function spawnButton()
 		TextColor3 = Color3.fromRGB(245, 245, 245),
 		TextSize = 16,
 		[React.Event.Activated] = function()
-			EnemyServiceClient.RequestSpawnEnemy("Tests.Sword")
+			EnemyServiceClient.RequestSpawnEnemy("Skeletal.Korblox")
 		end,
 	}, {
 		Stroke = React.createElement("UIStroke", {

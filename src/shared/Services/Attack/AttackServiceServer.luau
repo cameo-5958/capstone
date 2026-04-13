@@ -358,7 +358,7 @@ local function ResolveComboAttack(entity, weapon, now: number): (ComboAttack?, b
 	return attack, attackIndex < #combo.Attacks, startedNewSequence
 end
 
-function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: number, swingRange: number?)
+function AttackServiceServer.ProcessEnemyHit(attacker, target, physicalDamage: number, swingRange: number?)
 	if not attacker or not target then
 		return false
 	end
@@ -374,7 +374,7 @@ function AttackServiceServer.ProcessEnemyHit(attacker, target, baseDamage: numbe
 	end
 
 	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
-	attacker:ApplyDamage(baseDamage, target)
+	target:TakeDamage(physicalDamage, attacker)
 	return true
 end
 
@@ -488,8 +488,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 
 	active.Hits[hitWindowIndex] = active.Hits[hitWindowIndex] or {}
 	local hitWindowHits = active.Hits[hitWindowIndex]
-	local lastHitAt = hitWindowHits[payload.TargetUUID]
-	if lastHitAt and now - lastHitAt < hitWindow.Profile.HitReset then
+	if hitWindowHits[payload.TargetUUID] then
 		return
 	end
 
@@ -520,8 +519,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 
 			retryActive.Hits[hitWindowIndex] = retryActive.Hits[hitWindowIndex] or {}
 			local retryWindowHits = retryActive.Hits[hitWindowIndex]
-			local retryLastHitAt = retryWindowHits[targetUUID]
-			if retryLastHitAt and retryNow - retryLastHitAt < retryWindow.Profile.HitReset then
+			if retryWindowHits[targetUUID] then
 				return
 			end
 
@@ -562,7 +560,6 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
-
 
 
 

@@ -61,6 +61,7 @@ local function OnEnter(self: Neuron): ()
 	self.__Attributes["Direction"] = math.random() > 0.5 and 1 or -1
 
 	local animationKey = GetStrafeAnimationKey(self)
+	self.Brain.LastStrafeAnimationKey = animationKey
 	if self.Brain.MovementEngine.__Animations[animationKey] then
 		self.Brain.MovementEngine:Play(animationKey)
 	end
@@ -97,6 +98,8 @@ end
 
 local function OnExit(self: Neuron): ()
 	local animationKey = GetStrafeAnimationKey(self)
+	self.Brain.LastStrafeAnimationKey = animationKey
+	self.Brain.LastStrafeEndedAt = os.clock()
 	if self.Brain.MovementEngine.__Animations[animationKey] then
 		self.Brain.MovementEngine:Stop(animationKey)
 	end

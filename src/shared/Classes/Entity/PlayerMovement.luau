@@ -19,6 +19,9 @@ local MovementEngine = {}
 MovementEngine.__index = MovementEngine
 setmetatable(MovementEngine, { __index = MovementShared })
 
+local DEFAULT_ATTACK_MOVEMENT_LOCK_DURATION = 1.2
+local ACTION_CANCEL_LEAD_TIME = 0.5
+
 export type MovementEngine = SharedMovementEngine & {
 	Character: Model,
 	Humanoid: Humanoid,
@@ -27,6 +30,11 @@ export type MovementEngine = SharedMovementEngine & {
 	EntityUUID: number?,
 	Player: Player?,
 	WalkAnimationPlaying: boolean,
+	IdleAnimationPlaying: boolean,
+	CurrentLocomotionAnimation: string?,
+	CurrentLocomotionAnimationId: string?,
+	LocomotionResumeToken: number,
+	CurrentActionAnimationIds: { string },
 	__Animations: { string: string },
 	__ComboState: {
 		WeaponClass: string?,
@@ -40,6 +48,8 @@ export type MovementEngine = SharedMovementEngine & {
 	Stop: (MovementEngine, string) -> (),
 	UpdateFacingFromCamera: (MovementEngine) -> (),
 	UpdateMovementAnimation: (MovementEngine) -> (),
+	DisableAllMovement: (MovementEngine) -> (),
+	EnableAllMovement: (MovementEngine) -> (),
 	Attack: (MovementEngine) -> boolean,
 	Dash: (MovementEngine) -> boolean,
 	new: (Entity) -> (),
@@ -54,6 +64,11 @@ end
 function MovementEngine.init(self: MovementEngine): ()
 	self.AllMovementDisabled = false
 	self.WalkAnimationPlaying = false
+	self.IdleAnimationPlaying = false
+	self.CurrentLocomotionAnimation = nil
+	self.CurrentLocomotionAnimationId = nil
+	self.LocomotionResumeToken = 0
+	self.CurrentActionAnimationIds = {}
 	self.__ComboState = {
 		WeaponClass = nil,
 		ComboId = nil,
@@ -142,10 +157,10 @@ end
 local function GetAttackLockDurations(
 	self: MovementEngine,
 	equippedWeapon: { [string]: any }?,
-	attackContext: { [string]: any }
+	_attackContext: { [string]: any }
 ): (number, number)
-	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, attackContext.MovementLockDuration or attackContext.LockDuration)
-	local actionLockDuration = attackContext.ActionLockDuration or movementLockDuration
+	local movementLockDuration = GetMovementLockDuration(self, equippedWeapon, DEFAULT_ATTACK_MOVEMENT_LOCK_DURATION)
+	local actionLockDuration = math.max(0, movementLockDuration - ACTION_CANCEL_LEAD_TIME)
 	return movementLockDuration, actionLockDuration
 end
 
@@ -191,6 +206,81 @@ local function PeekNextComboAttack(self: MovementEngine, equippedWeapon: { [stri
 	end
 
 	return combo.Attacks[math.clamp(attackIndex, 1, #combo.Attacks)]
+end
+
+local function CollectComboAnimationIds(weaponClass: string?): { string }
+	if not weaponClass then
+		return {}
+	end
+
+	local comboSet = ClassCombos[weaponClass]
+	if not comboSet then
+		return {}
+	end
+
+	local animationIds = {}
+	local seen = {}
+	for _, combo in pairs(comboSet.Combos) do
+		for _, attack in ipairs(combo.Attacks) do
+			local animationId = attack.AnimationId
+			if type(animationId) == "string" then
+				if animationId ~= "" and not seen[animationId] then
+					seen[animationId] = true
+					table.insert(animationIds, animationId)
+				end
+			else
+				for _, candidate in ipairs(animationId) do
+					if type(candidate) == "string" and candidate ~= "" and not seen[candidate] then
+						seen[candidate] = true
+						table.insert(animationIds, candidate)
+					end
+				end
+			end
+		end
+	end
+
+	return animationIds
+end
+
+local function CollectAllComboAnimationIds(): { string }
+	local animationIds = {}
+	local seen = {}
+
+	for weaponClass in pairs(ClassCombos) do
+		for _, animId in ipairs(CollectComboAnimationIds(weaponClass)) do
+			if not seen[animId] then
+				seen[animId] = true
+				table.insert(animationIds, animId)
+			end
+		end
+	end
+
+	return animationIds
+end
+
+local AllComboAnimationIds = CollectAllComboAnimationIds()
+
+local function IsActionAnimationPlaying(self: MovementEngine): boolean
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	local activeAnimationIds = {}
+
+	if equippedWeapon then
+		for _, animId in ipairs(CollectComboAnimationIds(equippedWeapon.Class)) do
+			table.insert(activeAnimationIds, animId)
+		end
+	end
+
+	local dashAnimation = self:GetAnimation("Dash")
+	if dashAnimation ~= "" then
+		table.insert(activeAnimationIds, dashAnimation)
+	end
+
+	local backstepAnimation = self:GetAnimation("Backstep")
+	if backstepAnimation ~= "" then
+		table.insert(activeAnimationIds, backstepAnimation)
+	end
+
+	return AnimationServiceClient.IsAnyLocalAnimationPlaying(activeAnimationIds)
 end
 
 local function IsBowEquipped(): boolean
@@ -372,6 +462,62 @@ function MovementEngine.EnableAllMovement(self: MovementEngine)
 	self:DeferTask()
 end
 
+local function StopCurrentLocomotionAnimation(self: MovementEngine)
+	if self.CurrentLocomotionAnimationId then
+		AnimationServiceClient.StopAnimation(self.CurrentLocomotionAnimationId)
+	end
+
+	self.WalkAnimationPlaying = false
+	self.IdleAnimationPlaying = false
+	self.CurrentLocomotionAnimation = nil
+	self.CurrentLocomotionAnimationId = nil
+end
+
+local function StopActionAnimations(self: MovementEngine)
+	local animationIds = table.clone(AllComboAnimationIds)
+
+	local dashAnimation = self:GetAnimation("Dash")
+	if dashAnimation ~= "" then
+		table.insert(animationIds, dashAnimation)
+	end
+
+	local backstepAnimation = self:GetAnimation("Backstep")
+	if backstepAnimation ~= "" then
+		table.insert(animationIds, backstepAnimation)
+	end
+
+	for _, animationId in ipairs(self.CurrentActionAnimationIds) do
+		table.insert(animationIds, animationId)
+	end
+
+	AnimationServiceClient.StopAnimation(animationIds)
+	self.CurrentActionAnimationIds = {}
+end
+
+local function TrackActionAnimation(self: MovementEngine, animationId: string)
+	if animationId == "" then
+		return
+	end
+
+	table.insert(self.CurrentActionAnimationIds, animationId)
+end
+
+local function ScheduleLocomotionResume(self: MovementEngine, duration: number): number
+	self.LocomotionResumeToken += 1
+	local token = self.LocomotionResumeToken
+
+	task.delay(duration, function()
+		if self.LocomotionResumeToken ~= token then
+			return
+		end
+
+		StopActionAnimations(self)
+		self:UpdateMovementAnimation()
+	end)
+
+	return token
+end
+
 function MovementEngine.Attack(self: MovementEngine): boolean
 	if not self:IsActionEnabled() then
 		return false
@@ -384,6 +530,8 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 
 	local comboAttack = PeekNextComboAttack(self, equippedWeapon)
 	local attackContext = GetResolvedComboAttackContext(equippedWeapon, comboAttack)
+	StopActionAnimations(self)
+	StopCurrentLocomotionAnimation(self)
 
 	local attackSightRange = attackContext.SightRange
 	local attackSwingRange = attackContext.SwingRange
@@ -402,6 +550,7 @@ function MovementEngine.Attack(self: MovementEngine): boolean
 
 	self:LockMovement(movementLockDuration)
 	self:LockAction(actionLockDuration)
+	ScheduleLocomotionResume(self, movementLockDuration)
 
 	local flatTargetLocation = Vector3.new(targetLocation.X, self.RootPart.Position.Y, targetLocation.Z)
 	local delta = (flatTargetLocation - self.RootPart.Position)
@@ -423,27 +572,51 @@ function MovementEngine.Dash(self: MovementEngine): boolean
 		return false
 	end
 
-	local dashDuration = 0.48
-	local dashSpeed = 16
+	local dashDuration = 0.32
+	local dashSpeed = 24
 	local dashDirection, usedDirectionalInput = GetCameraRelativeDashDirection(self.RootPart)
 	local facingDirection = Vector3.new(self.RootPart.CFrame.LookVector.X, 0, self.RootPart.CFrame.LookVector.Z).Unit
 	local isBackstep = (not usedDirectionalInput) or dashDirection:Dot(facingDirection) < -0.8
 	local dashAnimation = if isBackstep then "Backstep" else "Dash"
-	self:Stop("Attack")
+	local dashAnimationId = self:GetAnimation(dashAnimation)
+	StopActionAnimations(self)
+	StopCurrentLocomotionAnimation(self)
 	self:Play(dashAnimation)
+	TrackActionAnimation(self, dashAnimationId)
 	self:LockMovement(dashDuration)
 	self:LockAction(dashDuration)
+	local dashToken = ScheduleLocomotionResume(self, dashDuration)
 	self:SetInvincibilityStatus(true)
 	self:ApplyLinearVelocity(dashDirection * dashSpeed, dashDuration)
 	task.delay(dashDuration, function()
+		if self.LocomotionResumeToken ~= dashToken then
+			return
+		end
+
 		self:SetInvincibilityStatus(false)
 		self:Stop(dashAnimation)
+		self.CurrentActionAnimationIds = {}
+		self:UpdateMovementAnimation()
 	end)
 
 	return true
 end
 
 function MovementEngine.GetAnimation(self: MovementEngine, animation: string): string
+	if animation == "Idle" then
+		local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+		local weaponClass = equippedWeapon and equippedWeapon.Class or "Sword"
+		if weaponClass == "Claymore" and self.__Animations["IdleClaymore"] then
+			return self.__Animations["IdleClaymore"]
+		end
+		if weaponClass == "Spear" and self.__Animations["IdleSpear"] then
+			return self.__Animations["IdleSpear"]
+		end
+		if self.__Animations["Idle"] then
+			return self.__Animations["Idle"]
+		end
+	end
+
 	if self.__Animations[animation] then
 		return self.__Animations[animation]
 	end
@@ -471,20 +644,46 @@ end
 
 function MovementEngine.UpdateMovementAnimation(self: MovementEngine)
 	local walkAnimation = self.__Animations["Walk"] or ""
-	if walkAnimation == "" then
+	local idleAnimation = self:GetAnimation("Idle")
+	if walkAnimation == "" and idleAnimation == "" then
 		return
 	end
 
-	local shouldWalk = self:IsMovementEnabled()
-		and self.Humanoid.MoveDirection.Magnitude > 0.05
+	local isActivelyWalking = self.Humanoid.MoveDirection.Magnitude > 0.05
+	local canPlayLocomotion = self:IsMovementEnabled()
+		and self:IsActionEnabled()
 		and self.Character.Parent ~= nil
+	if not canPlayLocomotion or IsActionAnimationPlaying(self) then
+		StopCurrentLocomotionAnimation(self)
+		return
+	end
 
-	if shouldWalk and not self.WalkAnimationPlaying then
+	local desiredAnimation: string? = nil
+	local desiredAnimationId: string? = nil
+	if isActivelyWalking and walkAnimation ~= "" then
+		desiredAnimation = "Walk"
+		desiredAnimationId = walkAnimation
+	elseif idleAnimation ~= "" then
+		desiredAnimation = "Idle"
+		desiredAnimationId = idleAnimation
+	end
+
+	if self.CurrentLocomotionAnimation == desiredAnimation and self.CurrentLocomotionAnimationId == desiredAnimationId then
+		return
+	end
+
+	StopCurrentLocomotionAnimation(self)
+
+	if desiredAnimation == "Walk" then
 		self:Play("Walk")
 		self.WalkAnimationPlaying = true
-	elseif not shouldWalk and self.WalkAnimationPlaying then
-		self:Stop("Walk")
-		self.WalkAnimationPlaying = false
+		self.CurrentLocomotionAnimation = "Walk"
+		self.CurrentLocomotionAnimationId = desiredAnimationId
+	elseif desiredAnimation == "Idle" then
+		self:Play("Idle")
+		self.IdleAnimationPlaying = true
+		self.CurrentLocomotionAnimation = "Idle"
+		self.CurrentLocomotionAnimationId = desiredAnimationId
 	end
 end
 

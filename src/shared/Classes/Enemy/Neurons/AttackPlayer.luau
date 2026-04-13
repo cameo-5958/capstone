@@ -49,6 +49,40 @@ local function GetPredictorData(self: Neuron, flatTarget: Vector3, hitboxWidth: 
 	return size, cframe
 end
 
+local function GetFlatTargetPosition(self: Neuron, target: Model): Vector3?
+	local targetPart = target.PrimaryPart
+	if not targetPart then
+		return nil
+	end
+
+	local myPos = self.Brain.RootPart.Position
+	return Vector3.new(targetPart.Position.X, myPos.Y, targetPart.Position.Z)
+end
+
+local function PlayChargeStrafeAnimation(self: Neuron): string?
+	if os.clock() - self.Brain.LastStrafeEndedAt > self.__Attributes["StrafeCarryWindow"] then
+		return nil
+	end
+
+	local animationKey = self.Brain.LastStrafeAnimationKey
+	if type(animationKey) ~= "string" then
+		return nil
+	end
+
+	if not self.Brain.MovementEngine.__Animations[animationKey] then
+		return nil
+	end
+
+	self.Brain.MovementEngine:Play(animationKey)
+	return animationKey
+end
+
+local function StopChargeStrafeAnimation(self: Neuron, animationKey: string?)
+	if animationKey and self.Brain.MovementEngine.__Animations[animationKey] then
+		self.Brain.MovementEngine:Stop(animationKey)
+	end
+end
+
 local function CanEnter(self: Neuron): boolean
 	local target = self.Brain.Target
 	if not target then
@@ -104,6 +138,7 @@ local function OnEnter(self: Neuron): ()
 	self.Brain.MovementEngine:DisableMovement()
 	self.Brain.MovementEngine:ScheduleDeferTask(totalAttackTime)
 	self.Brain.MovementEngine:LookAt(flatTarget)
+	local chargeStrafeAnimationKey = PlayChargeStrafeAnimation(self)
 
 	local hitboxSize, hitboxOffset = GetEnemyHitboxData(self)
 	local predictorSize, predictorCFrame = GetPredictorData(self, flatTarget, hitboxSize.X)
@@ -133,6 +168,14 @@ local function OnEnter(self: Neuron): ()
 			return
 		end
 
+		StopChargeStrafeAnimation(self, chargeStrafeAnimationKey)
+		local latestFlatTarget = GetFlatTargetPosition(self, target)
+		if latestFlatTarget then
+			local latestDelta = latestFlatTarget - self.Brain.RootPart.Position
+			attackDirection = latestDelta.Magnitude > 0.001 and latestDelta.Unit or attackDirection
+			self.Brain.MovementEngine:LookAt(latestFlatTarget)
+		end
+
 		if self.Brain.MovementEngine.__Animations["Attack"] then
 			self.Brain.MovementEngine:Play("Attack")
 		end
@@ -143,7 +186,7 @@ local function OnEnter(self: Neuron): ()
 	end)
 
 	if attacker and targetEntity then
-		local damage = attacker:GetStat("PhysicalAttack")
+		local damage = attacker:GetStat("PhysicalDamage")
 		local hitDelay = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"]
 		task.delay(hitDelay, function()
 			if self.__Attributes["AttackToken"] ~= attackToken then
@@ -164,6 +207,7 @@ local function OnExit(self: Neuron): ()
 	self.__Attributes["AttackToken"] += 1
 	self.Brain.MovementEngine:CancelLinearVelocity()
 	self.Brain.MovementEngine:ClearLookAt()
+	StopChargeStrafeAnimation(self, self.Brain.LastStrafeAnimationKey)
 
 	if self.Brain.MovementEngine.__Animations["Attack"] then
 		self.Brain.MovementEngine:Stop("Attack")
@@ -188,6 +232,7 @@ function AttackPlayer.new(): Neuron
 	self.__Attributes["AttackDuration"] = 0.08
 	self.__Attributes["ApexPause"] = 0.12
 	self.__Attributes["PredictorReachPadding"] = 2
+	self.__Attributes["StrafeCarryWindow"] = 0.25
 	self.__Attributes["CooldownUntil"] = 0
 	self.__Attributes["ExitAt"] = 0
 	self.__Attributes["AttackToken"] = 0

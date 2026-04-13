@@ -6,10 +6,11 @@ return {
 			["light_chain"] = {
 				["Id"] = "light_chain",
 				["Attacks"] = {
+					-- [1] 0.3s to 0.55s, 80% damage
 					{
 						["AnimationId"] = "rbxassetid://109172127259985",
-						["PowerScale"] = 0.6,
-						["MovementLockedUntil"] = 0.65,
+						["PowerScale"] = 0.80,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
 							["HitboxOffset"] = CFrame.new(0, 0, -2.5)
@@ -20,12 +21,16 @@ return {
 							["MaxDashRange"] = 1.65,
 							["LungeDuration"] = 0.08,
 							["LockDuration"] = 0.65
+						},
+						["HitWindows"] = {
+							{ ["Delay"] = 0.3, ["Duration"] = 0.25 }
 						}
 					},
+					-- [2] 0.25s to 0.45s, 60% damage
 					{
 						["AnimationId"] = "rbxassetid://130560580139040",
-						["PowerScale"] = 0.7,
-						["MovementLockedUntil"] = 0.65,
+						["PowerScale"] = 0.60,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
 							["HitboxOffset"] = CFrame.new(0, 0, -2.5)
@@ -36,12 +41,17 @@ return {
 							["MaxDashRange"] = 1.7,
 							["LungeDuration"] = 0.08,
 							["LockDuration"] = 0.65
+						},
+						["HitWindows"] = {
+							{ ["Delay"] = 0.25, ["Duration"] = 0.20 }
 						}
 					},
+					-- [3] 0.2s to 0.45s, 120% damage
 					{
 						["AnimationId"] = "rbxassetid://71284972890547",
-						["PowerScale"] = 0.82,
-						["MovementLockedUntil"] = 0.72,
+						["PowerScale"] = 1.20,
+						["MovementLockedUntil"] = 1.7,
+						["DoesKnockback"] = true,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.8),
 							["HitboxOffset"] = CFrame.new(0, 0, -2.55)
@@ -52,39 +62,9 @@ return {
 							["MaxDashRange"] = 1.75,
 							["LungeDuration"] = 0.08,
 							["LockDuration"] = 0.72
-						}
-					},
-					{
-						["AnimationId"] = "rbxassetid://97561150583443",
-						["PowerScale"] = 0.96,
-						["MovementLockedUntil"] = 0.82,
-						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.85),
-							["HitboxOffset"] = CFrame.new(0, 0, -2.6)
 						},
-						["AttackContext"] = {
-							["SightRange"] = 33,
-							["SwingRange"] = 6.05,
-							["MaxDashRange"] = 1.8,
-							["LungeDuration"] = 0.08,
-							["LockDuration"] = 0.82
-						}
-					},
-					{
-						["AnimationId"] = "rbxassetid://91014619744040",
-						["PowerScale"] = 1.45,
-						["MovementLockedUntil"] = 1.4,
-						["IsHeavy"] = true,
-						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.9),
-							["HitboxOffset"] = CFrame.new(0, 0, -2.6)
-						},
-						["AttackContext"] = {
-							["SightRange"] = 34,
-							["SwingRange"] = 6.15,
-							["MaxDashRange"] = 1.8,
-							["LungeDuration"] = 0.08,
-							["LockDuration"] = 1.4
+						["HitWindows"] = {
+							{ ["Delay"] = 0.2, ["Duration"] = 0.25 }
 						}
 					}
 				}
@@ -99,9 +79,9 @@ return {
 				["Id"] = "heavy_chain",
 				["Attacks"] = {
 					{
-						["AnimationId"] = "rbxassetid://73590100307670",
+						["AnimationId"] = "rbxassetid://133775699616081",
 						["PowerScale"] = 0.85,
-						["MovementLockedUntil"] = 0.52,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["Cooldown"] = 0.8,
 							["Recovery"] = 0.3,
@@ -117,9 +97,9 @@ return {
 						}
 					},
 					{
-						["AnimationId"] = "rbxassetid://73590100307670",
+						["AnimationId"] = "rbxassetid://83484538358608",
 						["PowerScale"] = 1.0,
-						["MovementLockedUntil"] = 0.64,
+						["MovementLockedUntil"] = 1.2,
 						["IsHeavy"] = true,
 						["AttackProfile"] = {
 							["Cooldown"] = 0.8,
@@ -136,9 +116,9 @@ return {
 						}
 					},
 					{
-						["AnimationId"] = "rbxassetid://73590100307670",
+						["AnimationId"] = "rbxassetid://133918469702254",
 						["PowerScale"] = 1.15,
-						["MovementLockedUntil"] = 0.76,
+						["MovementLockedUntil"] = 1.2,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,
 						["AttackProfile"] = {
@@ -156,28 +136,9 @@ return {
 						}
 					},
 					{
-						["AnimationId"] = "rbxassetid://73590100307670",
-						["PowerScale"] = 1.28,
-						["MovementLockedUntil"] = 0.86,
-						["IsHeavy"] = true,
-						["AttackProfile"] = {
-							["Cooldown"] = 0.8,
-							["Recovery"] = 0.3,
-							["HitboxSize"] = Vector3.new(9.2, 4.6, 6.8),
-							["HitboxOffset"] = CFrame.new(0, 0, -3.45)
-						},
-						["AttackContext"] = {
-							["SightRange"] = 31,
-							["SwingRange"] = 5.3,
-							["MaxDashRange"] = 2.1,
-							["LungeDuration"] = 0.08,
-							["LockDuration"] = 0.86
-						}
-					},
-					{
-						["AnimationId"] = "rbxassetid://73590100307670",
+						["AnimationId"] = "rbxassetid://112592869773047",
 						["PowerScale"] = 1.55,
-						["MovementLockedUntil"] = 1.02,
+						["MovementLockedUntil"] = 1.7,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,
 						["AttackProfile"] = {
@@ -205,31 +166,34 @@ return {
 			["polearm_chain"] = {
 				["Id"] = "polearm_chain",
 				["Attacks"] = {
+					-- [1] Slim, far thrust — 0.3s to 0.5s, 60% damage
 					{
 						["AnimationId"] = "rbxassetid://139475664738055",
-						["PowerScale"] = 0.55,
-						["MovementLockedUntil"] = 0.62,
+						["PowerScale"] = 0.60,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
-							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
+							["HitboxSize"] = Vector3.new(0.7, 3.2, 11.5),
+							["HitboxOffset"] = CFrame.new(0, 0, -6.25)
 						},
 						["AttackContext"] = {
 							["SightRange"] = 32,
 							["SwingRange"] = 11.25,
 							["MaxDashRange"] = 2.35,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.2,
+							["ActionLockDuration"] = 0.7,
+							["LockDuration"] = 1.2
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.18, ["Duration"] = 0.08 }
+							{ ["Delay"] = 0.3, ["Duration"] = 0.2 }
 						}
 					},
+					-- [2] Two sweeps — 0.25–0.55 (shorter sweep, 12%) and 0.80–1.05 (sweep, 24%)
+					-- Note: PowerScale is per-attack; 0.18 averages the two intended values
 					{
 						["AnimationId"] = "rbxassetid://120272323117203",
-						["PowerScale"] = 0.62,
-						["MovementLockedUntil"] = 0.66,
+						["PowerScale"] = 0.18,
+						["MovementLockedUntil"] = 1.7,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
 							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
@@ -239,62 +203,78 @@ return {
 							["SwingRange"] = 11.4,
 							["MaxDashRange"] = 2.35,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.7,
+							["ActionLockDuration"] = 1.2,
+							["LockDuration"] = 1.7
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.17, ["Duration"] = 0.07 },
-							{ ["Delay"] = 0.29, ["Duration"] = 0.08 }
+							{
+								["Delay"] = 0.25,
+								["Duration"] = 0.30,
+								["AttackProfile"] = {
+									["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
+									["HitboxOffset"] = CFrame.new(0, 0, 0)
+								}
+							},
+							{
+								["Delay"] = 0.80,
+								["Duration"] = 0.25,
+								["AttackProfile"] = {
+									["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
+									["HitboxOffset"] = CFrame.new(0, 0, 0)
+								}
+							}
 						}
 					},
+					-- [3] 360° sweep — 0.35s to 0.5s, 35% damage
 					{
 						["AnimationId"] = "rbxassetid://77631012695666",
-						["PowerScale"] = 0.7,
-						["MovementLockedUntil"] = 0.7,
+						["PowerScale"] = 0.35,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
-							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
+							["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
+							["HitboxOffset"] = CFrame.new(0, 0, 0)
 						},
 						["AttackContext"] = {
 							["SightRange"] = 32,
 							["SwingRange"] = 11.45,
 							["MaxDashRange"] = 2.4,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.2,
+							["ActionLockDuration"] = 0.7,
+							["LockDuration"] = 1.2
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.2, ["Duration"] = 0.08 }
+							{ ["Delay"] = 0.35, ["Duration"] = 0.15 }
 						}
 					},
+					-- [4] Full 360° sweep — 0.3s to 0.65s, 15% damage
 					{
 						["AnimationId"] = "rbxassetid://109822730522380",
-						["PowerScale"] = 0.82,
-						["MovementLockedUntil"] = 0.74,
+						["PowerScale"] = 0.15,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
-							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
+							["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
+							["HitboxOffset"] = CFrame.new(0, 0, 0)
 						},
 						["AttackContext"] = {
 							["SightRange"] = 32,
 							["SwingRange"] = 11.5,
 							["MaxDashRange"] = 2.45,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.2,
+							["ActionLockDuration"] = 0.7,
+							["LockDuration"] = 1.2
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.18, ["Duration"] = 0.07 },
-							{ ["Delay"] = 0.31, ["Duration"] = 0.08 }
+							{ ["Delay"] = 0.3, ["Duration"] = 0.35 }
 						}
 					},
+					-- [5] Standard — 0.3s to 0.55s, 35% damage
 					{
 						["AnimationId"] = "rbxassetid://132830532945806",
-						["PowerScale"] = 0.94,
-						["MovementLockedUntil"] = 0.82,
+						["PowerScale"] = 0.35,
+						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
 							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
@@ -304,36 +284,36 @@ return {
 							["SwingRange"] = 11.65,
 							["MaxDashRange"] = 2.5,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.2,
+							["ActionLockDuration"] = 0.7,
+							["LockDuration"] = 1.2
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.22, ["Duration"] = 0.08 }
+							{ ["Delay"] = 0.3, ["Duration"] = 0.25 }
 						}
 					},
+					-- [6] Slim, far-reaching finisher — 0.25s to 0.5s, 90% damage
 					{
 						["AnimationId"] = "rbxassetid://103039946478115",
-						["PowerScale"] = 1.3,
-						["MovementLockedUntil"] = 1.02,
+						["PowerScale"] = 0.90,
+						["MovementLockedUntil"] = 1.7,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,
 						["AttackProfile"] = {
-							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
-							["HitboxOffset"] = CFrame.new(0, 0, -5.25)
+							["HitboxSize"] = Vector3.new(0.6, 3.0, 14.0),
+							["HitboxOffset"] = CFrame.new(0, 0, -7.5)
 						},
 						["AttackContext"] = {
 							["SightRange"] = 33,
 							["SwingRange"] = 11.8,
 							["MaxDashRange"] = 2.55,
 							["LungeDuration"] = 0.08,
-							["MovementLockDuration"] = 1.5,
-							["ActionLockDuration"] = 1.0,
-							["LockDuration"] = 1.5
+							["MovementLockDuration"] = 1.7,
+							["ActionLockDuration"] = 1.2,
+							["LockDuration"] = 1.7
 						},
 						["HitWindows"] = {
-							{ ["Delay"] = 0.24, ["Duration"] = 0.09 },
-							{ ["Delay"] = 0.38, ["Duration"] = 0.1 }
+							{ ["Delay"] = 0.25, ["Duration"] = 0.25 }
 						}
 					}
 				}

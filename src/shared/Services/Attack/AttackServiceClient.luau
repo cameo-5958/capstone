@@ -21,7 +21,7 @@ type ActiveAttack = {
 				HitboxSize: Vector3,
 				HitboxOffset: CFrame,
 			},
-		},
+		}
 	},
 	ClearAt: number,
 	LastReportedAt: { [number]: { [string]: number } },
@@ -99,7 +99,11 @@ local function ReportOverlapHits(attack: ActiveAttack)
 
 	attack.LastReportedAt[activeHitWindow.Index] = attack.LastReportedAt[activeHitWindow.Index] or {}
 	local lastReportedAt = attack.LastReportedAt[activeHitWindow.Index]
-	local parts = workspace:GetPartBoundsInBox(GetHitboxCFrame(character.PrimaryPart, activeHitWindow), activeHitWindow.Profile.HitboxSize, overlapParams)
+	local parts = workspace:GetPartBoundsInBox(
+		GetHitboxCFrame(character.PrimaryPart, activeHitWindow),
+		activeHitWindow.Profile.HitboxSize,
+		overlapParams
+	)
 	local seenThisFrame = {}
 
 	for _, part in ipairs(parts) do

@@ -6,7 +6,6 @@
 local API = script.Parent:WaitForChild("AnimationHandler") :: RemoteEvent
 local EntitiesFolder = workspace:WaitForChild("EntitiesFolder")
 local Players = game:GetService("Players")
-local ContentProvider = game:GetService("ContentProvider")
 
 local AnimationServiceClient = {}
 
@@ -87,10 +86,8 @@ end
 
 -- LoadTrack
 local function LoadTrack(animator: Animator, animId: string): AnimationTrack
-	-- Create a new animation, load and play
 	local anim = Instance.new("Animation")
 	anim.AnimationId = animId
-	ContentProvider:PreloadAsync({ anim })
 	local track = animator:LoadAnimation(anim)
 	GetTrackCache(animator)[animId] = track
 	return track
@@ -252,6 +249,53 @@ function AnimationServiceClient.StopAnimation(animId: AnimationId)
 
 	-- Call API with my animId
 	API:FireServer(animId, "Stop")
+end
+
+function AnimationServiceClient.StopLocalAnimations(animIds: { string })
+	local character = LocalPlayer.Character
+	if not character or character.Parent == nil then
+		return
+	end
+
+	for _, animId in ipairs(animIds) do
+		if animId ~= "" then
+			Stop(character, animId)
+		end
+	end
+end
+
+function AnimationServiceClient.IsLocalAnimationPlaying(animId: string): boolean
+	if animId == "" then
+		return false
+	end
+
+	local character = LocalPlayer.Character
+	if not character or character.Parent == nil then
+		return false
+	end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid or not humanoid:IsA("Humanoid") then
+		return false
+	end
+
+	local animator = humanoid:FindFirstChild("Animator")
+	if not animator or not animator:IsA("Animator") then
+		return false
+	end
+
+	local track = GetAnimationTrack(animator, animId)
+	return track ~= nil and track.IsPlaying
+end
+
+function AnimationServiceClient.IsAnyLocalAnimationPlaying(animIds: { string }): boolean
+	for _, animId in ipairs(animIds) do
+		if AnimationServiceClient.IsLocalAnimationPlaying(animId) then
+			return true
+		end
+	end
+
+	return false
 end
 
 return AnimationServiceClient

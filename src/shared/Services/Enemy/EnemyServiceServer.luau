@@ -20,6 +20,7 @@ local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
 local DefaultAnimations = require(ReplicatedStorage.Database.Enemies.Default.Animations)
 local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
+local LevelScaling = require(ReplicatedStorage.Modules.Progression.LevelScaling)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -53,6 +54,23 @@ local __Deaths: {
 } = {}
 
 local Enemies = {}
+local ENEMY_LEVEL_STEP = 5
+local DEFAULT_ENEMY_START_LEVEL = 5
+local NextSpawnLevel = DEFAULT_ENEMY_START_LEVEL
+
+local function GetNextSpawnLevel(): number
+	local level = LevelScaling.ClampLevel(NextSpawnLevel)
+	NextSpawnLevel = LevelScaling.ClampLevel(NextSpawnLevel + ENEMY_LEVEL_STEP)
+	return level
+end
+
+local function ResolveSpawnLevel(levelOverride: number?): number
+	if levelOverride ~= nil then
+		return LevelScaling.ClampLevel(levelOverride)
+	end
+
+	return GetNextSpawnLevel()
+end
 
 local function HideHumanoidOverhead(character: Model)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -64,6 +82,14 @@ local function HideHumanoidOverhead(character: Model)
 	humanoid.HealthDisplayDistance = 0
 	humanoid.NameDisplayDistance = 0
 	humanoid.DisplayName = ""
+end
+
+local function SetServerNetworkOwnership(model: Model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant:CanSetNetworkOwnership() then
+			descendant:SetNetworkOwner(nil)
+		end
+	end
 end
 
 local function RemoveEnemyForClients(uuid: string)
@@ -152,10 +178,11 @@ end)
 
 API.OnServerEvent:Connect(function(_: Player, action: string, payload: { [string]: any }?)
 	if action == "RequestSpawnEnemy" then
-		local enemyPath = payload and payload.EnemyPath or "Tests.Sword"
+		local enemyPath = payload and payload.EnemyPath or "Skeletal.Korblox"
+		local levelOverride = payload and payload.Level
 		local spawnPart = workspace:FindFirstChild("SpawnPoint")
 		if spawnPart and spawnPart:IsA("Part") then
-			Enemies.Spawn(enemyPath, spawnPart)
+			Enemies.Spawn(enemyPath, spawnPart, if type(levelOverride) == "number" then levelOverride else nil)
 		end
 	end
 end)
@@ -167,7 +194,9 @@ local default = {
 	CritDamage = 0,
 	MagicalAttack = 0,
 }
-function Enemies.Spawn(e: string, SpawnBlock: Part): ()
+function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
+	local spawnLevel = ResolveSpawnLevel(levelOverride)
+
 	-- Grab enemy's data from the database
 	-- Split Enemy into multiple parts
 	local EnemyPath = e:split(".")
@@ -180,20 +209,22 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 	-- Require the data to create the entity
 	local data = require(Enemy.Data) :: { ["Name"]: string, string: any }
 	local model = Enemy.Model:Clone() :: Model
+	model:SetAttribute("EnemyLevel", spawnLevel)
 	local mergedAnimations = table.clone(DefaultAnimations)
 	for key, value in pairs(data.__Animations or {}) do
 		mergedAnimations[key] = value
 	end
 
-	model.Parent = EnemyFolder
 	HideHumanoidOverhead(model)
 	CollisionServiceServer.AssignModel(model, "Enemy")
 
 	-- Create the entity here
 	local entity = Entity.new(model, data.Name)
+	model:PivotTo(SpawnBlock.CFrame)
 	model.Name = entity.UUID
-	entity.RootPart:PivotTo(SpawnBlock.CFrame)
 	entity.__Animations = mergedAnimations
+	model.Parent = EnemyFolder
+	SetServerNetworkOwnership(model)
 
 	-- Set default enemy stats
 	for key, value in pairs(default) do
@@ -225,6 +256,10 @@ function Enemies.Spawn(e: string, SpawnBlock: Part): ()
 			entity[key] = value
 		end
 	end
+
+	entity.Level = spawnLevel
+	entity.__ScaledLevel = spawnLevel
+	LevelScaling.ApplyScaling(entity)
 
 	local toolbarWeapons = data.__Components and data.__Components.ToolbarWeapons
 	if toolbarWeapons then

@@ -24,82 +24,6 @@ local EquippedWeaponPassiveIds = setmetatable({}, { __mode = "k" }) :: { [Entity
 local PlayerEntities: { [Player]: Entity } = {}
 local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
 
-local function FindLeftHand(character: Model): BasePart?
-	local leftHand = character:FindFirstChild("LeftHand")
-	if leftHand and leftHand:IsA("BasePart") then
-		return leftHand
-	end
-
-	local leftArm = character:FindFirstChild("Left Arm")
-	if leftArm and leftArm:IsA("BasePart") then
-		return leftArm
-	end
-
-	return nil
-end
-
-local function FindRightHand(character: Model): BasePart?
-	local rightHand = character:FindFirstChild("RightHand")
-	if rightHand and rightHand:IsA("BasePart") then
-		return rightHand
-	end
-
-	local rightArm = character:FindFirstChild("Right Arm")
-	if rightArm and rightArm:IsA("BasePart") then
-		return rightArm
-	end
-
-	return nil
-end
-
-local function AttachBowToLeftHand(character: Model, tool: Tool)
-	task.defer(function()
-		if tool.Parent ~= character then
-			return
-		end
-
-		local handle = tool:FindFirstChild("Handle")
-		local leftHand = FindLeftHand(character)
-		if not handle or not handle:IsA("BasePart") or not leftHand then
-			return
-		end
-
-		local rightHand = FindRightHand(character)
-		local rightGrip = character:FindFirstChild("RightGrip", true)
-		local preservedOffset = CFrame.new()
-
-		if rightGrip and rightGrip:IsA("Weld") then
-			preservedOffset = rightGrip.C0
-			rightGrip:Destroy()
-		elseif rightHand then
-			preservedOffset = rightHand.CFrame:ToObjectSpace(handle.CFrame)
-		end
-
-		local existingLeftGrip = character:FindFirstChild("LeftGrip", true)
-		if existingLeftGrip and existingLeftGrip:IsA("Weld") then
-			existingLeftGrip:Destroy()
-		end
-
-		handle.Massless = true
-		handle.CanCollide = false
-		handle.CFrame = leftHand.CFrame * preservedOffset
-
-		local leftGrip = Instance.new("Weld")
-		leftGrip.Name = "LeftGrip"
-		leftGrip.Part0 = leftHand
-		leftGrip.Part1 = handle
-		leftGrip.C0 = preservedOffset
-		leftGrip.Parent = leftHand
-	end)
-end
-
-local function CleanupLeftGrip(character: Model, tool: Tool)
-	local leftGrip = character:FindFirstChild("LeftGrip", true)
-	if leftGrip and leftGrip:IsA("Weld") and leftGrip.Part1 and leftGrip.Part1:IsDescendantOf(tool) then
-		leftGrip:Destroy()
-	end
-end
-
 local function createStarterWeapon()
 	return Weapon.new(
 		"Starter Sword",
@@ -233,9 +157,6 @@ function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 				entity:SetEquippedIndex(slot)
 			end
 			local equippedWeapon = entity:GetEquippedWeapon()
-			if equippedWeapon and equippedWeapon.Class == "Bow" then
-				AttachBowToLeftHand(character, child)
-			end
 			FireWeaponSwapHook(entity, previousWeapon, equippedWeapon, previousSlot, entity:GetEquippedIndex())
 			ApplyEquippedWeaponStats(entity)
 			WeaponServiceServer.SyncEquippedWeapon(player)
@@ -244,8 +165,6 @@ function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 			if not child:IsA("Tool") then
 				return
 			end
-
-			CleanupLeftGrip(character, child)
 
 			local slot = child:GetAttribute("ToolbarSlot")
 			if type(slot) ~= "number" then

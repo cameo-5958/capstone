@@ -114,6 +114,7 @@ end
 function MovementShared.DisableMovement(self: SharedMovementEngine)
 	self.MovementEnabled = false
 	self.Humanoid.WalkSpeed = 0
+	self.Humanoid:Move(Vector3.zero, false)
 	if self.UpdateMovementAnimation then
 		self:UpdateMovementAnimation()
 	end
@@ -139,6 +140,9 @@ end
 
 function MovementShared.EnableAction(self: SharedMovementEngine)
 	self.ActionEnabled = not self.AllMovementDisabled
+	if self.UpdateMovementAnimation then
+		self:UpdateMovementAnimation()
+	end
 end
 
 function MovementShared.DeferTask(self: SharedMovementEngine)

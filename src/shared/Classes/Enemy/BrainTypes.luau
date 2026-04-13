@@ -15,6 +15,8 @@ export type Brain = {
 	PendingStrafes: number,
 	PendingStumble: boolean,
 	StumbleSourcePosition: Vector3?,
+	LastStrafeAnimationKey: string?,
+	LastStrafeEndedAt: number,
 
 	-- All the neurons this brain has
 	Neurons: { Neuron },

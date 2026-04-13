@@ -148,11 +148,15 @@ end
 
 function MovementEngine.LookAt(self: MovementEngine, target: Vector3): ()
 	self.FacingTarget = target
+	local myPos = self.RootPart.Position
+	local flatTarget = Vector3.new(target.X, myPos.Y, target.Z)
+	local hasLookDirection = (flatTarget - myPos).Magnitude > 0.001
+	if hasLookDirection then
+		self.RootPart.CFrame = CFrame.lookAt(myPos, flatTarget)
+	end
 
 	local align = GetLookAlign(self)
-	if align then
-		local myPos = self.RootPart.Position
-		local flatTarget = Vector3.new(target.X, myPos.Y, target.Z)
+	if align and hasLookDirection then
 		align.CFrame = CFrame.lookAt(myPos, flatTarget)
 		align.Enabled = true
 		self.Humanoid.AutoRotate = false

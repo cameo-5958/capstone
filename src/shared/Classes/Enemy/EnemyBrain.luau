@@ -40,6 +40,8 @@ function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
 	self.PendingStrafes = 0
 	self.PendingStumble = false
 	self.StumbleSourcePosition = nil
+	self.LastStrafeAnimationKey = nil
+	self.LastStrafeEndedAt = 0
 
 	return self :: any
 end
@@ -73,6 +75,8 @@ function Brain.Destroy(self: Brain)
 	self.PendingStrafes = 0
 	self.PendingStumble = false
 	self.StumbleSourcePosition = nil
+	self.LastStrafeAnimationKey = nil
+	self.LastStrafeEndedAt = 0
 end
 
 function Brain.QueueStumble(self: Brain, sourcePosition: Vector3?)
