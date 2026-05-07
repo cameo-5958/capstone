@@ -126,6 +126,8 @@ export type Entity = {
 	ResetComboState: (self: Entity) -> (),
 
 	ApplyDamage: (self: Entity, damage: number, target: Entity) -> (),
+	DirectDamageToEntity: (self: Entity, damage: number, target: Entity) -> (),
+	TrueDamage: (self: Entity, damage: number, target: Entity) -> (),
 	TakeDamage: (self: Entity, damage: number, source: Entity) -> (),
 }
 

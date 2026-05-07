@@ -58,6 +58,8 @@ type CameraController = {
 	Pitch: number,
 	LastCameraCFrame: CFrame?,
 	LastFocusMidpoint: Vector3?,
+	MouseLockSuppressed: boolean,
+	UpdateSuppressed: boolean,
 	RenderStepName: string,
 	CharacterConnection: RBXScriptConnection?,
 	InputChangedConnection: RBXScriptConnection?,
@@ -68,6 +70,8 @@ type CameraController = {
 	SetMode: (self: CameraController, modeName: CameraModeName) -> CameraModeName,
 	GetMode: (self: CameraController) -> CameraModeName,
 	Update: (self: CameraController, deltaTime: number) -> (),
+	SetMouseLockSuppressed: (self: CameraController, suppressed: boolean) -> (),
+	SetUpdateSuppressed: (self: CameraController, suppressed: boolean) -> (),
 	ResolveFocusTarget: (self: CameraController, config: FocusModeConfig) -> Entity?,
 	GetZoomDistance: (self: CameraController, modeName: CameraModeName?) -> number,
 	AdjustZoom: (self: CameraController, delta: number) -> number,
@@ -199,8 +203,32 @@ local function ResolveCameraCollision(origin: Vector3, desiredPosition: Vector3,
 end
 
 function CameraController.ApplyMouseLock(self: CameraController)
+	if self.MouseLockSuppressed then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
+		return
+	end
+
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	UserInputService.MouseIconEnabled = false
+end
+
+function CameraController.SetMouseLockSuppressed(self: CameraController, suppressed: boolean)
+	self.MouseLockSuppressed = suppressed
+	if suppressed then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
+	end
+end
+
+function CameraController.SetUpdateSuppressed(self: CameraController, suppressed: boolean)
+	if self.UpdateSuppressed == suppressed then
+		return
+	end
+
+	self.UpdateSuppressed = suppressed
+	self.LastCameraCFrame = nil
+	self.LastFocusMidpoint = nil
 end
 
 function CameraController.BindCharacter(self: CameraController, character: Model)
@@ -396,6 +424,11 @@ function CameraController.CycleMode(self: CameraController, direction: number): 
 end
 
 function CameraController.Update(self: CameraController, deltaTime: number)
+	if self.UpdateSuppressed then
+		self:ApplyMouseLock()
+		return
+	end
+
 	self.Camera = workspace.CurrentCamera
 	local camera = self.Camera
 	if not camera then
@@ -492,6 +525,8 @@ function CameraController.new(): CameraController
 	self.Pitch = math.rad(-12)
 	self.LastCameraCFrame = nil
 	self.LastFocusMidpoint = nil
+	self.MouseLockSuppressed = false
+	self.UpdateSuppressed = false
 	self.RenderStepName = "CapstoneCameraController"
 	self.CharacterConnection = nil
 	self.InputChangedConnection = nil

@@ -186,7 +186,7 @@ local function OnEnter(self: Neuron): ()
 	end)
 
 	if attacker and targetEntity then
-		local damage = attacker:GetStat("PhysicalDamage")
+		local damage = attacker:GetStat("PhysicalAttack")
 		local hitDelay = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"]
 		task.delay(hitDelay, function()
 			if self.__Attributes["AttackToken"] ~= attackToken then

@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AttackContextModule = require(ReplicatedStorage.Classes.Attack.AttackContext)
 local EntityType = require(ReplicatedStorage.Classes.Entity.EntityTypes)
+local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 local EnemyHandler = ReplicatedStorage.Services.Enemy:WaitForChild("EnemyHandler") :: RemoteEvent
 
 type Entity = EntityType.Entity
@@ -11,6 +12,9 @@ type AttackContext = AttackContextModule.AttackContext
 
 export type Damage = {
 	Build: (from: Entity, to: Entity, baseDamage: number) -> AttackContext,
+	CalculateDamageOfEntity: (context: AttackContext) -> number,
+	DirectDamageToEntity: (from: Entity, to: Entity, damage: number, context: AttackContext?) -> number,
+	TrueDamage: (from: Entity, to: Entity, damage: number, context: AttackContext?) -> number,
 }
 
 local Damage = {} :: Damage
@@ -101,9 +105,9 @@ local function TriggerTypedDamageHooks(context: AttackContext)
 	end
 end
 
-local function ApplyDamage(context: AttackContext, baseDamage: number)
+local function PrepareAttackContext(context: AttackContext): boolean
 	if not context.To:IsAlive() then
-		return
+		return false
 	end
 
 	context.From:TriggerProcureData(context)
@@ -116,6 +120,69 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 		From = BuildFinalStats(context.Modifiers.From),
 		To = BuildFinalStats(context.Modifiers.To),
 	}
+
+	return true
+end
+
+local function GetDefense(to: Entity, context: AttackContext?): number
+	if context then
+		local defense = context.FinalStats.To["Defense"]
+		if defense ~= nil then
+			return defense
+		end
+	end
+
+	return to:GetStat("Defense")
+end
+
+local function ApplyDefense(to: Entity, damage: number, context: AttackContext?): number
+	local defense = GetDefense(to, context)
+	return damage * (100 / (defense + 100))
+end
+
+local function FireDamageIndicator(to: Entity, damage: number, didCrit: boolean?)
+	EnemyHandler:FireAllClients("DamageIndicator", {
+		UUID = to.UUID,
+		Damage = damage,
+		IsCrit = didCrit == true,
+		CurrentHealth = to:GetStat("Health"),
+		MaxHealth = to:GetStat("MaxHealth"),
+	})
+end
+
+local function ApplyResolvedDamage(from: Entity, to: Entity, damage: number, context: AttackContext?): number
+	if not to:IsAlive() then
+		return 0
+	end
+
+	local finalDamage = CombatNumbers.RoundToTenth(damage)
+	local targetWasAlive = to:IsAlive()
+	if context then
+		from:TriggerOnAttackEnemy(context)
+	end
+
+	to:TakeDamage(finalDamage, from)
+	FireDamageIndicator(to, finalDamage, context and context.DidCrit)
+
+	if context and context.DoesKnockback and to:IsAlive() then
+		GetEnemyServiceServer().RegisterHeavyHit(to, from)
+	end
+
+	if context then
+		from:TriggerOnHitSuccess(context)
+
+		if targetWasAlive and not to:IsAlive() then
+			from:TriggerOnDefeatEnemy(context)
+		end
+	end
+
+	return finalDamage
+end
+
+function Damage.CalculateDamageOfEntity(context: AttackContext): number
+	if not PrepareAttackContext(context) then
+		return 0
+	end
 
 	local damageStatName = GetDamageStatName(context)
 	local finalDamage = context.BaseDamage + SumModifiers(context.Modifiers.From.BaseFlat[damageStatName] or {})
@@ -143,35 +210,32 @@ local function ApplyDamage(context: AttackContext, baseDamage: number)
 		TriggerTypedDamageHooks(context)
 	end
 
-	finalDamage *= context.FinalStats.From[damageStatName] * (1 + SumModifiers(
+	finalDamage *= (context.FinalStats.From[damageStatName] or 1) * (1 + SumModifiers(
 		context.Modifiers.From.Additive[damageStatName] or {}
 	)) * ProductModifiers(context.Modifiers.From.Multiplicative[damageStatName] or {})
 
-	-- Reduce the damage by the defense of the target enemy
-	finalDamage *= 100 / (context.FinalStats.To["Defense"] + 100)
-	finalDamage = math.round(finalDamage * 100) / 100
+	return finalDamage
+end
 
-	-- Have the entity take the damage
-	local targetWasAlive = context.To:IsAlive()
-	context.From:TriggerOnAttackEnemy(context)
-	context.To:TakeDamage(finalDamage, context.From)
-	EnemyHandler:FireAllClients("DamageIndicator", {
-		UUID = context.To.UUID,
-		Damage = finalDamage,
-		IsCrit = context.DidCrit,
-		CurrentHealth = context.To:GetStat("Health"),
-		MaxHealth = context.To:GetStat("MaxHealth"),
-	})
-
-	if context.DoesKnockback and context.To:IsAlive() then
-		GetEnemyServiceServer().RegisterHeavyHit(context.To, context.From)
+function Damage.DirectDamageToEntity(from: Entity, to: Entity, damage: number, context: AttackContext?): number
+	if not to:IsAlive() then
+		return 0
 	end
 
-	context.From:TriggerOnHitSuccess(context)
+	return ApplyResolvedDamage(from, to, ApplyDefense(to, damage, context), context)
+end
 
-	if targetWasAlive and not context.To:IsAlive() then
-		context.From:TriggerOnDefeatEnemy(context)
+function Damage.TrueDamage(from: Entity, to: Entity, damage: number, context: AttackContext?): number
+	if not to:IsAlive() then
+		return 0
 	end
+
+	return ApplyResolvedDamage(from, to, damage, context)
+end
+
+local function ApplyDamage(context: AttackContext)
+	local calculatedDamage = Damage.CalculateDamageOfEntity(context)
+	Damage.DirectDamageToEntity(context.From, context.To, calculatedDamage, context)
 end
 
 function Damage.Build(from: Entity, to: Entity, baseDamage: number): AttackContext
@@ -179,7 +243,7 @@ function Damage.Build(from: Entity, to: Entity, baseDamage: number): AttackConte
 	context.BaseDamage = baseDamage
 
 	context.Attack = function(self: AttackContext)
-		ApplyDamage(self, baseDamage)
+		ApplyDamage(self)
 	end
 
 	return context

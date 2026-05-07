@@ -9,6 +9,8 @@ end
 
 local API = endpoint :: RemoteEvent
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
+local InventoryServiceServer = require(ReplicatedStorage.Services.Inventory.InventoryServiceServer)
 local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
 local Weapon = require(ReplicatedStorage.Classes.Weapon.Weapon)
 local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
@@ -23,6 +25,27 @@ local EquippedWeaponPassiveIds = setmetatable({}, { __mode = "k" }) :: { [Entity
 
 local PlayerEntities: { [Player]: Entity } = {}
 local PlayerConnections: { [Player]: { RBXScriptConnection } } = {}
+
+local function cloneSerializable(value: any): any
+	local valueType = type(value)
+	if valueType == "table" then
+		local clone = {}
+		for key, child in pairs(value) do
+			local keyType = type(key)
+			if keyType == "string" or keyType == "number" then
+				local clonedChild = cloneSerializable(child)
+				if clonedChild ~= nil then
+					clone[key] = clonedChild
+				end
+			end
+		end
+		return clone
+	elseif valueType == "string" or valueType == "number" or valueType == "boolean" then
+		return value
+	end
+
+	return nil
+end
 
 local function createStarterWeapon()
 	return Weapon.new(
@@ -56,15 +79,40 @@ local function SerializeEquippedWeapon(weapon: WeaponType?)
 	end
 
 	return {
+		ItemKind = "Weapon",
+		Name = weapon.Name,
+		Rarity = weapon.Rarity,
 		Class = weapon.Class,
 		Type = weapon.Type,
 		AttackContext = weapon:GetAttackContext(),
+		InstanceId = weapon.UUID,
 		WeaponId = weapon.WeaponId,
 		BaseDamage = weapon.BaseDamage,
 		GrantedStats = table.clone(weapon.GrantedStats),
 		Weight = weapon.Weight,
-		HasPassive = weapon.WeaponPassive ~= nil,
+		HasPassive = weapon.WeaponPassive ~= nil or #weapon.PassiveDetails > 0,
 		HasAbility = weapon.WeaponAbility ~= nil,
+		PassiveDetails = cloneSerializable(weapon.PassiveDetails) or {},
+	}
+end
+
+local function SerializeLoadoutSlot(entity: Entity, slot: number): { [string]: any }
+	local weapon = entity:GetToolbarWeapon(slot)
+	local data = SerializeEquippedWeapon(weapon) or {}
+	data.Slot = slot
+	data.IsEquipped = entity:GetEquippedIndex() == slot
+	return data
+end
+
+local function SerializeLoadout(entity: Entity): { [string]: any }
+	local slots = {}
+	for slot = 1, 4 do
+		slots[slot] = SerializeLoadoutSlot(entity, slot)
+	end
+
+	return {
+		EquippedIndex = entity:GetEquippedIndex(),
+		Slots = slots,
 	}
 end
 
@@ -129,12 +177,57 @@ local function FireWeaponSwapHook(
 	})
 end
 
+local function FindExistingToolbarSlotForInventoryWeapon(entity: Entity, serializedWeapon: { [string]: any }): number?
+	local instanceId = serializedWeapon.InstanceId
+	if type(instanceId) == "string" and instanceId ~= "" then
+		for slot = 1, 4 do
+			local weapon = entity:GetToolbarWeapon(slot)
+			if weapon and weapon.UUID == instanceId then
+				return slot
+			end
+		end
+	end
+
+	local weaponId = serializedWeapon.WeaponId
+	if type(weaponId) ~= "string" or weaponId == "" then
+		return nil
+	end
+	for slot = 1, 4 do
+		local weapon = entity:GetToolbarWeapon(slot)
+		if weapon and weapon.WeaponId == weaponId then
+			return slot
+		end
+	end
+
+	return nil
+end
+
+local function GetFirstEmptyToolbarSlot(entity: Entity): number
+	for slot = 1, 4 do
+		if entity:GetToolbarWeapon(slot) == nil then
+			return slot
+		end
+	end
+
+	return 4
+end
+
+local function IsCharacterDyingOrRemoved(character: Model): boolean
+	if character.Parent == nil then
+		return true
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return humanoid ~= nil and humanoid.Health <= 0
+end
+
 function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 	PlayerEntities[player] = entity
 	DisconnectPlayerConnections(player)
 	if entity:GetToolbarWeapon(1) ~= nil and entity:GetEquippedIndex() == nil then
 		entity:SetEquippedIndex(1)
 	end
+	EquipmentServiceServer.RestoreToolbarTools(entity)
 	ApplyEquippedWeaponStats(entity)
 
 	local character = entity.Character
@@ -171,6 +264,10 @@ function WeaponServiceServer.RegisterEntity(player: Player, entity: Entity): ()
 				return
 			end
 
+			if IsCharacterDyingOrRemoved(character) then
+				return
+			end
+
 			if entity:GetEquippedIndex() == slot then
 				local previousWeapon = entity:GetEquippedWeapon()
 				entity:SetEquippedIndex(nil)
@@ -196,6 +293,16 @@ function WeaponServiceServer.SyncEquippedWeapon(player: Player): ()
 	ApplyEquippedWeaponStats(entity)
 
 	API:FireClient(player, "SyncEquippedWeapon", SerializeEquippedWeapon(entity:GetEquippedWeapon()))
+	API:FireClient(player, "SyncLoadout", SerializeLoadout(entity))
+end
+
+function WeaponServiceServer.SyncLoadout(player: Player): ()
+	local entity = PlayerEntities[player]
+	if not entity then
+		return
+	end
+
+	API:FireClient(player, "SyncLoadout", SerializeLoadout(entity))
 end
 
 function WeaponServiceServer.CreateStarterWeapon()
@@ -224,6 +331,73 @@ function WeaponServiceServer.SetEquippedSlot(player: Player, slot: number?)
 	WeaponServiceServer.SyncEquippedWeapon(player)
 end
 
+function WeaponServiceServer.ClearToolbarSlot(player: Player, slot: number?): ()
+	local entity = PlayerEntities[player]
+	if not entity or type(slot) ~= "number" or slot < 1 or slot > 4 then
+		return
+	end
+
+	local previousSlot = entity:GetEquippedIndex()
+	local previousWeapon = entity:GetEquippedWeapon()
+	EquipmentServiceServer.ClearToolbarSlot(entity, slot)
+	if entity:GetEquippedIndex() == slot then
+		entity:SetEquippedIndex(nil)
+	end
+
+	FireWeaponSwapHook(entity, previousWeapon, entity:GetEquippedWeapon(), previousSlot, entity:GetEquippedIndex())
+	WeaponServiceServer.SyncEquippedWeapon(player)
+end
+
+function WeaponServiceServer.EquipInventoryEntry(player: Player, entryId: string, targetSlot: number?): boolean
+	local entity = PlayerEntities[player]
+	if not entity then
+		return false
+	end
+
+	if type(entryId) ~= "string" or entryId == "" then
+		return false
+	end
+
+	local entry = InventoryServiceServer.GetEntry(player, entryId)
+	if not entry or entry.ItemKind ~= "Weapon" then
+		return false
+	end
+
+	local serializedWeapon = entry.Data
+	if targetSlot ~= nil then
+		if type(targetSlot) ~= "number" or targetSlot < 1 or targetSlot > 4 then
+			return false
+		end
+		targetSlot = math.floor(targetSlot)
+	end
+
+	local existingSlot = FindExistingToolbarSlotForInventoryWeapon(entity, serializedWeapon)
+	if existingSlot and (targetSlot == nil or targetSlot == existingSlot) then
+		WeaponServiceServer.SetEquippedSlot(player, existingSlot)
+		return true
+	end
+
+	targetSlot = targetSlot or GetFirstEmptyToolbarSlot(entity)
+	local previousSlot = entity:GetEquippedIndex()
+	local previousWeapon = entity:GetEquippedWeapon()
+
+	if existingSlot and existingSlot ~= targetSlot then
+		EquipmentServiceServer.SwapToolbarSlots(entity, existingSlot, targetSlot)
+		entity:SetEquippedIndex(targetSlot)
+
+		FireWeaponSwapHook(entity, previousWeapon, entity:GetEquippedWeapon(), previousSlot, targetSlot)
+		WeaponServiceServer.SyncEquippedWeapon(player)
+		return true
+	end
+
+	EquipmentServiceServer.AssignSerializedToolbarWeapon(entity, serializedWeapon, targetSlot)
+	entity:SetEquippedIndex(targetSlot)
+
+	FireWeaponSwapHook(entity, previousWeapon, entity:GetEquippedWeapon(), previousSlot, targetSlot)
+	WeaponServiceServer.SyncEquippedWeapon(player)
+	return true
+end
+
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
 	if action == "UseAbility" then
 		local entity = PlayerEntities[player]
@@ -239,10 +413,16 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 		equipped:UseRightClick(entity, payload or {})
 	elseif action == "EquipSlot" then
 		WeaponServiceServer.SetEquippedSlot(player, payload and payload.Slot or nil)
+	elseif action == "EquipInventoryEntry" then
+		WeaponServiceServer.EquipInventoryEntry(player, payload and payload.EntryId or "", payload and payload.Slot or nil)
+	elseif action == "UnequipSlot" then
+		WeaponServiceServer.ClearToolbarSlot(player, payload and payload.Slot or nil)
 	elseif action == "Unequip" then
 		WeaponServiceServer.SetEquippedSlot(player, nil)
 	elseif action == "RequestEquippedWeapon" then
 		WeaponServiceServer.SyncEquippedWeapon(player)
+	elseif action == "RequestLoadout" then
+		WeaponServiceServer.SyncLoadout(player)
 	end
 end)
 

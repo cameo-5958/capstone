@@ -5,33 +5,45 @@ local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.Equi
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 local WeaponServiceServer = require(ReplicatedStorage.Services.Weapon.WeaponServiceServer)
 
-local TEST_LOADOUT = {
+local DEFAULT_LOADOUT = {
 	"Skeletal.Saber",
-	"Damaged.Greatsword",
-	"Skeletal.Lance",
-	"Unbound.LastStrike",
 }
 
-local function ApplyTestLoadout(player: Player)
+local function HasToolbarWeapons(entity): boolean
+	for slot = 1, 4 do
+		if entity:GetToolbarWeapon(slot) ~= nil then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function ApplyDefaultLoadout(player: Player)
 	local entity = PlayerServiceServer.GetEntity(player)
 	if not entity or not entity.Character or entity.Character.Parent == nil then
 		return
 	end
 
-	EquipmentServiceServer.ApplyLoadout(entity, TEST_LOADOUT)
+	if HasToolbarWeapons(entity) then
+		WeaponServiceServer.SyncEquippedWeapon(player)
+		return
+	end
+
+	EquipmentServiceServer.ApplyLoadout(entity, DEFAULT_LOADOUT)
 	WeaponServiceServer.SyncEquippedWeapon(player)
 end
 
 local function BindPlayer(player: Player)
 	player.CharacterAdded:Connect(function()
 		task.defer(function()
-			ApplyTestLoadout(player)
+			ApplyDefaultLoadout(player)
 		end)
 	end)
 
 	if player.Character and player.Character.Parent ~= nil then
 		task.defer(function()
-			ApplyTestLoadout(player)
+			ApplyDefaultLoadout(player)
 		end)
 	end
 end

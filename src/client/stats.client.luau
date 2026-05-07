@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
 
 local LOCAL_PLAYER = Players.LocalPlayer
@@ -24,12 +25,7 @@ local STAT_ORDER = {
 }
 
 local function FormatValue(value: number?): string
-	if value == nil then
-		return "--"
-	end
-
-	local rounded = math.round(value * 100) / 100
-	return tostring(rounded)
+	return CombatNumbers.FormatTenth(value)
 end
 
 local existingGui = PLAYER_GUI:FindFirstChild(GUI_NAME)

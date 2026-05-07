@@ -8,17 +8,31 @@ local API = script.Parent:WaitForChild("WeaponEndpoint") :: RemoteEvent
 local WeaponServiceClient = {}
 
 local EquippedWeaponData: { [string]: any }? = nil
+local LoadoutData: { [string]: any } = {
+	EquippedIndex = nil,
+	Slots = {
+		{ Slot = 1, IsEquipped = false },
+		{ Slot = 2, IsEquipped = false },
+		{ Slot = 3, IsEquipped = false },
+		{ Slot = 4, IsEquipped = false },
+	},
+}
 local EquippedWeaponChanged = Signal.new()
+local LoadoutChanged = Signal.new()
 
 API.OnClientEvent:Connect(function(action: string, payload: { [string]: any }?)
 	if action == "SyncEquippedWeapon" then
 		EquippedWeaponData = payload
 		EquippedWeaponChanged:Fire(payload)
+	elseif action == "SyncLoadout" then
+		LoadoutData = payload or LoadoutData
+		LoadoutChanged:Fire(LoadoutData)
 	end
 end)
 
 task.defer(function()
 	API:FireServer("RequestEquippedWeapon", {})
+	API:FireServer("RequestLoadout", {})
 end)
 
 function WeaponServiceClient.UseAbility(payload: { [string]: any }?): ()
@@ -31,8 +45,27 @@ function WeaponServiceClient.EquipSlot(slot: number?)
 	})
 end
 
+function WeaponServiceClient.EquipInventoryEntry(entryId: string): ()
+	API:FireServer("EquipInventoryEntry", {
+		EntryId = entryId,
+	})
+end
+
+function WeaponServiceClient.EquipInventoryEntryToSlot(entryId: string, slot: number): ()
+	API:FireServer("EquipInventoryEntry", {
+		EntryId = entryId,
+		Slot = slot,
+	})
+end
+
 function WeaponServiceClient.Unequip()
 	API:FireServer("Unequip", {})
+end
+
+function WeaponServiceClient.UnequipSlot(slot: number): ()
+	API:FireServer("UnequipSlot", {
+		Slot = slot,
+	})
 end
 
 function WeaponServiceClient.GetEquippedWeaponData(): { [string]: any }?
@@ -41,6 +74,18 @@ end
 
 function WeaponServiceClient.GetEquippedWeaponChangedSignal()
 	return EquippedWeaponChanged
+end
+
+function WeaponServiceClient.RequestLoadout(): ()
+	API:FireServer("RequestLoadout", {})
+end
+
+function WeaponServiceClient.GetLoadoutData(): { [string]: any }
+	return LoadoutData
+end
+
+function WeaponServiceClient.GetLoadoutChangedSignal()
+	return LoadoutChanged
 end
 
 return table.freeze(WeaponServiceClient)

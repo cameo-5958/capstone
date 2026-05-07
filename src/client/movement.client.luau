@@ -100,6 +100,26 @@ local function SetBowCameraEnabled(enabled: boolean)
 	end
 end
 
+local function SetMouseLockSuppressed(suppressed: boolean)
+	local controller = CameraController.GetSharedController()
+	if not controller then
+		if suppressed then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+		return
+	end
+
+	controller:SetMouseLockSuppressed(suppressed)
+end
+
+local function SetCameraUpdateSuppressed(suppressed: boolean)
+	local controller = CameraController.GetSharedController()
+	if controller then
+		controller:SetUpdateSuppressed(suppressed)
+	end
+end
+
 local function RecreateMovementEngine()
 	engine = Movement.lnew()
 	if IsWardrobeOpen then
@@ -156,22 +176,31 @@ local function SetWardrobeOpen(isOpen: boolean)
 	if isOpen then
 		CancelBowCharge()
 		PlayerServiceClient.SetRightClickReleased()
+		SetMouseLockSuppressed(true)
+		SetCameraUpdateSuppressed(true)
 		engine:DisableAllMovement()
-		WardrobeViewport.Show()
+		if not WardrobeViewport.Show() then
+			IsWardrobeOpen = false
+			SetCameraUpdateSuppressed(false)
+			SetMouseLockSuppressed(false)
+			engine:EnableAllMovement()
+		end
 	else
 		WardrobeViewport.Hide()
+		SetMouseLockSuppressed(false)
+		SetCameraUpdateSuppressed(false)
 		engine:EnableAllMovement()
 	end
 end
 
 -- Attach to UserInputService
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then
+	if input.KeyCode == Enum.KeyCode.B and not UserInputService:GetFocusedTextBox() then
+		SetWardrobeOpen(not IsWardrobeOpen)
 		return
 	end
 
-	if input.KeyCode == Enum.KeyCode.B then
-		SetWardrobeOpen(not IsWardrobeOpen)
+	if processed then
 		return
 	end
 

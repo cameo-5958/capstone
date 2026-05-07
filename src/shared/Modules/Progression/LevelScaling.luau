@@ -1,7 +1,7 @@
 --!strict
 -- Applies level-based stat scaling to an entity at spawn.
 --
--- HP and PhysicalDamage scale exponentially by 10-level intervals.
+-- HP and PhysicalAttack scale exponentially by 10-level intervals.
 -- Levels are capped at 120 so spawn progression has a clear ceiling.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,8 +52,8 @@ function LevelScaling.ApplyScaling(entity: any)
 	)
 
 	entity:AddModifier(
-		"PhysicalDamage",
-		Modifier.new("level:physicaldamage", "Multiplicative", damageScaleFactor, "level")
+		"PhysicalAttack",
+		Modifier.new("level:physicalattack", "Multiplicative", damageScaleFactor, "level")
 	)
 
 	local defenseBonus = 2 * (level - 1)

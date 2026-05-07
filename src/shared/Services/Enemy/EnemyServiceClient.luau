@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
+local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 type Entity = EntityTypes.Entity
 
 local __Enemies: {
@@ -61,15 +62,7 @@ local ClearAttackPredictor: (uuid: string) -> ()
 local DestroyDamageIndicator: (indicatorId: string) -> ()
 
 local function FormatStatValue(value: number?): string
-	if value == nil then
-		return "--"
-	end
-
-	if value % 1 == 0 then
-		return tostring(value)
-	end
-
-	return tostring(math.round(value * 100) / 100)
+	return CombatNumbers.FormatTenth(value)
 end
 
 local function GetEnemyDisplayLevel(ent: Entity): number

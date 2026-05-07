@@ -7,6 +7,7 @@ local Services = ReplicatedStorage:WaitForChild("Services")
 local ToLoad = {
 	"Collision",
 	"Equipment",
+	"Inventory",
 	"Enemy",
 	"Attack",
 	"Weapon",

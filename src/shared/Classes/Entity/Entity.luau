@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modifier = require(script.Parent.Parent.Modifier.Modifier)
 local ModifierType = require(script.Parent.Parent.Modifier.ModifierType)
 local Damage = require(ReplicatedStorage.Classes.Attack.Damage)
+local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 local StatBlock = require(script.Parent.Parent.Modifier.StatBlock)
 local EntityTypes = require(script.Parent.EntityTypes)
 
@@ -44,7 +45,17 @@ local DEFAULT_STATS: EntityTypes.StatBlock = {
 	Speed = 6,
 }
 
+local function RoundHealthOrDamageStat(_: string, value: number): number
+	return CombatNumbers.RoundToTenth(value)
+end
+
 local FINALIZE_MAP = {
+	Health = RoundHealthOrDamageStat,
+	MaxHealth = RoundHealthOrDamageStat,
+	PhysicalAttack = RoundHealthOrDamageStat,
+	MagicalAttack = RoundHealthOrDamageStat,
+	PhysicalDamage = RoundHealthOrDamageStat,
+	MagicDamage = RoundHealthOrDamageStat,
 	CritRate = function(_: string, value: number): number
 		return math.max(0, value)
 	end,
@@ -232,7 +243,9 @@ end
 function Entity.SetStat(self: Entity, stat: Stat, to: number): number
 	local nextValue = to
 	if stat == "Health" then
-		nextValue = math.clamp(to, 0, self:GetStat("MaxHealth"))
+		nextValue = CombatNumbers.RoundToTenth(math.clamp(to, 0, self:GetStat("MaxHealth")))
+	elseif stat == "MaxHealth" then
+		nextValue = CombatNumbers.RoundToTenth(to)
 	elseif stat == "Mana" then
 		nextValue = math.clamp(to, 0, self:GetStat("MaxMana"))
 	elseif stat == "Stamina" then
@@ -528,9 +541,18 @@ function Entity.ApplyDamage(self: Entity, damage: number, target: Entity): ()
 	context:Attack()
 end
 
+function Entity.DirectDamageToEntity(self: Entity, damage: number, target: Entity): ()
+	Damage.DirectDamageToEntity(self, target, damage)
+end
+
+function Entity.TrueDamage(self: Entity, damage: number, target: Entity): ()
+	Damage.TrueDamage(self, target, damage)
+end
+
 function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()
-	print("Taking " .. damage .. " damage")
-	self:SetStat("Health", self:GetStat("Health") - damage)
+	local roundedDamage = CombatNumbers.RoundToTenth(damage)
+	print("Taking " .. roundedDamage .. " damage")
+	self:SetStat("Health", self:GetStat("Health") - roundedDamage)
 
 	if not self:IsAlive() then
 		print("Am Dead")

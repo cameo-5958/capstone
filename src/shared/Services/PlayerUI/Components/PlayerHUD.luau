@@ -6,6 +6,7 @@ local RunService = game:GetService("RunService")
 local React = require(ReplicatedStorage.Packages.react)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
 local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
+local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 local StatusBarTemplate = require(script.Parent.StatusBarTemplate)
 
 local HEALTH_LERP_SPEED = 4.5
@@ -18,7 +19,7 @@ local STAMINA_BACKGROUND_IMAGE = "rbxassetid://133315616213837"
 local STAMINA_FOREGROUND_IMAGE = "rbxassetid://109347407918358"
 
 local function formatStatLine(current: number, maximum: number, label: string): string
-	return string.format("%d / %d %s", math.floor(current + 0.5), math.floor(maximum + 0.5), label)
+	return ("%s / %s %s"):format(CombatNumbers.FormatTenth(current), CombatNumbers.FormatTenth(maximum), label)
 end
 
 local function getRatio(current: number, maximum: number): number

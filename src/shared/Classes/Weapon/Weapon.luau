@@ -21,7 +21,9 @@ export type AttackProfile = WeaponTypes.AttackProfile
 export type ComboAttack = WeaponTypes.ComboAttack
 export type ComboDefinition = WeaponTypes.ComboDefinition
 export type ComboSet = WeaponTypes.ComboSet
+export type PassiveMetadata = WeaponTypes.PassiveMetadata
 export type Weapon = WeaponTypes.Weapon
+export type WeaponPassiveInput = WeaponTypes.WeaponPassiveInput
 
 local Weapon = {}
 Weapon.__index = Weapon
@@ -37,6 +39,19 @@ local DEFAULT_ATTACK_PROFILE: AttackProfile = {
 	HitboxOffset = CFrame.new(0, 0, -3.5),
 }
 
+local function NormalizeRarity(rarity: string?): string
+	if type(rarity) ~= "string" or rarity == "" then
+		return "CRUDE"
+	end
+
+	local normalized = string.upper(rarity)
+	if normalized == "COMMON" then
+		return "CRUDE"
+	end
+
+	return normalized
+end
+
 local function MergeAttackProfile(profile: AttackProfile?): AttackProfile
 	local merged = table.clone(DEFAULT_ATTACK_PROFILE) :: any
 	if not profile then
@@ -48,6 +63,85 @@ local function MergeAttackProfile(profile: AttackProfile?): AttackProfile
 	end
 
 	return merged
+end
+
+local function isAttackModifierApplier(value: any): boolean
+	return type(value) == "table"
+		and type(value.Id) == "string"
+		and type(value.Apply) == "function"
+end
+
+local function clonePassiveMetadata(source: { [string]: any }, fallbackId: string?): PassiveMetadata
+	local clone = table.clone(source) :: any
+	if type(clone.Values) == "table" then
+		clone.Values = table.clone(clone.Values)
+	end
+	if type(clone.Id) ~= "string" or clone.Id == "" then
+		clone.Id = fallbackId
+	end
+	if type(clone.Kind) ~= "string" or clone.Kind == "" then
+		clone.Kind = "Passive"
+	end
+	if type(clone.Tag) ~= "string" or clone.Tag == "" then
+		clone.Tag = clone.Kind
+	end
+
+	return clone :: PassiveMetadata
+end
+
+local function normalizePassiveMetadataList(metadata: any, fallbackId: string?): { PassiveMetadata }
+	if type(metadata) ~= "table" then
+		return {}
+	end
+
+	local details = {}
+	if metadata[1] ~= nil then
+		for _, detail in ipairs(metadata) do
+			if type(detail) == "table" then
+				table.insert(details, clonePassiveMetadata(detail, fallbackId))
+			end
+		end
+	else
+		table.insert(details, clonePassiveMetadata(metadata, fallbackId))
+	end
+
+	return details
+end
+
+local function resolveWeaponPassive(
+	weaponPassive: WeaponPassiveInput?,
+	passiveDetails: { PassiveMetadata }?
+): (AttackModifierApplier?, { PassiveMetadata })
+	local applier: AttackModifierApplier? = nil
+	local metadata = {}
+	local passive = weaponPassive :: any
+
+	if isAttackModifierApplier(passive) then
+		applier = passive :: AttackModifierApplier
+		local attributes = passive.__Attributes
+		if type(attributes) == "table" then
+			metadata = normalizePassiveMetadataList(
+				attributes.PassiveDetails or attributes.Metadata or attributes.Details,
+				applier.Id
+			)
+		end
+	elseif type(passive) == "table" then
+		local candidate = passive.Applier or passive.Modifier or passive.Passive or passive.Runtime
+		if isAttackModifierApplier(candidate) then
+			applier = candidate :: AttackModifierApplier
+		end
+
+		metadata = normalizePassiveMetadataList(
+			passive.Metadata or passive.Details or passive.Display or passive.PassiveDetails,
+			if applier then applier.Id else nil
+		)
+	end
+
+	if passiveDetails and #passiveDetails > 0 then
+		metadata = normalizePassiveMetadataList(passiveDetails, if applier then applier.Id else nil)
+	end
+
+	return applier, metadata
 end
 
 function Weapon.new(
@@ -62,13 +156,17 @@ function Weapon.new(
 	toolTemplate: Tool?,
 	weaponClass: string?,
 	attackContext: { [string]: any }?,
-	weaponPassive: AttackModifierApplier?
+	weaponPassive: WeaponPassiveInput?,
+	rarity: string?,
+	passiveDetails: { PassiveMetadata }?
 ): Weapon
 	local self = setmetatable({}, Weapon)
+	local resolvedPassive, resolvedPassiveDetails = resolveWeaponPassive(weaponPassive, passiveDetails)
 
 	self.UUID = HttpService:GenerateGUID(false)
 	self.Name = name
 	self.WeaponId = weaponId or name
+	self.Rarity = NormalizeRarity(rarity)
 	self.Class = weaponClass or "Sword"
 	self.Type = self.Class
 	self.AttackContext = table.clone(attackContext or {})
@@ -78,7 +176,8 @@ function Weapon.new(
 	self.Weight = weight or 0
 	self.AttackProfile = MergeAttackProfile(attackProfile)
 	self.Owner = nil
-	self.WeaponPassive = weaponPassive
+	self.WeaponPassive = resolvedPassive
+	self.PassiveDetails = resolvedPassiveDetails
 	self.WeaponAbility = weaponAbility or rightClickAbility
 	self.RightClickAbility = self.WeaponAbility
 	self.ToolTemplate = toolTemplate

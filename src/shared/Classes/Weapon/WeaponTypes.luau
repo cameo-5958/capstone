@@ -14,6 +14,21 @@ type AttackContext = AttackContextModule.AttackContext
 type Damage = DamageModule.Damage
 
 export type AbilityCallback = (self: any, owner: Entity, context: { [string]: any }?) -> ()
+export type PassiveMetadata = {
+	Id: string?,
+	Kind: string?,
+	Tag: string?,
+	Name: string?,
+	Title: string?,
+	Desc: string?,
+	Description: string?,
+	Values: { [string]: any }?,
+}
+export type WeaponPassiveDefinition = {
+	Applier: AttackModifierApplier,
+	Metadata: PassiveMetadata | { PassiveMetadata },
+}
+export type WeaponPassiveInput = AttackModifierApplier | WeaponPassiveDefinition
 export type AnimationId = string | { string }
 export type AttackProfile = {
 	AnimationId: AnimationId,
@@ -78,6 +93,7 @@ export type Weapon = {
 	UUID: string,
 	Name: string,
 	WeaponId: string,
+	Rarity: string,
 	Class: string,
 	Type: string,
 	AttackContext: { [string]: any },
@@ -88,6 +104,7 @@ export type Weapon = {
 	AttackProfile: AttackProfile,
 	Owner: Entity?,
 	WeaponPassive: AttackModifierApplier?,
+	PassiveDetails: { PassiveMetadata },
 	WeaponAbility: AbilityCallback?,
 	RightClickAbility: AbilityCallback?,
 	ToolTemplate: Tool?,
@@ -105,7 +122,9 @@ export type Weapon = {
 		toolTemplate: Tool?,
 		weaponClass: string?,
 		attackContext: { [string]: any }?,
-		weaponPassive: AttackModifierApplier?
+		weaponPassive: WeaponPassiveInput?,
+		rarity: string?,
+		passiveDetails: { PassiveMetadata }?
 	) -> Weapon,
 	SetOwner: (self: Weapon, entity: Entity?) -> Weapon,
 	SetToolInstance: (self: Weapon, tool: Tool?) -> Tool?,

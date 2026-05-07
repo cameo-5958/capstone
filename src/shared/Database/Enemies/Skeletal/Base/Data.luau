@@ -5,7 +5,7 @@ return {
 	["__Stats"] = {
 		["Health"] = 50,
 		["MaxHealth"] = 50,
-		["PhysicalDamage"] = 10,
+		["PhysicalAttack"] = 10,
 	},
 	["__Components"] = {
 		["EquippedIndex"] = 1,

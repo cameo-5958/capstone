@@ -13,6 +13,7 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
+local Damage = require(ReplicatedStorage.Classes.Attack.Damage)
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 local ProjectileServiceServer = require(ReplicatedStorage.Services.Projectile.ProjectileServiceServer)
@@ -358,7 +359,7 @@ local function ResolveComboAttack(entity, weapon, now: number): (ComboAttack?, b
 	return attack, attackIndex < #combo.Attacks, startedNewSequence
 end
 
-function AttackServiceServer.ProcessEnemyHit(attacker, target, physicalDamage: number, swingRange: number?)
+function AttackServiceServer.ProcessEnemyHit(attacker, target, physicalAttack: number, swingRange: number?)
 	if not attacker or not target then
 		return false
 	end
@@ -374,7 +375,7 @@ function AttackServiceServer.ProcessEnemyHit(attacker, target, physicalDamage: n
 	end
 
 	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
-	target:TakeDamage(physicalDamage, attacker)
+	Damage.DirectDamageToEntity(attacker, target, physicalAttack)
 	return true
 end
 
@@ -560,6 +561,5 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
-
 
 
