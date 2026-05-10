@@ -120,9 +120,10 @@ end
 
 local function MergeAttackProfile(baseProfile: AttackProfile, overrideProfile: ComboAttackProfile?): AttackProfile
 	local merged = table.clone(baseProfile)
+	local mergedAny = merged :: any
 	if overrideProfile then
 		for key, value in pairs(overrideProfile) do
-			(merged :: any)[key] = value
+			mergedAny[key] = value
 		end
 	end
 	return merged
@@ -561,5 +562,4 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
-
 

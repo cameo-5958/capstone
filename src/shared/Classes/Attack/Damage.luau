@@ -20,7 +20,7 @@ export type Damage = {
 local Damage = {} :: Damage
 
 local function GetEnemyServiceServer()
-	return require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
+	return require(ReplicatedStorage.Services.Enemy.EnemyServiceServer) :: any
 end
 
 local function SumModifiers(modifiers): number

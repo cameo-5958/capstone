@@ -58,133 +58,14 @@ local function GetBackpack(entity: Entity): Backpack?
 	return player:FindFirstChildOfClass("Backpack")
 end
 
-local function EnsureTrailAttachment(handle: BasePart, name: string, position: Vector3): Attachment
-	local attachment = handle:FindFirstChild(name)
-	if attachment and attachment:IsA("Attachment") then
-		attachment.Position = position
-		return attachment
-	end
-
-	attachment = Instance.new("Attachment")
-	attachment.Name = name
-	attachment.Position = position
-	attachment.Parent = handle
-	return attachment
-end
-
-local function GetTrailEndpoints(handle: BasePart): (Vector3, Vector3)
-	local size = handle.Size
-	local mesh = handle:FindFirstChildWhichIsA("DataModelMesh")
-	if mesh then
-		size = Vector3.new(
-			math.max(size.X, math.abs(mesh.Scale.X)),
-			math.max(size.Y, math.abs(mesh.Scale.Y)),
-			math.max(size.Z, math.abs(mesh.Scale.Z))
-		)
-	end
-
-	local xExtent = size.X * 0.48
-	local yExtent = size.Y * 0.48
-	local zExtent = size.Z * 0.48
-	local axes = {
-		{ Name = "X", Size = size.X, Extent = xExtent },
-		{ Name = "Y", Size = size.Y, Extent = yExtent },
-		{ Name = "Z", Size = size.Z, Extent = zExtent },
-	}
-	table.sort(axes, function(left, right)
-		return left.Size > right.Size
-	end)
-
-	local primaryAxis = axes[1]
-	local secondaryAxis = axes[2]
-	local tertiaryAxis = axes[3]
-
-	-- For flat, elongated blades, the trail looks better spanning the blade face
-	-- instead of the full blade length.
-	local chosenAxis = primaryAxis
-	if primaryAxis.Size >= (secondaryAxis.Size * 1.2) and tertiaryAxis.Size <= (secondaryAxis.Size * 0.6) then
-		chosenAxis = secondaryAxis
-	end
-
-	if chosenAxis.Name == "Z" then
-		return Vector3.new(0, 0, -chosenAxis.Extent), Vector3.new(0, 0, chosenAxis.Extent)
-	elseif chosenAxis.Name == "Y" then
-		return Vector3.new(0, -chosenAxis.Extent, 0), Vector3.new(0, chosenAxis.Extent, 0)
-	else
-		return Vector3.new(-chosenAxis.Extent, 0, 0), Vector3.new(chosenAxis.Extent, 0, 0)
-	end
-end
-
-local function EnsureWeaponTrail(tool: Tool, weaponClass: string?)
-	local handle = tool:FindFirstChild("Handle")
-	if not handle or not handle:IsA("BasePart") then
-		return
-	end
-
-	if weaponClass == "Staff" then
-		local existingTrail = handle:FindFirstChild("WeaponTrail")
-		if existingTrail and existingTrail:IsA("Trail") then
-			existingTrail.Enabled = false
+local function EnsureWeaponTrail(tool: Tool, _weaponClass: string?)
+	for _, descendant in ipairs(tool:GetDescendants()) do
+		if descendant:IsA("Trail") then
+			descendant:Destroy()
+		elseif descendant:IsA("Attachment") and descendant.Name:match("^TrailAttachment") then
+			descendant:Destroy()
 		end
-		return
 	end
-
-	local endpoint0, endpoint1 = GetTrailEndpoints(handle)
-	local attachment0 = EnsureTrailAttachment(handle, "TrailAttachment0", endpoint0)
-	local attachment1 = EnsureTrailAttachment(handle, "TrailAttachment1", endpoint1)
-
-	local trail = handle:FindFirstChild("WeaponTrail")
-	if trail and trail:IsA("Trail") then
-		trail.Attachment0 = attachment0
-		trail.Attachment1 = attachment1
-		return
-	end
-
-	trail = Instance.new("Trail") :: Trail
-	trail.Name = "WeaponTrail"
-	trail.Attachment0 = attachment0
-	trail.Attachment1 = attachment1
-	trail.FaceCamera = false
-	trail.Lifetime = if weaponClass == "Spear" then 0.07 else 0.09
-	trail.MinLength = if weaponClass == "Spear" then 0.06 else 0.08
-	trail.Brightness = 0
-	trail.LightEmission = 0
-	trail.LightInfluence = 1
-	trail.Transparency = if weaponClass == "Spear"
-		then NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.4),
-			NumberSequenceKeypoint.new(0.4, 0.65),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		else NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.3),
-			NumberSequenceKeypoint.new(0.35, 0.58),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-	trail.WidthScale = if weaponClass == "Spear"
-		then NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.5),
-			NumberSequenceKeypoint.new(0.45, 0.25),
-			NumberSequenceKeypoint.new(1, 0),
-		})
-		else NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.65),
-			NumberSequenceKeypoint.new(0.4, 0.35),
-			NumberSequenceKeypoint.new(1, 0),
-		})
-	trail.Color = if weaponClass == "Spear"
-		then ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(215, 220, 230)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(170, 178, 195)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(125, 135, 155)),
-		})
-		else ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 220, 225)),
-			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(175, 180, 190)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 125, 135)),
-		})
-	trail.Enabled = true
-	trail.Parent = handle
 end
 
 local function ClearManagedTools(entity: Entity)

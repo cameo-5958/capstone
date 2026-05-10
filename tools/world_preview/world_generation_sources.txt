@@ -1,0 +1,61 @@
+# World generation function locations
+214:local function runFootprintSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
+226:local function runHeightSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
+244:local function runThicknessSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
+261:local function runMaterialSieve(columns: { [string]: TileColumn }, config: WorldConfig)
+281:local function runWaterSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
+304:local function runStructureSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
+344:local function buildChunkPayloads(columns: { [string]: TileColumn }, config: WorldConfig): { ChunkData }
+422:local function bakeCollision(chunks: { ChunkData }, config: WorldConfig): number
+540:local function generateWorld(seed: number): WorldState
+544:	runFootprintSieve(columns, config, seed)
+545:	runHeightSieve(columns, config, seed)
+546:	runThicknessSieve(columns, config, seed)
+547:	runMaterialSieve(columns, config)
+548:	runWaterSieve(columns, config, seed)
+549:	runStructureSieve(columns, config, seed)
+551:	local chunks = buildChunkPayloads(columns, config)
+553:	local collisionParts = bakeCollision(chunks, config)
+615:	CurrentWorld = generateWorld(seed)
+
+# World config + types
+3:export type WorldConfig = {
+14:export type WorldProfile = {
+24:export type TileColumn = {
+36:export type TileColumnPayload = {
+48:export type ChunkData = {
+51:	Columns: { TileColumnPayload },
+56:WorldTypes.DefaultConfig = {
+65:} :: WorldConfig
+75:} :: WorldProfile
+77:WorldTypes.BiomeMaterials = {
+
+# Client-side world render copy points
+38:local WorldServiceClient = {}
+88:local function createVisualPart(parent: Instance, name: string, size: Vector3, position: Vector3, material: Enum.Material, color: Color3, transparency: number)
+103:local function renderColumn(column: TileColumnPayload, parent: Folder)
+117:		createVisualPart(
+129:	createVisualPart(
+142:			createVisualPart(
+155:		createVisualPart(
+165:		createVisualPart(
+174:		createVisualPart(
+186:local function loadChunk(chunk: ChunkData)
+193:		renderColumn(column, folder)
+199:function WorldServiceClient.GetSeed(): number
+203:function WorldServiceClient.GetConfig(): WorldConfig?
+207:function WorldServiceClient.GetLoadedChunkCount(): number
+215:function WorldServiceClient.GetWorldChangedSignal()
+219:function WorldServiceClient.RequestRegenerate(seed: number?)
+225:function WorldServiceClient.init(): ()
+234:	elseif action == "InitializeWorld" then
+239:		WorldChanged:Fire("InitializeWorld", payload)
+240:	elseif action == "LoadChunk" then
+242:			loadChunk(payload :: ChunkData)
+243:			WorldChanged:Fire("LoadChunk", payload)
+248:return table.freeze(WorldServiceClient)
+
+# World service wiring
+src/shared/Services/Loader/ServerLoader.luau:9:	"World",
+src/client/init.client.luau:7:local WorldServiceClient = require(ReplicatedStorage.Services.World.WorldServiceClient)
+src/client/init.client.luau:10:WorldServiceClient.init()

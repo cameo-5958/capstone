@@ -9,3 +9,6 @@
 # Sourcemap & Packges
 sourcemap.json
 Packages/
+
+# Ignore documentation in root file
+/*.md

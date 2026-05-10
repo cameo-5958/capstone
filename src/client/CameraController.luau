@@ -93,11 +93,11 @@ local MODE_CONFIGS: {
 } = {
 	Default = {
 		Name = "Default",
-		Fov = 70,
-		Offset = Vector3.new(2.5, 2.8, 12),
-		ZoomMin = 6,
-		ZoomMax = 24,
-		ZoomDefault = 12,
+		Fov = 66,
+		Offset = Vector3.new(2.2, 2.6, 8.5),
+		ZoomMin = 4.5,
+		ZoomMax = 14,
+		ZoomDefault = 8.5,
 		LookAtHeight = 2.5,
 		MouseSensitivity = 0.0035,
 		Smoothing = 7,

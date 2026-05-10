@@ -3,11 +3,12 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local API = script.Parent:WaitForChild("AttackEndpoint") :: RemoteEvent
-
 local AttackServiceClient = {}
 local LocalPlayer = Players.LocalPlayer
 local EntitiesFolder = workspace:WaitForChild("EntitiesFolder")
+local API: RemoteEvent? = nil
+local APIConnection: RBXScriptConnection? = nil
+local warnedEndpointMissing = false
 
 type ActiveAttack = {
 	AttackId: string,
@@ -34,6 +35,19 @@ local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Include
 overlapParams.FilterDescendantsInstances = { EntitiesFolder }
 overlapParams.MaxParts = 32
+
+local function fireServer(action: string, payload: { [string]: any }?)
+	local remote = API
+	if not remote then
+		if not warnedEndpointMissing then
+			warn("[AttackServiceClient] AttackEndpoint is not ready yet; attack inputs are being dropped until it appears.")
+			warnedEndpointMissing = true
+		end
+		return
+	end
+
+	remote:FireServer(action, payload or {})
+end
 
 local function GetHitboxCFrame(rootPart: BasePart, hitWindow): CFrame
 	return rootPart.CFrame * hitWindow.Profile.HitboxOffset
@@ -125,7 +139,7 @@ local function ReportOverlapHits(attack: ActiveAttack)
 		end
 
 		lastReportedAt[targetUUID] = now
-		API:FireServer("ReportHit", {
+		fireServer("ReportHit", {
 			AttackId = attack.AttackId,
 			TargetUUID = targetUUID,
 			HitWindowIndex = activeHitWindow.Index,
@@ -134,18 +148,18 @@ local function ReportOverlapHits(attack: ActiveAttack)
 end
 
 function AttackServiceClient.PrimaryAttack(): ()
-	API:FireServer("RequestPrimaryAttack", {})
+	fireServer("RequestPrimaryAttack", {})
 end
 
 function AttackServiceClient.BeginBowCharge(): ()
-	API:FireServer("BeginBowCharge", {})
+	fireServer("BeginBowCharge", {})
 end
 
 function AttackServiceClient.ReleaseBowCharge(payload: { [string]: any }?): ()
-	API:FireServer("ReleaseBowCharge", payload or {})
+	fireServer("ReleaseBowCharge", payload or {})
 end
 
-API.OnClientEvent:Connect(function(action: string, payload: { [string]: any })
+local function onClientEvent(action: string, payload: { [string]: any })
 	if action ~= "AttackStarted" then
 		return
 	end
@@ -156,6 +170,36 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any })
 		ClearAt = payload.ClearAt,
 		LastReportedAt = {},
 	}
+end
+
+local function bindAPI(candidate: Instance)
+	if not candidate:IsA("RemoteEvent") then
+		return
+	end
+
+	local remote = candidate :: RemoteEvent
+	if API == remote then
+		return
+	end
+
+	API = remote
+	warnedEndpointMissing = false
+	if APIConnection then
+		APIConnection:Disconnect()
+		APIConnection = nil
+	end
+	APIConnection = remote.OnClientEvent:Connect(onClientEvent)
+end
+
+local existingEndpoint = script.Parent:FindFirstChild("AttackEndpoint")
+if existingEndpoint then
+	bindAPI(existingEndpoint)
+end
+
+script.Parent.ChildAdded:Connect(function(child)
+	if child.Name == "AttackEndpoint" then
+		bindAPI(child)
+	end
 end)
 
 RunService.Heartbeat:Connect(function()

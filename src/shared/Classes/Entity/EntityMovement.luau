@@ -68,9 +68,10 @@ function MovementEngine.new(entity: Entity): MovementEngine
 	self.__Animations = entity.__Animations
 	self.MoveToFinished = self.Humanoid.MoveToFinished;
 
-	((self :: any) :: MovementEngine):init()
+	local movement = (self :: any) :: MovementEngine
+	movement:init()
 
-	return (self :: any) :: MovementEngine
+	return movement
 end
 
 function MovementEngine.OnLinearVelocityApplied(self: MovementEngine, force: Vector3, time_: number): ()

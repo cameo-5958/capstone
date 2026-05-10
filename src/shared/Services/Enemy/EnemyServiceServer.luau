@@ -178,7 +178,7 @@ end)
 
 API.OnServerEvent:Connect(function(_: Player, action: string, payload: { [string]: any }?)
 	if action == "RequestSpawnEnemy" then
-		local enemyPath = payload and payload.EnemyPath or "Skeletal.Korblox"
+		local enemyPath = payload and payload.EnemyPath or "Golem.Basalt"
 		local levelOverride = payload and payload.Level
 		local spawnPart = workspace:FindFirstChild("SpawnPoint")
 		if spawnPart and spawnPart:IsA("Part") then
@@ -194,21 +194,61 @@ local default = {
 	CritDamage = 0,
 	MagicalAttack = 0,
 }
+
+local function resolveEnemyFolder(enemyPath: string): Instance
+	local pathParts = enemyPath:split(".")
+	local current: Instance = EnemiesDatabase
+	for _, part in ipairs(pathParts) do
+		current = current:WaitForChild(part)
+	end
+	return current
+end
+
+local function buildEnemyModel(enemyFolder: Instance, enemyPath: string): Model
+	local modelInstance = enemyFolder:FindFirstChild("Model")
+	if modelInstance and modelInstance:IsA("Model") then
+		return modelInstance:Clone()
+	end
+
+	local modelBuilderModule = enemyFolder:FindFirstChild("ModelBuilder")
+	if modelBuilderModule and modelBuilderModule:IsA("ModuleScript") then
+		local ok, exported = pcall(require, modelBuilderModule)
+		if not ok then
+			error(string.format("Failed to require model builder for '%s': %s", enemyPath, tostring(exported)))
+		end
+
+		local builderFn: (() -> Model)? = nil
+		if type(exported) == "function" then
+			builderFn = exported
+		elseif type(exported) == "table" and type((exported :: any).Build) == "function" then
+			builderFn = function()
+				return (exported :: any).Build()
+			end
+		end
+		if not builderFn then
+			error(string.format("ModelBuilder for '%s' must export a function or table with Build()", enemyPath))
+		end
+
+		local builtModel = builderFn()
+		if not builtModel or not builtModel:IsA("Model") then
+			error(string.format("ModelBuilder for '%s' did not return a Model", enemyPath))
+		end
+		return builtModel
+	end
+
+	error(string.format("Enemy '%s' is missing a Model or ModelBuilder", enemyPath))
+end
+
 function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
 	local spawnLevel = ResolveSpawnLevel(levelOverride)
 
 	-- Grab enemy's data from the database
 	-- Split Enemy into multiple parts
-	local EnemyPath = e:split(".")
-	local Enemy = EnemiesDatabase
-
-	for _, part in pairs(EnemyPath) do
-		Enemy = Enemy:WaitForChild(part)
-	end
+	local Enemy = resolveEnemyFolder(e)
 
 	-- Require the data to create the entity
 	local data = require(Enemy.Data) :: { ["Name"]: string, string: any }
-	local model = Enemy.Model:Clone() :: Model
+	local model = buildEnemyModel(Enemy, e)
 	model:SetAttribute("EnemyLevel", spawnLevel)
 	local mergedAnimations = table.clone(DefaultAnimations)
 	for key, value in pairs(data.__Animations or {}) do

@@ -378,7 +378,8 @@ function MovementEngine.lnew(): MovementEngine
 	self.Player = lp
 	self.Speed = humanoid:GetAttribute("EntitySpeed") or humanoid.WalkSpeed
 	self.__Animations = table.clone(PlayerConfig.__Animations or {});
-	((self :: any) :: MovementEngine):init()
+	local movement = (self :: any) :: MovementEngine
+	movement:init()
 
 	humanoid:GetAttributeChangedSignal("EntitySpeed"):Connect(function()
 		local nextSpeed = humanoid:GetAttribute("EntitySpeed")
@@ -402,7 +403,7 @@ function MovementEngine.lnew(): MovementEngine
 		self:UpdateFacingFromCamera()
 	end)
 
-	return (self :: any) :: MovementEngine
+	return movement
 end
 
 function MovementEngine.GetTarget(self: MovementEngine, pos: Vector3, sight: number?): Entity

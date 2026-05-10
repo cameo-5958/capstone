@@ -38,6 +38,9 @@ function CollisionServiceServer.init()
 	ensureGroup("Player")
 	setGroupsCollidable("Enemy", "Enemy", false)
 	setGroupsCollidable("Enemy", "Player", false)
+	setGroupsCollidable("Player", "Default", true)
+	setGroupsCollidable("Enemy", "Default", true)
+	setGroupsCollidable("Player", "Player", true)
 	REGISTERED = true
 end
 

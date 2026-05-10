@@ -6,7 +6,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 local BrainTypes = require(ReplicatedStorage.Classes.Enemy.BrainTypes)
-local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 
 type MovementEngine = Movement.MovementEngine
 type Brain = BrainTypes.Brain
@@ -14,6 +13,15 @@ type Neuron = BrainTypes.Neuron
 
 local Brain = {}
 Brain.__index = Brain
+local PlayerServiceServerModule = nil :: any
+
+local function GetPlayerServiceServerModule()
+	if PlayerServiceServerModule == nil then
+		PlayerServiceServerModule = require(ReplicatedStorage.Services.Player:WaitForChild("PlayerServiceServer") :: ModuleScript)
+	end
+
+	return PlayerServiceServerModule
+end
 
 -- Constructor
 function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
@@ -86,6 +94,8 @@ end
 
 -- Brain thread
 function Brain.Tick(self: Brain, dt: number)
+	local PlayerServiceServer = GetPlayerServiceServerModule()
+
 	if self.Target then
 		local targetEntity = PlayerServiceServer.GetEntityFromCharacter(self.Target)
 		if not targetEntity or not targetEntity:IsAlive() then
@@ -177,6 +187,8 @@ function Brain.Obstruction(self: Brain, pos: Vector3): boolean
 end
 
 function Brain.GetTargetPlayer(self: Brain, range: number): Model?
+	local PlayerServiceServer = GetPlayerServiceServerModule()
+
 	-- Get list of players
 	local plys = PlayerServiceServer.GetPlayers()
 

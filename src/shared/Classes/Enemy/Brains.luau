@@ -12,7 +12,7 @@ local TrackPlayer = require(neurons.TrackPlayer)
 
 -- Import brain
 local BrainTypes = require(script.Parent.BrainTypes)
-local Brain = require(script.Parent.EnemyBrain)
+local BrainClass = require(script.Parent.BrainClass)
 type Brain = BrainTypes.Brain
 type Neuron = BrainTypes.Neuron
 
@@ -20,7 +20,7 @@ local Brains = {}
 
 function Brains.Aggressive(movementEngine, range: number): Brain
 	-- Create the brain
-	local brain = Brain.new(movementEngine, {
+	local brain = BrainClass.new(movementEngine, {
 		-- Interrupting
 		Stumble.new(), -- Heavy hits interrupt into a short stumble
 		Aggro.new(), -- Can get aggroed

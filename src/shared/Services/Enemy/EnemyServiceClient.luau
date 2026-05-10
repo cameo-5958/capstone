@@ -399,7 +399,8 @@ local function CancelLinearVelocityVisual(uuid: string)
 		lv:Destroy()
 	end
 
-	(ent.Character.PrimaryPart :: BasePart).AssemblyLinearVelocity = Vector3.zero
+	local rootPart = ent.Character.PrimaryPart :: BasePart
+	rootPart.AssemblyLinearVelocity = Vector3.zero
 end
 
 local function ApplyLinearVelocityVisual(uuid: string, velocity: Vector3, duration: number)
@@ -484,7 +485,7 @@ end
 
 function Enemies.RequestSpawnEnemy(enemyPath: string?)
 	API:FireServer("RequestSpawnEnemy", {
-		EnemyPath = enemyPath or "Skeletal.Korblox",
+		EnemyPath = enemyPath or "Golem.Basalt",
 	})
 end
 
@@ -493,7 +494,8 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 	if action == "Move" then
 		local ent = __Enemies[data.UUID]
 		if ent and ent.Character and ent.Character:FindFirstChild("Humanoid") then
-			(ent.Character:FindFirstChild("Humanoid") :: Humanoid):MoveTo(data.Position)
+			local humanoid = ent.Character:FindFirstChild("Humanoid") :: Humanoid
+			humanoid:MoveTo(data.Position)
 		end
 		CancelLinearVelocityVisual(data.UUID)
 

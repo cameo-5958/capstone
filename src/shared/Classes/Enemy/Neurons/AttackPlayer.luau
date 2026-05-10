@@ -2,7 +2,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 local SuperNeuron = require(script.Parent.Parent.Neuron)
 local BrainTypes = require(script.Parent.Parent.BrainTypes)
 local EnemyHandler = ReplicatedStorage.Services.Enemy:WaitForChild("EnemyHandler") :: RemoteEvent
@@ -14,8 +13,77 @@ local AttackPlayer = {}
 AttackPlayer.__index = AttackPlayer
 setmetatable(AttackPlayer, SuperNeuron)
 
-local function GetAttackServiceServer()
-	return require(ReplicatedStorage.Services.Attack.AttackServiceServer)
+local DamageModule = nil :: any
+local PlayerServiceServerModule = nil :: any
+
+local function GetDamageModule()
+	if DamageModule == nil then
+		DamageModule = require(ReplicatedStorage.Classes.Attack:WaitForChild("Damage")) :: any
+	end
+
+	return DamageModule
+end
+
+local function GetPlayerServiceServerModule()
+	if PlayerServiceServerModule == nil then
+		PlayerServiceServerModule =
+			require(ReplicatedStorage.Services.Player:WaitForChild("PlayerServiceServer")) :: any
+	end
+
+	return PlayerServiceServerModule
+end
+
+local overlapParams = OverlapParams.new()
+overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+overlapParams.MaxParts = 64
+
+local function IsTargetInsideHitbox(
+	attacker,
+	target,
+	hitboxSize: Vector3,
+	hitboxOffset: CFrame,
+	rootCFrame: CFrame
+): boolean
+	overlapParams.FilterDescendantsInstances = { attacker.Character }
+	local parts = workspace:GetPartBoundsInBox(rootCFrame * hitboxOffset, hitboxSize, overlapParams)
+	for _, part in ipairs(parts) do
+		if part:IsDescendantOf(target.Character) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function GetServerHitboxData(attacker, swingRange: number?): (Vector3, CFrame)
+	local equippedWeapon = attacker and attacker:GetEquippedWeapon()
+	if equippedWeapon then
+		local profile = equippedWeapon:GetAttackProfile()
+		return profile.HitboxSize, profile.HitboxOffset
+	end
+
+	local hitRange = (swingRange or 4.5) + 1.5
+	return Vector3.new(3.25, 4.5, hitRange), CFrame.new(0, 0, -(hitRange * 0.5))
+end
+
+local function ProcessEnemyHit(attacker, target, physicalAttack: number, swingRange: number?): boolean
+	if not attacker or not target then
+		return false
+	end
+
+	if target:IsInvincible() then
+		print(("Hit whiffed on invincible target: %s -> %s"):format(attacker.Name, target.Name))
+		return false
+	end
+
+	local hitboxSize, hitboxOffset = GetServerHitboxData(attacker, swingRange)
+	if not IsTargetInsideHitbox(attacker, target, hitboxSize, hitboxOffset, attacker.RootPart.CFrame) then
+		return false
+	end
+
+	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
+	GetDamageModule().DirectDamageToEntity(attacker, target, physicalAttack)
+	return true
 end
 
 local function GetDesiredLungeDistance(self: Neuron, distanceToTarget: number): number
@@ -97,7 +165,10 @@ local function CanEnter(self: Neuron): boolean
 		return false
 	end
 
-	return self.Brain:Delta(target).Magnitude <= self.__Attributes["AttackSwingRange"] + self.__Attributes["MaxLungeDistance"] + self.__Attributes["AttackRangeBuffer"]
+	return self.Brain:Delta(target).Magnitude
+		<= self.__Attributes["AttackSwingRange"]
+			+ self.__Attributes["MaxLungeDistance"]
+			+ self.__Attributes["AttackRangeBuffer"]
 end
 
 local function CanExit(self: Neuron): boolean
@@ -116,9 +187,11 @@ local function OnEnter(self: Neuron): ()
 
 	local targetPos = target.PrimaryPart.Position
 	local attacker = self.Brain.MovementEngine.Entity
-	local targetEntity = PlayerServiceServer.GetEntityFromCharacter(target)
+	local targetEntity = GetPlayerServiceServerModule().GetEntityFromCharacter(target)
 	local attackStartAt = workspace:GetServerTimeNow() + self.__Attributes["ChargeDuration"]
-	local totalAttackTime = self.__Attributes["ChargeDuration"] + self.__Attributes["AttackDuration"] + self.__Attributes["ApexPause"]
+	local totalAttackTime = self.__Attributes["ChargeDuration"]
+		+ self.__Attributes["AttackDuration"]
+		+ self.__Attributes["ApexPause"]
 
 	self.__Attributes["ExitAt"] = os.clock() + totalAttackTime
 	self.__Attributes["CooldownUntil"] = os.clock() + self.__Attributes["Cooldown"]
@@ -181,7 +254,10 @@ local function OnEnter(self: Neuron): ()
 		end
 
 		if lungeDistance > 0 then
-			self.Brain.MovementEngine:ApplyLinearVelocity(attackDirection * lungeVelocity, self.__Attributes["AttackDuration"])
+			self.Brain.MovementEngine:ApplyLinearVelocity(
+				attackDirection * lungeVelocity,
+				self.__Attributes["AttackDuration"]
+			)
 		end
 	end)
 
@@ -197,10 +273,9 @@ local function OnEnter(self: Neuron): ()
 				return
 			end
 
-			GetAttackServiceServer().ProcessEnemyHit(attacker, targetEntity, damage, self.__Attributes["AttackSwingRange"])
+			ProcessEnemyHit(attacker, targetEntity, damage, self.__Attributes["AttackSwingRange"])
 		end)
 	end
-
 end
 
 local function OnExit(self: Neuron): ()

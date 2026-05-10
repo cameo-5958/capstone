@@ -18,30 +18,33 @@ local Connection = {}
 Connection.__index = Connection
 
 function Connection.Disconnect(self: Connection)
-	local listeners = (self :: any)._listeners :: { [number]: (...any) -> () }
-	local index = (self :: any)._index :: number?
+	local selfAny = self :: any
+	local listeners = selfAny._listeners :: { [number]: (...any) -> () }
+	local index = selfAny._index :: number?
 	if not index then
 		return
 	end
 
 	listeners[index] = nil;
-	(self :: any)._index = nil
+	selfAny._index = nil
 end
 
 function Signal.new(): Signal
 	local self = setmetatable({}, Signal);
-	(self :: any)._listeners = {}
-	(self :: any)._nextId = 0
-	(self :: any)._destroyed = false
-	return (self :: any) :: Signal
+	local selfAny = self :: any
+	selfAny._listeners = {}
+	selfAny._nextId = 0
+	selfAny._destroyed = false
+	return selfAny :: Signal
 end
 
 function Signal.Connect(self: Signal, callback: (...any) -> ()): Connection
-	assert(not (self :: any)._destroyed, "Cannot connect to a destroyed Signal")
+	local selfAny = self :: any
+	assert(not selfAny._destroyed, "Cannot connect to a destroyed Signal")
 
-	local listeners = (self :: any)._listeners :: { [number]: (...any) -> () }
-	local nextId = ((self :: any)._nextId :: number) + 1
-	(self :: any)._nextId = nextId
+	local listeners = selfAny._listeners :: { [number]: (...any) -> () }
+	local nextId = (selfAny._nextId :: number) + 1
+	selfAny._nextId = nextId
 	listeners[nextId] = callback
 
 	return setmetatable({
@@ -73,12 +76,13 @@ function Signal.Fire(self: Signal, ...: any)
 end
 
 function Signal.Destroy(self: Signal)
-	if (self :: any)._destroyed then
+	local selfAny = self :: any
+	if selfAny._destroyed then
 		return
 	end
 
-	(self :: any)._destroyed = true
-	table.clear((self :: any)._listeners :: { [number]: (...any) -> () })
+	selfAny._destroyed = true
+	table.clear(selfAny._listeners :: { [number]: (...any) -> () })
 end
 
 return table.freeze(Signal)
