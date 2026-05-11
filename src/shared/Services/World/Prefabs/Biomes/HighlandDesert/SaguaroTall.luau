@@ -15,15 +15,15 @@ local Definition = {
 
 local function Build(parent: Instance, context: PrefabTypes.PrefabBuildContext): Model
 	local model, pivot = PrefabUtils.createModel(parent, Definition, context)
-	PrefabUtils.addPart(model, "TrunkCore", pivot * CFrame.new(0, 4.5, 0), Vector3.new(2.2, 8, 2.2), Enum.Material.Wood, Color3.fromRGB(110, 86, 60), 0, nil)
-	PrefabUtils.addPart(model, "RootNorth", pivot * CFrame.new(0, 1.1, -2.3), Vector3.new(2.4, 1.2, 3.2), Enum.Material.Wood, Color3.fromRGB(110, 86, 60), 0, nil)
-	PrefabUtils.addPart(model, "RootSouth", pivot * CFrame.new(0, 1.1, 2.3), Vector3.new(2.4, 1.2, 3.2), Enum.Material.Wood, Color3.fromRGB(110, 86, 60), 0, nil)
-	PrefabUtils.addPart(model, "RootEast", pivot * CFrame.new(2.3, 1.1, 0), Vector3.new(3.2, 1.2, 2.4), Enum.Material.Wood, Color3.fromRGB(110, 86, 60), 0, nil)
-	PrefabUtils.addPart(model, "CanopyCore", pivot * CFrame.new(0, 7, 0), Vector3.new(8.4, 5.2, 8.4), Enum.Material.Grass, Color3.fromRGB(118, 144, 88), 0, "Ball")
-	PrefabUtils.addPart(model, "CanopyNorth", pivot * CFrame.new(0, 8, -3.1), Vector3.new(5.1, 3.6, 5.1), Enum.Material.Grass, Color3.fromRGB(118, 144, 88), 0, "Ball")
-	PrefabUtils.addPart(model, "CanopySouth", pivot * CFrame.new(0, 8, 3.1), Vector3.new(5.1, 3.6, 5.1), Enum.Material.Grass, Color3.fromRGB(118, 144, 88), 0, "Ball")
-	PrefabUtils.addPart(model, "CanopyEast", pivot * CFrame.new(3.1, 7, 0), Vector3.new(4.4, 3.2, 4.4), Enum.Material.Grass, Color3.fromRGB(118, 144, 88), 0, "Ball")
-	PrefabUtils.addPart(model, "CanopyWest", pivot * CFrame.new(-3.1, 7, 0), Vector3.new(4.4, 3.2, 4.4), Enum.Material.Grass, Color3.fromRGB(118, 144, 88), 0, "Ball")
+	local cactusColor = Color3.fromRGB(98, 134, 78)
+	PrefabUtils.addPart(model, "MainStemLower", pivot * CFrame.new(0, 3.2, 0), Vector3.new(1.4, 6.4, 1.4), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "MainStemUpper", pivot * CFrame.new(0, 8.0, 0), Vector3.new(1.4, 3.2, 1.4), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "ArmLeftBase", pivot * CFrame.new(-1.5, 5.7, 0), Vector3.new(1.0, 1.8, 1.0), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "ArmLeftTall", pivot * CFrame.new(-2.1, 7.4, 0), Vector3.new(0.9, 3.8, 0.9), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "ArmRightBase", pivot * CFrame.new(1.5, 4.8, 0), Vector3.new(1.0, 1.8, 1.0), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "ArmRightTall", pivot * CFrame.new(2.1, 6.2, 0), Vector3.new(0.9, 3.0, 0.9), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "MiniCactusA", pivot * CFrame.new(-3.2, 1.6, 2.1), Vector3.new(0.65, 3.2, 0.65), Enum.Material.Grass, cactusColor, 0, nil)
+	PrefabUtils.addPart(model, "MiniCactusB", pivot * CFrame.new(2.9, 1.4, -2.2), Vector3.new(0.6, 2.8, 0.6), Enum.Material.Grass, cactusColor, 0, nil)
 	return model
 end
 

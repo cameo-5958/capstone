@@ -9,6 +9,8 @@ type PrefabDefinition = PrefabTypes.PrefabDefinition
 type GenerateGalleryOptions = {
 	ClearExisting: boolean?,
 	IncludeExecutorOnly: boolean?,
+	IncludeNature: boolean?,
+	IncludeStructures: boolean?,
 	IncludeMarkers: boolean?,
 	TileSize: number?,
 	SpacingStuds: number?,
@@ -49,7 +51,19 @@ local function getOrCreateRoot(): Folder
 	return root
 end
 
-local function shouldInclude(definition: PrefabDefinition, includeExecutorOnly: boolean, includeMarkers: boolean): boolean
+local function shouldInclude(
+	definition: PrefabDefinition,
+	includeExecutorOnly: boolean,
+	includeNature: boolean,
+	includeStructures: boolean,
+	includeMarkers: boolean
+): boolean
+	if definition.Category == "Nature" and not includeNature then
+		return false
+	end
+	if definition.Category == "Structure" and not includeStructures then
+		return false
+	end
 	if definition.Category == "Marker" then
 		return includeMarkers
 	end
@@ -63,6 +77,8 @@ function PrefabExecutor.GenerateGallery(options: GenerateGalleryOptions?): Folde
 	local resolved = options or {}
 	local clearExisting = if resolved.ClearExisting == nil then true else resolved.ClearExisting
 	local includeExecutorOnly = if resolved.IncludeExecutorOnly == nil then false else resolved.IncludeExecutorOnly
+	local includeNature = if resolved.IncludeNature == nil then true else resolved.IncludeNature
+	local includeStructures = if resolved.IncludeStructures == nil then true else resolved.IncludeStructures
 	local includeMarkers = if resolved.IncludeMarkers == nil then true else resolved.IncludeMarkers
 	local tileSize = math.max(4, resolved.TileSize or 10)
 	local spacing = math.max(tileSize * 1.8, resolved.SpacingStuds or 26)
@@ -77,7 +93,7 @@ function PrefabExecutor.GenerateGallery(options: GenerateGalleryOptions?): Folde
 
 	local grouped = {} :: { [string]: { [string]: { PrefabDefinition } } }
 	for _, definition in ipairs(PrefabRegistry.GetAll()) do
-		if shouldInclude(definition, includeExecutorOnly, includeMarkers) then
+		if shouldInclude(definition, includeExecutorOnly, includeNature, includeStructures, includeMarkers) then
 			local biomeBucket = grouped[definition.Biome]
 			if not biomeBucket then
 				biomeBucket = {}

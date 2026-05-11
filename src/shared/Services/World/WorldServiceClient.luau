@@ -45,6 +45,9 @@ type PathPointPayload = {
 	Z: number,
 	Height: number,
 	RadiusScale: number?,
+	IsStructureNode: boolean?,
+	PathRadiusTiles: number?,
+	FlattenRadiusTiles: number?,
 }
 
 type PathRoutePayload = { PathPointPayload }
@@ -70,11 +73,12 @@ local SpawnChunkZ = 0
 local SuggestedStreamRadius = 22
 local SuggestedUnloadRadius = 28
 
-local STREAM_UPDATE_INTERVAL = 0.2
-local STREAM_REQUEST_BUDGET = 28
+local STREAM_UPDATE_INTERVAL = 0.24
+local STREAM_REQUEST_BUDGET = 16
 local DEBUG_NODE_ELEVATION = 6
 local WATERFALL_SIDE_INSET_RATIO = 0.08
 local WATERFALL_THICKNESS_RATIO = 0.16
+local WATERFALL_FACE_OFFSET_RATIO = 0.03
 local WATERFALL_MIN_DROP = 1
 local WATERFALL_EDGE_EXTRA_DROP = 2
 local STUD_UNIT = 1
@@ -174,6 +178,17 @@ local function ensurePathDebugRoot(): Folder
 end
 
 local function clearRenderedWorld()
+	local hasLoadedChunks = false
+	for _ in pairs(LoadedChunks) do
+		hasLoadedChunks = true
+		break
+	end
+	if hasLoadedChunks then
+		API:FireServer("ResetLoadedChunks", {
+			Seed = CurrentSeed,
+		})
+	end
+
 	local root = ensureRenderRoot()
 	for _, child in ipairs(root:GetChildren()) do
 		child:Destroy()
@@ -357,6 +372,7 @@ local function renderChunkWaterfalls(chunk: ChunkData)
 	local tileSize = CurrentConfig.TileSize
 	local sideInset = math.max(0.08, tileSize * WATERFALL_SIDE_INSET_RATIO)
 	local thickness = math.max(0.3, tileSize * WATERFALL_THICKNESS_RATIO)
+	local faceOffset = math.max(0.05, tileSize * WATERFALL_FACE_OFFSET_RATIO)
 	local directions = {
 		{ Name = "PX", DX = 1, DZ = 0 },
 		{ Name = "NX", DX = -1, DZ = 0 },
@@ -370,7 +386,7 @@ local function renderChunkWaterfalls(chunk: ChunkData)
 		end
 
 		local palette = getBiomePalette(column.Biome)
-		local sourceTopY = column.SurfaceY + 0.5
+		local sourceTopY = column.SurfaceY
 		for _, direction in ipairs(directions) do
 			local neighborX = column.X + direction.DX
 			local neighborZ = column.Z + direction.DZ
@@ -383,7 +399,7 @@ local function renderChunkWaterfalls(chunk: ChunkData)
 			local targetBottomY: number? = nil
 			if neighborColumn and neighborColumn.Solid then
 				if neighborColumn.SurfaceY <= (column.SurfaceY - WATERFALL_MIN_DROP) then
-					targetBottomY = neighborColumn.SurfaceY + 0.5
+					targetBottomY = neighborColumn.SurfaceY
 				end
 			else
 				targetBottomY = column.BottomY - WATERFALL_EDGE_EXTRA_DROP
@@ -401,10 +417,10 @@ local function renderChunkWaterfalls(chunk: ChunkData)
 			local centerZ = column.Z * tileSize
 			if direction.DX ~= 0 then
 				sizeX = thickness
-				centerX += direction.DX * (tileSize * 0.5 - thickness * 0.5)
+				centerX += direction.DX * (tileSize * 0.5 - thickness * 0.5 + faceOffset)
 			else
 				sizeZ = thickness
-				centerZ += direction.DZ * (tileSize * 0.5 - thickness * 0.5)
+				centerZ += direction.DZ * (tileSize * 0.5 - thickness * 0.5 + faceOffset)
 			end
 
 			local fallHeight = sourceTopY - targetBottomY
@@ -441,43 +457,8 @@ local function renderColumn(column: TileColumnPayload, parent: Folder)
 	local tileSize = CurrentConfig.TileSize
 	local x = column.X * tileSize
 	local z = column.Z * tileSize
-	local capHeight = 1
-	local fillHeight = math.max(0, column.SurfaceY - column.BottomY)
+	local columnHeight = math.max(1, column.SurfaceY - column.BottomY + 1)
 	local palette = getBiomePalette(column.Biome)
-
-	if fillHeight > 0 then
-		local fillMaterial = resolveMaterial(column.FillMaterial, Enum.Material.Ground)
-		local fillColor = palette.Fill
-		if fillMaterial == Enum.Material.Sandstone then
-			fillColor = Color3.fromRGB(148, 128, 96)
-		elseif fillMaterial == Enum.Material.Sand then
-			fillColor = Color3.fromRGB(198, 176, 118)
-		elseif fillMaterial == Enum.Material.Rock then
-			fillColor = Color3.fromRGB(116, 116, 124)
-		end
-		local fillCenterY = column.BottomY + (fillHeight - 1) * 0.5
-		createVisualPart(
-			parent,
-			string.format("Tile_%d_%d_Fill", column.X, column.Z),
-			Vector3.new(tileSize, fillHeight, tileSize),
-			Vector3.new(x, fillCenterY, z),
-			fillMaterial,
-			fillColor,
-			0
-		)
-	end
-
-	local undersideHeight = math.max(5, math.floor(tileSize * 0.8 + fillHeight * 0.35))
-	local undersideCenterY = column.BottomY - (undersideHeight + 1) * 0.5
-	createVisualPart(
-		parent,
-		string.format("Tile_%d_%d_Underside", column.X, column.Z),
-		Vector3.new(tileSize, undersideHeight, tileSize),
-		Vector3.new(x, undersideCenterY, z),
-		Enum.Material.Slate,
-		Color3.fromRGB(95, 95, 108),
-		0
-	)
 
 	local surfaceMaterial = resolveMaterial(column.SurfaceMaterial, Enum.Material.Grass)
 	if column.IsPath and column.PathMaterial then
@@ -497,19 +478,33 @@ local function renderColumn(column: TileColumnPayload, parent: Folder)
 		surfaceMaterial = Enum.Material.SmoothPlastic
 		surfaceColor = palette.Water
 	end
+
+	local fillCenterY = column.BottomY + (columnHeight - 1) * 0.5
 	createVisualPart(
 		parent,
-		string.format("Tile_%d_%d_Surface", column.X, column.Z),
-		Vector3.new(tileSize, capHeight, tileSize),
-		Vector3.new(x, column.SurfaceY, z),
+		string.format("Tile_%d_%d_Fill", column.X, column.Z),
+		Vector3.new(tileSize, columnHeight, tileSize),
+		Vector3.new(x, fillCenterY, z),
 		surfaceMaterial,
 		surfaceColor,
 		0
 	)
 
+	local undersideHeight = math.max(5, math.floor(tileSize * 0.8 + columnHeight * 0.35))
+	local undersideCenterY = column.BottomY - (undersideHeight + 1) * 0.5
+	createVisualPart(
+		parent,
+		string.format("Tile_%d_%d_Underside", column.X, column.Z),
+		Vector3.new(tileSize, undersideHeight, tileSize),
+		Vector3.new(x, undersideCenterY, z),
+		Enum.Material.Slate,
+		Color3.fromRGB(95, 95, 108),
+		0
+	)
+
 	if column.StructureTag then
 		PrefabRenderer.Render(column.StructureTag, parent, {
-			Position = Vector3.new(x, column.SurfaceY + 0.5, z),
+			Position = Vector3.new(x, column.SurfaceY, z),
 			TileSize = tileSize,
 			SurfaceY = column.SurfaceY,
 			Biome = column.Biome,
@@ -536,18 +531,28 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 	end
 
 	local tileSize = CurrentConfig.TileSize
-	local nodeDiameter = math.max(24, tileSize * 3.6) * PATH_VISUAL_WIDTH_SCALE
 	local nodeThickness = math.max(0.8, tileSize * 0.22)
 	local nodeYOffset = DEBUG_NODE_ELEVATION + nodeThickness * 0.5
 	local linkThickness = math.max(1.2, tileSize * 0.24) * PATH_VISUAL_WIDTH_SCALE
 	local rolePriority = {
 		Node = 1,
-		City = 2,
-		End = 3,
-		Start = 4,
+		Structure = 2,
+		City = 3,
+		End = 4,
+		Start = 5,
 	}
 
-	local nodeMap = {} :: { [string]: { X: number, Z: number, Height: number, Role: string, RadiusScale: number } }
+	local nodeMap = {} :: {
+		[string]: {
+			X: number,
+			Z: number,
+			Height: number,
+			Role: string,
+			RadiusScale: number,
+			PathRadiusTiles: number,
+			FlattenRadiusTiles: number,
+		},
+	}
 
 	local function mergeNode(point: PathPointPayload, role: string)
 		local key = string.format("%d_%d", point.X, point.Z)
@@ -559,6 +564,8 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 				Height = point.Height,
 				Role = role,
 				RadiusScale = if point.RadiusScale then point.RadiusScale else 1,
+				PathRadiusTiles = if point.PathRadiusTiles then point.PathRadiusTiles else 0,
+				FlattenRadiusTiles = if point.FlattenRadiusTiles then point.FlattenRadiusTiles else 0,
 			}
 			return
 		end
@@ -575,6 +582,14 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 		if nextScale > current.RadiusScale then
 			current.RadiusScale = nextScale
 		end
+		local nextPathRadiusTiles = if point.PathRadiusTiles then point.PathRadiusTiles else 0
+		if nextPathRadiusTiles > current.PathRadiusTiles then
+			current.PathRadiusTiles = nextPathRadiusTiles
+		end
+		local nextFlattenRadiusTiles = if point.FlattenRadiusTiles then point.FlattenRadiusTiles else 0
+		if nextFlattenRadiusTiles > current.FlattenRadiusTiles then
+			current.FlattenRadiusTiles = nextFlattenRadiusTiles
+		end
 	end
 
 	for routeIndex, route in ipairs(pathRoutes) do
@@ -587,6 +602,8 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 					role = "Start"
 				elseif pointIndex == #route then
 					role = "End"
+				elseif point.IsStructureNode == true then
+					role = "Structure"
 				end
 				mergeNode(point, role)
 			end
@@ -618,17 +635,20 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 			nodeColor = Color3.fromRGB(88, 255, 220)
 		elseif node.Role == "End" then
 			nodeColor = Color3.fromRGB(255, 184, 72)
-		elseif node.Role == "City" then
+		elseif node.Role == "City" or node.Role == "Structure" then
 			nodeColor = Color3.fromRGB(224, 236, 255)
 		end
 
-		local radiusScale = math.clamp(node.RadiusScale, 1, 2)
-		local scaledDiameter = nodeDiameter * radiusScale
+		local fallbackPathRadiusTiles = math.max(1, math.max(1, node.RadiusScale) * 2.4)
+		local pathRadiusTiles = if node.PathRadiusTiles > 0 then node.PathRadiusTiles else fallbackPathRadiusTiles
+		local flattenRadiusTiles = if node.FlattenRadiusTiles > 0 then node.FlattenRadiusTiles else pathRadiusTiles
+		local flattenedDiameterStuds = math.max(tileSize, flattenRadiusTiles * tileSize * 2)
+		local pathDiameterStuds = math.max(tileSize, pathRadiusTiles * tileSize * 2)
 		local worldPosition = Vector3.new(node.X * tileSize, node.Height + nodeYOffset, node.Z * tileSize)
 		local disk = createDebugPart(
 			debugRoot,
 			string.format("PathNode_%s", nodeKey),
-			Vector3.new(nodeThickness, scaledDiameter, scaledDiameter),
+			Vector3.new(nodeThickness, flattenedDiameterStuds, flattenedDiameterStuds),
 			CFrame.new(worldPosition) * CFrame.Angles(0, 0, math.rad(90)),
 			nodeColor,
 			0.84
@@ -638,7 +658,7 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 		local halo = createDebugPart(
 			debugRoot,
 			string.format("PathNodeHalo_%s", nodeKey),
-			Vector3.new(nodeThickness * 0.7, scaledDiameter * 1.35, scaledDiameter * 1.35),
+			Vector3.new(nodeThickness * 0.7, pathDiameterStuds * 1.02, pathDiameterStuds * 1.02),
 			CFrame.new(worldPosition + Vector3.new(0, nodeThickness * 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90)),
 			nodeColor,
 			0.94
@@ -801,6 +821,11 @@ local function updateStreaming(force: boolean)
 			ChunkFolders[key] = nil
 			LoadedChunks[key] = nil
 			RequestedChunks[key] = nil
+			API:FireServer("ChunkUnloaded", {
+				ChunkX = chunk.ChunkX,
+				ChunkZ = chunk.ChunkZ,
+				Seed = CurrentSeed,
+			})
 			refreshWaterfallsAroundChunk(chunk.ChunkX, chunk.ChunkZ)
 			WorldChanged:Fire("UnloadChunk", chunk)
 		end
@@ -826,6 +851,11 @@ local function loadChunk(chunk: ChunkData)
 	RequestedChunks[key] = true
 	ChunkFolders[key] = folder
 	registerChunkColumns(key, chunk)
+	API:FireServer("ChunkLoaded", {
+		ChunkX = chunk.ChunkX,
+		ChunkZ = chunk.ChunkZ,
+		Seed = CurrentSeed,
+	})
 	refreshWaterfallsAroundChunk(chunk.ChunkX, chunk.ChunkZ)
 end
 

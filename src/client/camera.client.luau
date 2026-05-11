@@ -13,7 +13,7 @@ CameraController.SetSharedController(controller)
 local FREECAM_KEY = Enum.KeyCode.P
 local FREECAM_RENDERSTEP = "CapstoneDetachedPerspectiveCamera"
 local FREECAM_ROTATION_SENSITIVITY = 0.0023
-local FREECAM_BASE_SPEED = 120
+local FREECAM_BASE_SPEED = 220
 local FREECAM_FAST_MULTIPLIER = 3.2
 local FREECAM_SLOW_MULTIPLIER = 0.35
 local FREECAM_MIN_PITCH = math.rad(-89)
@@ -24,11 +24,25 @@ local FreecamPosition = Vector3.zero
 local FreecamYaw = 0
 local FreecamPitch = 0
 
+local DEFAULT_FOG_COLOR = Color3.fromRGB(170, 190, 210)
+local DEFAULT_FOG_START = 190
+local DEFAULT_FOG_END = 194
+
+local function applyGameplayFog()
+	Lighting.FogColor = DEFAULT_FOG_COLOR
+	Lighting.FogStart = DEFAULT_FOG_START
+	Lighting.FogEnd = DEFAULT_FOG_END
+end
+
+local function applyPerspectiveFogOverride()
+	Lighting.FogColor = DEFAULT_FOG_COLOR
+	-- Keep hard fog limits even in detached/freecam mode.
+	Lighting.FogStart = DEFAULT_FOG_START
+	Lighting.FogEnd = DEFAULT_FOG_END
+end
+
 local function configureDefaultWorldView()
-	-- Use a near-hard vision cutoff instead of broad haze.
-	Lighting.FogColor = Color3.fromRGB(170, 190, 210)
-	Lighting.FogStart = 156
-	Lighting.FogEnd = 162
+	applyGameplayFog()
 	Lighting.Brightness = 2.15
 	Lighting.ExposureCompensation = 0.08
 
@@ -58,6 +72,7 @@ local function stopFreecam()
 	controller:SetMouseLockSuppressed(false)
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	UserInputService.MouseIconEnabled = true
+	applyGameplayFog()
 end
 
 local function startFreecam()
@@ -76,6 +91,7 @@ local function startFreecam()
 	controller:SetMouseLockSuppressed(true)
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	UserInputService.MouseIconEnabled = false
+	applyPerspectiveFogOverride()
 
 	RunService:BindToRenderStep(FREECAM_RENDERSTEP, Enum.RenderPriority.Camera.Value + 2, function(deltaTime: number)
 		if not FreecamEnabled then

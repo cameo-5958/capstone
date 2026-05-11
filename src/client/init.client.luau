@@ -24,8 +24,8 @@ local function attachPlayerLight(character: Model)
 
 	local light = Instance.new("PointLight")
 	light.Name = PLAYER_LIGHT_NAME
-	light.Brightness = 2.8
-	light.Range = 30
+	light.Brightness = 1.6
+	light.Range = 20
 	light.Shadows = false
 	light.Color = Color3.fromRGB(255, 244, 220)
 	light.Parent = rootPart

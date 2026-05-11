@@ -12,6 +12,9 @@ local STUD_UNIT = 1
 local MIN_PART_SIZE = 1
 local TREE_PREFAB_SCALE = 2.6
 local FOLIAGE_PREFAB_SCALE = 1.15
+local STRUCTURE_PREFAB_SCALE = 1.3
+local HABITATION_STRUCTURE_SCALE = 1.58
+local ENVIRONMENT_STRUCTURE_SCALE = 1.42
 local HASH_MODULUS = 2147483647
 local TREE_YAW_DEGREE_RANGE = 12
 local TREE_LEAN_DEGREE_RANGE = 3
@@ -51,6 +54,40 @@ local function isTreePrefab(definition: PrefabDefinition): boolean
 		or string.find(name, "saguaro", 1, true) ~= nil
 end
 
+function isHabitationStructure(definition: PrefabDefinition): boolean
+	if definition.Category ~= "Structure" then
+		return false
+	end
+
+	local name = string.lower(definition.Name)
+	return string.find(name, "house", 1, true) ~= nil
+		or string.find(name, "townhouse", 1, true) ~= nil
+		or string.find(name, "cabin", 1, true) ~= nil
+		or string.find(name, "hut", 1, true) ~= nil
+		or string.find(name, "shack", 1, true) ~= nil
+		or string.find(name, "chalet", 1, true) ~= nil
+		or string.find(name, "cottage", 1, true) ~= nil
+		or string.find(name, "barn", 1, true) ~= nil
+end
+
+local function isEnvironmentStructure(definition: PrefabDefinition): boolean
+	if definition.Category ~= "Structure" then
+		return false
+	end
+
+	local name = string.lower(definition.Name)
+	return string.find(name, "lamp", 1, true) ~= nil
+		or string.find(name, "lantern", 1, true) ~= nil
+		or string.find(name, "well", 1, true) ~= nil
+		or string.find(name, "fence", 1, true) ~= nil
+		or string.find(name, "cart", 1, true) ~= nil
+		or string.find(name, "campfire", 1, true) ~= nil
+		or string.find(name, "camp", 1, true) ~= nil
+		or string.find(name, "gate", 1, true) ~= nil
+		or string.find(name, "plaza", 1, true) ~= nil
+		or string.find(name, "marker", 1, true) ~= nil
+end
+
 local function getBuildScale(definition: PrefabDefinition): number
 	if isTreePrefab(definition) then
 		return TREE_PREFAB_SCALE
@@ -58,6 +95,16 @@ local function getBuildScale(definition: PrefabDefinition): number
 
 	if definition.Category == "Nature" then
 		return FOLIAGE_PREFAB_SCALE
+	end
+
+	if definition.Category == "Structure" then
+		if isHabitationStructure(definition) then
+			return HABITATION_STRUCTURE_SCALE
+		end
+		if isEnvironmentStructure(definition) then
+			return ENVIRONMENT_STRUCTURE_SCALE
+		end
+		return STRUCTURE_PREFAB_SCALE
 	end
 
 	return 1
@@ -132,19 +179,11 @@ local function snapSizeAxis(value: number): number
 end
 
 local function snapSize(size: Vector3): Vector3
-	return Vector3.new(
-		snapSizeAxis(size.X),
-		snapSizeAxis(size.Y),
-		snapSizeAxis(size.Z)
-	)
+	return Vector3.new(snapSizeAxis(size.X), snapSizeAxis(size.Y), snapSizeAxis(size.Z))
 end
 
 local function snapPosition(position: Vector3): Vector3
-	return Vector3.new(
-		snapNumber(position.X),
-		snapNumber(position.Y),
-		snapNumber(position.Z)
-	)
+	return Vector3.new(snapNumber(position.X), snapNumber(position.Y), snapNumber(position.Z))
 end
 
 local function snapCFrame(cframe: CFrame): CFrame
@@ -197,8 +236,7 @@ local function stringContains(value: string, token: string): boolean
 end
 
 local function isTreeRootPart(partNameLower: string): boolean
-	return stringContains(partNameLower, "root")
-		or stringContains(partNameLower, "stump")
+	return stringContains(partNameLower, "root") or stringContains(partNameLower, "stump")
 end
 
 local function isTreeTrunkLikePart(partNameLower: string, material: Enum.Material): boolean
@@ -261,6 +299,185 @@ local function shouldPartCollide(model: Model): boolean
 	return getModelCategory(model) ~= "Marker"
 end
 
+local function clampNumber(value: number, minValue: number, maxValue: number): number
+	return math.max(minValue, math.min(maxValue, value))
+end
+
+local function computeModelBounds(model: Model): (Vector3?, Vector3?, number)
+	local minX = math.huge
+	local minY = math.huge
+	local minZ = math.huge
+	local maxX = -math.huge
+	local maxY = -math.huge
+	local maxZ = -math.huge
+	local partCount = 0
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local part = descendant :: BasePart
+			local size = part.Size
+			local position = part.Position
+			local half = size * 0.5
+			local low = position - half
+			local high = position + half
+			minX = math.min(minX, low.X)
+			minY = math.min(minY, low.Y)
+			minZ = math.min(minZ, low.Z)
+			maxX = math.max(maxX, high.X)
+			maxY = math.max(maxY, high.Y)
+			maxZ = math.max(maxZ, high.Z)
+			partCount += 1
+		end
+	end
+
+	if partCount <= 0 then
+		return nil, nil, 0
+	end
+	return Vector3.new(minX, minY, minZ), Vector3.new(maxX, maxY, maxZ), partCount
+end
+
+local function addAbsoluteModelPart(
+	model: Model,
+	name: string,
+	cframe: CFrame,
+	size: Vector3,
+	material: Enum.Material,
+	color: Color3,
+	transparency: number?
+): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = shouldPartCollide(model)
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = true
+	part.Material = material
+	part.Color = color
+	part.Transparency = transparency or 0
+	part.Size = snapSize(size)
+	part.CFrame = snapCFrame(cframe)
+	applyStudSurfaces(part)
+	applyShape(part, nil)
+	part.Parent = model
+	return part
+end
+
+local function applyStructureDetailPass(model: Model, definition: PrefabDefinition)
+	if definition.Category ~= "Structure" then
+		return
+	end
+	if not isHabitationStructure(definition) then
+		return
+	end
+	if model:GetAttribute("StructureDetailApplied") == true then
+		return
+	end
+
+	local minBounds, maxBounds, partCount = computeModelBounds(model)
+	if not minBounds or not maxBounds or partCount < 4 then
+		return
+	end
+
+	local boundsSize = maxBounds - minBounds
+	if boundsSize.X < 6 or boundsSize.Z < 6 or boundsSize.Y < 4 then
+		return
+	end
+
+	model:SetAttribute("StructureDetailApplied", true)
+
+	local center = (minBounds + maxBounds) * 0.5
+	local baseY = minBounds.Y
+	local topY = maxBounds.Y
+	local minSpan = math.min(boundsSize.X, boundsSize.Z)
+	local frameInset = clampNumber(minSpan * 0.07, 0.8, 2.6)
+	local frameThickness = clampNumber(minSpan * 0.08, 0.8, 2.4)
+	local postThickness = clampNumber(minSpan * 0.08, 0.8, 1.8)
+	local postHeight = clampNumber(boundsSize.Y * 0.32, 2.4, 9.0)
+	local bandThickness = clampNumber(minSpan * 0.06, 0.8, 1.8)
+	local bandY = clampNumber(baseY + boundsSize.Y * 0.48, baseY + 1.6, topY - 1.2)
+	local ridgeThickness = clampNumber(minSpan * 0.06, 0.8, 1.6)
+
+	addAbsoluteModelPart(
+		model,
+		"DetailBaseSkirt",
+		CFrame.new(center.X, baseY + 0.4, center.Z),
+		Vector3.new(boundsSize.X + frameThickness * 1.8, 0.8, boundsSize.Z + frameThickness * 1.8),
+		Enum.Material.Slate,
+		Color3.fromRGB(88, 89, 98),
+		0
+	)
+
+	addAbsoluteModelPart(
+		model,
+		"DetailMidBand",
+		CFrame.new(center.X, bandY, center.Z),
+		Vector3.new(boundsSize.X + bandThickness * 0.9, 0.8, boundsSize.Z + bandThickness * 0.9),
+		Enum.Material.Wood,
+		Color3.fromRGB(83, 61, 44),
+		0
+	)
+
+	local corners = {
+		{ Name = "NW", SX = -1, SZ = -1 },
+		{ Name = "NE", SX = 1, SZ = -1 },
+		{ Name = "SW", SX = -1, SZ = 1 },
+		{ Name = "SE", SX = 1, SZ = 1 },
+	}
+	for _, corner in ipairs(corners) do
+		addAbsoluteModelPart(
+			model,
+			"DetailCornerPost" .. corner.Name,
+			CFrame.new(
+				center.X + corner.SX * (boundsSize.X * 0.5 - frameInset),
+				baseY + postHeight * 0.5 + 0.35,
+				center.Z + corner.SZ * (boundsSize.Z * 0.5 - frameInset)
+			),
+			Vector3.new(postThickness, postHeight, postThickness),
+			Enum.Material.WoodPlanks,
+			Color3.fromRGB(96, 72, 52),
+			0
+		)
+	end
+
+	if boundsSize.X >= boundsSize.Z then
+		addAbsoluteModelPart(
+			model,
+			"DetailRoofRidge",
+			CFrame.new(center.X, topY - 0.45, center.Z),
+			Vector3.new(clampNumber(boundsSize.X * 0.42, 4, boundsSize.X), 0.8, ridgeThickness),
+			Enum.Material.Wood,
+			Color3.fromRGB(78, 58, 42),
+			0
+		)
+	else
+		addAbsoluteModelPart(
+			model,
+			"DetailRoofRidge",
+			CFrame.new(center.X, topY - 0.45, center.Z),
+			Vector3.new(ridgeThickness, 0.8, clampNumber(boundsSize.Z * 0.42, 4, boundsSize.Z)),
+			Enum.Material.Wood,
+			Color3.fromRGB(78, 58, 42),
+			0
+		)
+	end
+
+	if isHabitationStructure(definition) then
+		local canopyWidth = clampNumber(boundsSize.X * 0.34, 3.2, boundsSize.X * 0.7)
+		local canopyDepth = clampNumber(boundsSize.Z * 0.12, 1.2, 3.8)
+		local canopyY = clampNumber(baseY + boundsSize.Y * 0.28, baseY + 2.4, topY - 2.2)
+		addAbsoluteModelPart(
+			model,
+			"DetailEntryCanopy",
+			CFrame.new(center.X, canopyY, center.Z + boundsSize.Z * 0.5 + canopyDepth * 0.35),
+			Vector3.new(canopyWidth, 0.8, canopyDepth),
+			Enum.Material.WoodPlanks,
+			Color3.fromRGB(108, 80, 58),
+			0
+		)
+	end
+end
+
 function PrefabUtils.createModel(
 	parent: Instance,
 	definition: PrefabDefinition,
@@ -274,6 +491,12 @@ function PrefabUtils.createModel(
 	model:SetAttribute("PrefabBiome", definition.Biome)
 	model:SetAttribute("PrefabCategory", definition.Category)
 	model:SetAttribute("RuntimeEligible", definition.RuntimeEligible)
+	if context.ColumnX ~= nil then
+		model:SetAttribute("ColumnX", context.ColumnX)
+	end
+	if context.ColumnZ ~= nil then
+		model:SetAttribute("ColumnZ", context.ColumnZ)
+	end
 	local treePrefab = isTreePrefab(definition)
 	model:SetAttribute("IsTreePrefab", treePrefab)
 
@@ -370,7 +593,8 @@ function PrefabUtils.addPart(
 			)
 			local globalDriftOffset = Vector3.new(canopyDriftX * scale, 0, canopyDriftZ * scale)
 			local nextPosition = scaledCFrame.Position + globalDriftOffset + localJitterOffset
-			scaledCFrame = CFrame.fromMatrix(nextPosition, scaledCFrame.XVector, scaledCFrame.YVector, scaledCFrame.ZVector)
+			scaledCFrame =
+				CFrame.fromMatrix(nextPosition, scaledCFrame.XVector, scaledCFrame.YVector, scaledCFrame.ZVector)
 			resolvedColor = applyColorTint(color, leafTint + partRng:NextNumber(-0.05, 0.05))
 		else
 			scaledSize = Vector3.new(
@@ -401,10 +625,16 @@ function PrefabUtils.finalizeDefinition(
 		RuntimeEligible: boolean,
 		FootprintStuds: Vector2,
 		HeightStuds: number,
+		SpawnMarkers: { PrefabTypes.PrefabSpawnMarker }?,
 	},
 	buildFn: (parent: Instance, context: PrefabBuildContext) -> Model
 ): PrefabDefinition
-	return {
+	local spawnMarkers = nil
+	if definition.SpawnMarkers then
+		spawnMarkers = table.clone(definition.SpawnMarkers)
+	end
+
+	local finalizedDefinition = {
 		Id = definition.Id,
 		Name = definition.Name,
 		Biome = definition.Biome,
@@ -412,8 +642,17 @@ function PrefabUtils.finalizeDefinition(
 		RuntimeEligible = definition.RuntimeEligible,
 		FootprintStuds = definition.FootprintStuds,
 		HeightStuds = definition.HeightStuds,
+		SpawnMarkers = spawnMarkers,
 		Build = buildFn,
 	}
+
+	finalizedDefinition.Build = function(parent: Instance, context: PrefabBuildContext): Model
+		local model = buildFn(parent, context)
+		applyStructureDetailPass(model, finalizedDefinition)
+		return model
+	end
+
+	return finalizedDefinition
 end
 
 return table.freeze(PrefabUtils)

@@ -42,6 +42,10 @@ Server -> client events:
 Client -> server requests:
 
 - `RequestWorld`
+- `RequestChunks`
+- `ChunkLoaded`
+- `ChunkUnloaded`
+- `ResetLoadedChunks`
 - `RequestRegenerate` (Studio only)
 
 No per-frame world replication is used.
@@ -97,8 +101,10 @@ Execution order in `generateWorld(seed)`:
 4. Thickness sieve: floating island underside depth.
 5. Material sieve: assign surface/fill materials by depth.
 6. Water sieve: optional pond cells near sea threshold.
-7. Structure sieve: seeded biome-scoped prefab IDs (nature runtime pool).
-8. Bake:
+7. Structure sieve: seeded biome-scoped nature prefab IDs.
+8. Path/node sieve: route carving, city node placement, curated node-structure assignment.
+9. Structure footprint flatten sieve: flatten structure-tagged footprint areas before serialization.
+10. Bake:
 - Build chunk payloads for clients.
 - Build merged collision prisms for server physics.
 
@@ -125,6 +131,18 @@ Client receives chunks and renders visible geometry locally:
 - Prefab-driven structure visuals from `StructureTag` IDs via `PrefabRenderer`
 
 These visual parts are non-colliding; collision comes from server bake.
+
+## 7.1 Runtime Spawn Streaming
+
+Runtime entity spawning is now chunk-driven and prefab-marker based:
+
+- Server builds spawn points from prefab `SpawnMarkers`.
+- Client chunk load/unload notifications drive server chunk ref-counts.
+- `0 -> 1` chunk viewers: spawn runtime enemies/treasure in that chunk.
+- `1 -> 0` chunk viewers: despawn alive/unclaimed runtime entities.
+- Dead enemies and claimed treasure stay resolved and do not respawn.
+
+Detailed setup and configuration: `documentation/world-entity-spawns.md`.
 
 ## 8. Public API
 
@@ -185,7 +203,9 @@ This supports quick manual validation during iteration.
 ## 11. Operational Constraints
 
 - World visuals are currently loaded at once (no distance streaming).
-- Runtime structure generation is nature-prefab-only; building prefabs are executor/modelify assets.
+- Runtime structure generation is mixed:
+  - Nature scatter uses biome pools.
+  - Curated structures are assigned at node anchors using weighted biome pools.
 - Collision is authoritative on server; clients only render visuals.
 
 ## 12. Extension Guidelines

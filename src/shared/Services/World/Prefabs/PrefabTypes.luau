@@ -22,6 +22,32 @@ export type PrefabBuildContext = {
 	NameSuffix: string?,
 }
 
+export type EnemySpawnMarkerConfig = {
+	Enabled: boolean?,
+	EnemyPath: string?,
+	PoolId: string?,
+	LevelMin: number?,
+	LevelMax: number?,
+	LevelStep: number?,
+	LootTableId: string?,
+}
+
+export type TreasureSpawnMarkerConfig = {
+	Enabled: boolean?,
+	LootTableId: string?,
+	PromptActionText: string?,
+	PromptObjectText: string?,
+}
+
+export type PrefabSpawnMarker = {
+	Id: string,
+	Type: "Enemy" | "Treasure",
+	Offset: Vector3,
+	YawDegrees: number?,
+	Enemy: EnemySpawnMarkerConfig?,
+	Treasure: TreasureSpawnMarkerConfig?,
+}
+
 export type PrefabDefinition = {
 	Id: string,
 	Name: string,
@@ -30,6 +56,7 @@ export type PrefabDefinition = {
 	RuntimeEligible: boolean,
 	FootprintStuds: Vector2,
 	HeightStuds: number,
+	SpawnMarkers: { PrefabSpawnMarker }?,
 	Build: (parent: Instance, context: PrefabBuildContext) -> Model,
 }
 

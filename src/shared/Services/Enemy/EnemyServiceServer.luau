@@ -42,6 +42,7 @@ local __EnemyRuntime: {
 		MovementEngine: any,
 		Brain: any,
 		DeathConnection: any,
+		SpawnOptions: { [string]: any }?,
 	},
 } = {}
 local __Deaths: {
@@ -100,7 +101,7 @@ local function RemoveEnemyForClients(uuid: string)
 	})
 end
 
-local function WipeEntity(uuid: string)
+local function WipeEntity(uuid: string, asDeath: boolean?)
 	local runtime = __EnemyRuntime[uuid]
 	local entity = runtime and runtime.Entity or __Enemies[uuid]
 	if not entity then
@@ -120,15 +121,31 @@ local function WipeEntity(uuid: string)
 		end
 	end
 
-	__Deaths[uuid] = {
-		UUID = uuid,
-		Position = entity.RootPart.Position,
-		DiedAt = workspace:GetServerTimeNow(),
-		Entity = entity,
-	}
+	if asDeath ~= false then
+		__Deaths[uuid] = {
+			UUID = uuid,
+			Position = entity.RootPart.Position,
+			DiedAt = workspace:GetServerTimeNow(),
+			Entity = entity,
+		}
+	end
 	__EnemyRuntime[uuid] = nil
 	__Enemies[uuid] = nil
 	RemoveEnemyForClients(uuid)
+end
+
+local function resolveSpawnCFrame(spawnTarget: any): CFrame
+	if typeof(spawnTarget) == "CFrame" then
+		return spawnTarget
+	end
+	if typeof(spawnTarget) == "Vector3" then
+		return CFrame.new(spawnTarget)
+	end
+	if typeof(spawnTarget) == "Instance" and (spawnTarget :: Instance):IsA("BasePart") then
+		return (spawnTarget :: BasePart).CFrame
+	end
+
+	error("Enemy spawn target must be BasePart, CFrame, or Vector3")
 end
 
 local function SerializeEntityForClient(entity: Entity): { [string]: any }
@@ -239,7 +256,12 @@ local function buildEnemyModel(enemyFolder: Instance, enemyPath: string): Model
 	error(string.format("Enemy '%s' is missing a Model or ModelBuilder", enemyPath))
 end
 
-function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
+function Enemies.Spawn(
+	e: string,
+	spawnTarget: Part | BasePart | CFrame | Vector3,
+	levelOverride: number?,
+	spawnOptions: { [string]: any }?
+): Entity?
 	local spawnLevel = ResolveSpawnLevel(levelOverride)
 
 	-- Grab enemy's data from the database
@@ -260,8 +282,20 @@ function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
 
 	-- Create the entity here
 	local entity = Entity.new(model, data.Name)
-	model:PivotTo(SpawnBlock.CFrame)
+	model:PivotTo(resolveSpawnCFrame(spawnTarget))
 	model.Name = entity.UUID
+	if spawnOptions and type(spawnOptions.SpawnContext) == "table" then
+		local context = spawnOptions.SpawnContext
+		if type(context.SpawnPointId) == "string" then
+			model:SetAttribute("WorldSpawnPointId", context.SpawnPointId)
+		end
+		if type(context.PrefabId) == "string" then
+			model:SetAttribute("WorldSpawnPrefabId", context.PrefabId)
+		end
+		if type(context.MarkerId) == "string" then
+			model:SetAttribute("WorldSpawnMarkerId", context.MarkerId)
+		end
+	end
 	entity.__Animations = mergedAnimations
 	model.Parent = EnemyFolder
 	SetServerNetworkOwnership(model)
@@ -325,7 +359,15 @@ function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
 	local brain = Brains.Aggressive(movementEngine, 32)
 	local deathConnection = entity:GetStatChangedSignal("Health"):Connect(function(newValue: number)
 		if newValue <= 0 then
-			WipeEntity(entity.UUID)
+			if spawnOptions and type(spawnOptions.OnDeath) == "function" then
+				local ok, callbackError = pcall(function()
+					spawnOptions.OnDeath(entity.UUID, entity)
+				end)
+				if not ok then
+					warn(string.format("[EnemyServiceServer] OnDeath callback failed for %s: %s", entity.UUID, tostring(callbackError)))
+				end
+			end
+			WipeEntity(entity.UUID, true)
 		end
 	end)
 	__EnemyRuntime[entity.UUID] = {
@@ -333,6 +375,7 @@ function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
 		MovementEngine = movementEngine,
 		Brain = brain,
 		DeathConnection = deathConnection,
+		SpawnOptions = spawnOptions,
 	}
 
 	-- Start the brain loop
@@ -344,6 +387,17 @@ function Enemies.Spawn(e: string, SpawnBlock: Part, levelOverride: number?): ()
 			[entity.UUID] = SerializeEntityForClient(entity),
 		},
 	})
+
+	return entity
+end
+
+function Enemies.Despawn(uuid: string): boolean
+	if not __Enemies[uuid] then
+		return false
+	end
+
+	WipeEntity(uuid, false)
+	return true
 end
 
 function Enemies.GetClosest(position: Vector3, sight: number?): Entity?

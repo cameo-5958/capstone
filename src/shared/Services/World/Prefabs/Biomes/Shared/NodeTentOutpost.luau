@@ -11,6 +11,40 @@ local Definition = {
 	RuntimeEligible = true,
 	FootprintStuds = Vector2.new(20, 18),
 	HeightStuds = 11,
+	SpawnMarkers = {
+		{
+			Id = "OutpostGuardFront",
+			Type = "Enemy",
+			Offset = Vector3.new(0, 0, -7),
+			Enemy = {
+				PoolId = "Camp.Guards",
+				LevelMin = 12,
+				LevelMax = 34,
+				LevelStep = 2,
+			},
+		},
+		{
+			Id = "OutpostGuardRear",
+			Type = "Enemy",
+			Offset = Vector3.new(0, 0, 7),
+			Enemy = {
+				PoolId = "Camp.Guards",
+				LevelMin = 12,
+				LevelMax = 34,
+				LevelStep = 2,
+			},
+		},
+		{
+			Id = "OutpostChest",
+			Type = "Treasure",
+			Offset = Vector3.new(-5, 0, 4),
+			Treasure = {
+				LootTableId = "FieldCache",
+				PromptActionText = "Open Crate",
+				PromptObjectText = "Outpost Crate",
+			},
+		},
+	},
 }
 
 local function Build(parent: Instance, context: PrefabTypes.PrefabBuildContext): Model

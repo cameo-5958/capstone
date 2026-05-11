@@ -15,14 +15,14 @@ local Definition = {
 
 local function Build(parent: Instance, context: PrefabTypes.PrefabBuildContext): Model
 	local model, pivot = PrefabUtils.createModel(parent, Definition, context)
-	PrefabUtils.addPart(model, "PatchCore", pivot * CFrame.new(0, 0.6, 0), Vector3.new(6.8, 1.2, 6.8), Enum.Material.Ground, Color3.fromRGB(203, 184, 120), 0, nil)
-	PrefabUtils.addPart(model, "TuftA", pivot * CFrame.new(-2.1, 1.4, -1.8), Vector3.new(1.2, 2.7, 1.2), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
-	PrefabUtils.addPart(model, "TuftB", pivot * CFrame.new(1.9, 1.3, -2.4), Vector3.new(1.1, 2.4, 1.1), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
-	PrefabUtils.addPart(model, "TuftC", pivot * CFrame.new(2.4, 1.2, 1.6), Vector3.new(1.0, 2.2, 1.0), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
-	PrefabUtils.addPart(model, "TuftD", pivot * CFrame.new(-1.8, 1.4, 2.3), Vector3.new(1.3, 2.5, 1.3), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
-	PrefabUtils.addPart(model, "FlowerA", pivot * CFrame.new(0.7, 1.1, 0.4), Vector3.new(0.7, 1.5, 0.7), Enum.Material.SmoothPlastic, Color3.fromRGB(203, 184, 120), 0, "Ball")
-	PrefabUtils.addPart(model, "FlowerB", pivot * CFrame.new(-0.9, 1.0, -0.5), Vector3.new(0.65, 1.4, 0.65), Enum.Material.SmoothPlastic, Color3.fromRGB(203, 184, 120), 0, "Ball")
-	PrefabUtils.addPart(model, "FlowerC", pivot * CFrame.new(1.6, 0.9, -0.8), Vector3.new(0.6, 1.2, 0.6), Enum.Material.SmoothPlastic, Color3.fromRGB(203, 184, 120), 0, "Ball")
+	PrefabUtils.addPart(model, "BladeA", pivot * CFrame.new(-2.2, 1.6, -1.8), Vector3.new(0.55, 3.2, 0.55), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
+	PrefabUtils.addPart(model, "BladeB", pivot * CFrame.new(-0.8, 1.5, -0.4), Vector3.new(0.5, 3.0, 0.5), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
+	PrefabUtils.addPart(model, "BladeC", pivot * CFrame.new(1.7, 1.7, -1.9), Vector3.new(0.6, 3.4, 0.6), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
+	PrefabUtils.addPart(model, "BladeD", pivot * CFrame.new(2.1, 1.4, 1.5), Vector3.new(0.5, 2.8, 0.5), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
+	PrefabUtils.addPart(model, "BladeE", pivot * CFrame.new(-1.7, 1.6, 2.1), Vector3.new(0.55, 3.1, 0.55), Enum.Material.Grass, Color3.fromRGB(76, 140, 72), 0, nil)
+	PrefabUtils.addPart(model, "FlowerStemA", pivot * CFrame.new(0.7, 1.35, 0.4), Vector3.new(0.35, 2.7, 0.35), Enum.Material.Grass, Color3.fromRGB(92, 158, 84), 0, nil)
+	PrefabUtils.addPart(model, "FlowerStemB", pivot * CFrame.new(-1.0, 1.25, -0.6), Vector3.new(0.35, 2.5, 0.35), Enum.Material.Grass, Color3.fromRGB(92, 158, 84), 0, nil)
+	PrefabUtils.addPart(model, "FlowerStemC", pivot * CFrame.new(1.5, 1.2, -0.9), Vector3.new(0.35, 2.4, 0.35), Enum.Material.Grass, Color3.fromRGB(92, 158, 84), 0, nil)
 	return model
 end
 

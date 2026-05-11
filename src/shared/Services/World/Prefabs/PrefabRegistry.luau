@@ -30,13 +30,7 @@ local PrefabsDatabase = resolvePrefabsDatabase()
 local DefinitionById = {} :: { [string]: PrefabDefinition }
 local AllDefinitionsCache: { PrefabDefinition }? = nil
 local ModuleByPathCache: { [string]: ModuleScript }? = nil
-local ExcludedPrefabIds = {
-	["TemperateGrassland::FieldstoneCottage"] = true,
-	["TemperateGrassland::BarnLeanTo"] = true,
-	["TemperateGrassland::WindmillShed"] = true,
-	["TemperateGrassland::StoneWellFence"] = true,
-	["Shared::NodeFenceCamp"] = true,
-}
+local ExcludedPrefabIds = {}
 
 local RuntimeNaturePools: { [string]: { string } } = {
 	TemperateGrassland = {

@@ -95,10 +95,10 @@ local MODE_CONFIGS: {
 		Name = "Default",
 		Fov = 66,
 		Offset = Vector3.new(2.2, 2.6, 8.5),
-		ZoomMin = 4.5,
-		ZoomMax = 14,
-		ZoomDefault = 8.5,
-		LookAtHeight = 2.5,
+		ZoomMin = 5.2,
+		ZoomMax = 5.2,
+		ZoomDefault = 5.2,
+		LookAtHeight = 0.65,
 		MouseSensitivity = 0.0035,
 		Smoothing = 7,
 		MinPitch = math.rad(-70),
@@ -110,8 +110,8 @@ local MODE_CONFIGS: {
 		Offset = Vector3.new(1.1, 2.05, 5),
 		ZoomMin = 2.5,
 		ZoomMax = 8,
-		ZoomDefault = 3.2,
-		LookAtHeight = 2.2,
+		ZoomDefault = 3.8,
+		LookAtHeight = 0.5,
 		MouseSensitivity = 0.0022,
 		Smoothing = 10,
 		MinPitch = math.rad(-55),
@@ -124,8 +124,8 @@ local MODE_CONFIGS: {
 		ZoomMin = 10,
 		ZoomMax = 26,
 		ZoomDefault = 14,
-		LookAtHeight = 2.5,
-		EnemyLookAtHeight = 2,
+		LookAtHeight = 0.8,
+		EnemyLookAtHeight = 0.9,
 		Smoothing = 6,
 		EnemySearchRadius = 80,
 		FramePadding = 0.9,
@@ -149,13 +149,31 @@ local function GetRootPart(character: Model?): BasePart?
 	return nil
 end
 
-local function GetCharacterPivot(self: CameraController, lookAtHeight: number): Vector3?
-	local rootPart = self.RootPart
-	if not rootPart then
+local function GetTorsoPart(character: Model?): BasePart?
+	if not character then
 		return nil
 	end
 
-	return rootPart.Position + Vector3.yAxis * lookAtHeight
+	local upperTorso = character:FindFirstChild("UpperTorso")
+	if upperTorso and upperTorso:IsA("BasePart") then
+		return upperTorso
+	end
+
+	local torso = character:FindFirstChild("Torso")
+	if torso and torso:IsA("BasePart") then
+		return torso
+	end
+
+	return GetRootPart(character)
+end
+
+local function GetCharacterPivot(self: CameraController, lookAtHeight: number): Vector3?
+	local torsoPart = GetTorsoPart(self.Character)
+	if not torsoPart then
+		return nil
+	end
+
+	return torsoPart.Position + Vector3.yAxis * lookAtHeight
 end
 
 local function ShouldForceFaceCamera(self: CameraController): boolean
@@ -497,6 +515,9 @@ function CameraController.Init(self: CameraController)
 		end
 
 		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			if self.CurrentModeName == "Default" then
+				return
+			end
 			self:AdjustZoom(-input.Position.Z * 1.5)
 		end
 	end)
