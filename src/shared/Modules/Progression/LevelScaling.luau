@@ -9,8 +9,8 @@ local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
 
 local MAX_LEVEL = 120
 local LEVELS_PER_SCALE_INTERVAL = 10
-local HEALTH_MULTIPLIER_PER_INTERVAL = 4
-local DAMAGE_MULTIPLIER_PER_INTERVAL = 2
+local HEALTH_MULTIPLIER_PER_INTERVAL = 1.5
+local DAMAGE_MULTIPLIER_PER_INTERVAL = 1.2
 
 local LevelScaling = {}
 
@@ -46,10 +46,7 @@ function LevelScaling.ApplyScaling(entity: any)
 	local healthScaleFactor = LevelScaling.GetHealthScaleFactor(level)
 	local damageScaleFactor = LevelScaling.GetDamageScaleFactor(level)
 
-	entity:AddModifier(
-		"MaxHealth",
-		Modifier.new("level:maxhealth", "Multiplicative", healthScaleFactor, "level")
-	)
+	entity:AddModifier("MaxHealth", Modifier.new("level:maxhealth", "Multiplicative", healthScaleFactor, "level"))
 
 	entity:AddModifier(
 		"PhysicalAttack",
@@ -58,10 +55,7 @@ function LevelScaling.ApplyScaling(entity: any)
 
 	local defenseBonus = 2 * (level - 1)
 	if defenseBonus > 0 then
-		entity:AddModifier(
-			"Defense",
-			Modifier.new("level:defense", "BaseFlat", defenseBonus, "level")
-		)
+		entity:AddModifier("Defense", Modifier.new("level:defense", "BaseFlat", defenseBonus, "level"))
 	end
 
 	-- Scaling MaxHealth up does not auto-fill Health, so do it explicitly.
