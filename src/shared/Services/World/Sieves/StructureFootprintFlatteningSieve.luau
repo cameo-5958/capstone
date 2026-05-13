@@ -12,6 +12,7 @@ return function(ctx, columns, config, seed)
 	local PrefabRegistry = ctx.PrefabRegistry
 	local getRuntimeStructureScale = ctx.getRuntimeStructureScale
 	local snapHeight = ctx.snapHeight
+	local smoothstep = ctx.smoothstep
 	local makeColumnKey = ctx.makeColumnKey
 
 		if not StructureFlatteningSettings.Enabled then

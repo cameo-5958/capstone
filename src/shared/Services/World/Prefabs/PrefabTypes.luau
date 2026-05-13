@@ -5,7 +5,6 @@ export type PrefabBiome =
 	"TemperateGrassland"
 	| "PineHighlands"
 	| "Forest"
-	| "DenseForest"
 	| "Alpine"
 	| "HighlandDesert"
 	| "Marshland"

@@ -9,6 +9,8 @@ local BackOffPlayer = require(neurons.BackOffPlayer)
 local Aggro = require(neurons.Aggro)
 local Wander = require(neurons.Wander)
 local TrackPlayer = require(neurons.TrackPlayer)
+local EscapePlayer = require(neurons.EscapePlayer)
+local GrazeWander = require(neurons.GrazeWander)
 
 -- Import brain
 local BrainTypes = require(script.Parent.BrainTypes)
@@ -33,6 +35,15 @@ function Brains.Aggressive(movementEngine, range: number): Brain
 
 		-- Passive
 		Wander.new(range), -- Will wander if left alone
+	})
+
+	return brain
+end
+
+function Brains.PassivePrey(movementEngine, range: number): Brain
+	local brain = BrainClass.new(movementEngine, {
+		EscapePlayer.new(),
+		GrazeWander.new(range),
 	})
 
 	return brain

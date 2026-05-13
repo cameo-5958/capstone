@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Signal = require(game:GetService("ReplicatedStorage").Classes.Modifier.Signal)
@@ -48,9 +49,20 @@ type PathPointPayload = {
 	IsStructureNode: boolean?,
 	PathRadiusTiles: number?,
 	FlattenRadiusTiles: number?,
+	CarveHeight: number?,
 }
 
 type PathRoutePayload = { PathPointPayload }
+
+type SpawnDebugRegenerateOptions = {
+	EnemyBaseLevel: number?,
+	GenerationType: string?,
+}
+
+type WorldRegenerateOptions = {
+	Biome: string?,
+	SpawnDebug: SpawnDebugRegenerateOptions?,
+}
 
 local WorldServiceClient = {}
 
@@ -84,6 +96,11 @@ local WATERFALL_EDGE_EXTRA_DROP = 2
 local STUD_UNIT = 1
 local MIN_PART_SIZE = 1
 local PATH_VISUAL_WIDTH_SCALE = 2
+local TREASURE_CHEST_OPEN_ANGLE_DEGREES = -108
+local TREASURE_CHEST_OPEN_FORWARD_SHIFT = 0.55
+local TREASURE_CHEST_OPEN_VERTICAL_LIFT = 0.5
+local TREASURE_CHEST_OPEN_TWEEN = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TREASURE_CHEST_LOCK_FADE_TWEEN = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local BiomeColors = {
 	TemperateGrassland = {
@@ -97,11 +114,6 @@ local BiomeColors = {
 		Water = Color3.fromRGB(82, 156, 255),
 	},
 	Forest = {
-		Surface = Color3.fromRGB(66, 117, 70),
-		Fill = Color3.fromRGB(104, 104, 116),
-		Water = Color3.fromRGB(72, 141, 222),
-	},
-	DenseForest = {
 		Surface = Color3.fromRGB(54, 102, 60),
 		Fill = Color3.fromRGB(96, 101, 110),
 		Water = Color3.fromRGB(66, 128, 209),
@@ -221,7 +233,8 @@ local function snapSize(size: Vector3): Vector3
 end
 
 local function snapPosition(position: Vector3): Vector3
-	return Vector3.new(snapNumber(position.X), snapNumber(position.Y), snapNumber(position.Z))
+	-- Preserve exact Y so stacked parts (fill + cap) keep their intended vertical relationship.
+	return Vector3.new(snapNumber(position.X), position.Y, snapNumber(position.Z))
 end
 
 local function snapCFrame(cframe: CFrame): CFrame
@@ -478,17 +491,45 @@ local function renderColumn(column: TileColumnPayload, parent: Folder)
 		surfaceMaterial = Enum.Material.SmoothPlastic
 		surfaceColor = palette.Water
 	end
+	local isWaterTile = column.HasWater
 
-	local fillCenterY = column.BottomY + (columnHeight - 1) * 0.5
-	createVisualPart(
-		parent,
-		string.format("Tile_%d_%d_Fill", column.X, column.Z),
-		Vector3.new(tileSize, columnHeight, tileSize),
-		Vector3.new(x, fillCenterY, z),
-		surfaceMaterial,
-		surfaceColor,
-		0
-	)
+	local fillMaterial = resolveMaterial(column.FillMaterial, Enum.Material.Rock)
+	local fillColor = palette.Fill
+	local fillHeight = math.max(0, columnHeight - 1)
+	if fillHeight > 0 then
+		local fillCenterY = column.BottomY + (fillHeight - 1) * 0.5
+		createVisualPart(
+			parent,
+			string.format("Tile_%d_%d_Stone", column.X, column.Z),
+			Vector3.new(tileSize, fillHeight, tileSize),
+			Vector3.new(x, fillCenterY, z),
+			fillMaterial,
+			fillColor,
+			0
+		)
+	end
+
+	if isWaterTile then
+		createVisualPart(
+			parent,
+			string.format("Tile_%d_%d_Water", column.X, column.Z),
+			Vector3.new(tileSize, 1, tileSize),
+			Vector3.new(x, column.SurfaceY - 0.5, z),
+			Enum.Material.SmoothPlastic,
+			palette.Water,
+			0.08
+		)
+	else
+		createVisualPart(
+			parent,
+			string.format("Tile_%d_%d_Cap", column.X, column.Z),
+			Vector3.new(tileSize, 1, tileSize),
+			Vector3.new(x, column.SurfaceY, z),
+			surfaceMaterial,
+			surfaceColor,
+			0
+		)
+	end
 
 	local undersideHeight = math.max(5, math.floor(tileSize * 0.8 + columnHeight * 0.35))
 	local undersideCenterY = column.BottomY - (undersideHeight + 1) * 0.5
@@ -524,146 +565,6 @@ local function renderPathDebug(pathRoutes: { PathRoutePayload }?)
 	local debugRoot = ensurePathDebugRoot()
 	for _, child in ipairs(debugRoot:GetChildren()) do
 		child:Destroy()
-	end
-
-	if not pathRoutes or #pathRoutes == 0 then
-		return
-	end
-
-	local tileSize = CurrentConfig.TileSize
-	local nodeThickness = math.max(0.8, tileSize * 0.22)
-	local nodeYOffset = DEBUG_NODE_ELEVATION + nodeThickness * 0.5
-	local linkThickness = math.max(1.2, tileSize * 0.24) * PATH_VISUAL_WIDTH_SCALE
-	local rolePriority = {
-		Node = 1,
-		Structure = 2,
-		City = 3,
-		End = 4,
-		Start = 5,
-	}
-
-	local nodeMap = {} :: {
-		[string]: {
-			X: number,
-			Z: number,
-			Height: number,
-			Role: string,
-			RadiusScale: number,
-			PathRadiusTiles: number,
-			FlattenRadiusTiles: number,
-		},
-	}
-
-	local function mergeNode(point: PathPointPayload, role: string)
-		local key = string.format("%d_%d", point.X, point.Z)
-		local current = nodeMap[key]
-		if not current then
-			nodeMap[key] = {
-				X = point.X,
-				Z = point.Z,
-				Height = point.Height,
-				Role = role,
-				RadiusScale = if point.RadiusScale then point.RadiusScale else 1,
-				PathRadiusTiles = if point.PathRadiusTiles then point.PathRadiusTiles else 0,
-				FlattenRadiusTiles = if point.FlattenRadiusTiles then point.FlattenRadiusTiles else 0,
-			}
-			return
-		end
-
-		local currentPriority = rolePriority[current.Role] or 0
-		local nextPriority = rolePriority[role] or 0
-		if nextPriority > currentPriority then
-			current.Role = role
-		end
-		if point.Height > current.Height then
-			current.Height = point.Height
-		end
-		local nextScale = if point.RadiusScale then point.RadiusScale else 1
-		if nextScale > current.RadiusScale then
-			current.RadiusScale = nextScale
-		end
-		local nextPathRadiusTiles = if point.PathRadiusTiles then point.PathRadiusTiles else 0
-		if nextPathRadiusTiles > current.PathRadiusTiles then
-			current.PathRadiusTiles = nextPathRadiusTiles
-		end
-		local nextFlattenRadiusTiles = if point.FlattenRadiusTiles then point.FlattenRadiusTiles else 0
-		if nextFlattenRadiusTiles > current.FlattenRadiusTiles then
-			current.FlattenRadiusTiles = nextFlattenRadiusTiles
-		end
-	end
-
-	for routeIndex, route in ipairs(pathRoutes) do
-		if #route > 0 then
-			for pointIndex, point in ipairs(route) do
-				local role = "Node"
-				if #route == 1 then
-					role = "City"
-				elseif pointIndex == 1 then
-					role = "Start"
-				elseif pointIndex == #route then
-					role = "End"
-				elseif point.IsStructureNode == true then
-					role = "Structure"
-				end
-				mergeNode(point, role)
-			end
-
-			for pointIndex = 1, #route - 1 do
-				local a = route[pointIndex]
-				local b = route[pointIndex + 1]
-				local from = Vector3.new(a.X * tileSize, a.Height + DEBUG_NODE_ELEVATION, a.Z * tileSize)
-				local to = Vector3.new(b.X * tileSize, b.Height + DEBUG_NODE_ELEVATION, b.Z * tileSize)
-				local direction = to - from
-				local distance = direction.Magnitude
-				if distance > 0.1 then
-					createDebugPart(
-						debugRoot,
-						string.format("PathLink_%d_%d", routeIndex, pointIndex),
-						Vector3.new(linkThickness, linkThickness, distance),
-						CFrame.lookAt((from + to) * 0.5, to),
-						Color3.fromRGB(66, 196, 255),
-						0.62
-					)
-				end
-			end
-		end
-	end
-
-	for nodeKey, node in pairs(nodeMap) do
-		local nodeColor = Color3.fromRGB(255, 77, 160)
-		if node.Role == "Start" then
-			nodeColor = Color3.fromRGB(88, 255, 220)
-		elseif node.Role == "End" then
-			nodeColor = Color3.fromRGB(255, 184, 72)
-		elseif node.Role == "City" or node.Role == "Structure" then
-			nodeColor = Color3.fromRGB(224, 236, 255)
-		end
-
-		local fallbackPathRadiusTiles = math.max(1, math.max(1, node.RadiusScale) * 2.4)
-		local pathRadiusTiles = if node.PathRadiusTiles > 0 then node.PathRadiusTiles else fallbackPathRadiusTiles
-		local flattenRadiusTiles = if node.FlattenRadiusTiles > 0 then node.FlattenRadiusTiles else pathRadiusTiles
-		local flattenedDiameterStuds = math.max(tileSize, flattenRadiusTiles * tileSize * 2)
-		local pathDiameterStuds = math.max(tileSize, pathRadiusTiles * tileSize * 2)
-		local worldPosition = Vector3.new(node.X * tileSize, node.Height + nodeYOffset, node.Z * tileSize)
-		local disk = createDebugPart(
-			debugRoot,
-			string.format("PathNode_%s", nodeKey),
-			Vector3.new(nodeThickness, flattenedDiameterStuds, flattenedDiameterStuds),
-			CFrame.new(worldPosition) * CFrame.Angles(0, 0, math.rad(90)),
-			nodeColor,
-			0.84
-		)
-		disk.Shape = Enum.PartType.Cylinder
-
-		local halo = createDebugPart(
-			debugRoot,
-			string.format("PathNodeHalo_%s", nodeKey),
-			Vector3.new(nodeThickness * 0.7, pathDiameterStuds * 1.02, pathDiameterStuds * 1.02),
-			CFrame.new(worldPosition + Vector3.new(0, nodeThickness * 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			nodeColor,
-			0.94
-		)
-		halo.Shape = Enum.PartType.Cylinder
 	end
 end
 
@@ -859,6 +760,232 @@ local function loadChunk(chunk: ChunkData)
 	refreshWaterfallsAroundChunk(chunk.ChunkX, chunk.ChunkZ)
 end
 
+local function getChunkCoordsFromTile(tileX: number, tileZ: number): (number?, number?)
+	if not CurrentConfig then
+		return nil, nil
+	end
+	return math.floor(tileX / CurrentConfig.ChunkSize), math.floor(tileZ / CurrentConfig.ChunkSize)
+end
+
+local function getChunkFolderForTile(tileX: number, tileZ: number): Folder?
+	local chunkX, chunkZ = getChunkCoordsFromTile(tileX, tileZ)
+	if chunkX == nil or chunkZ == nil then
+		return nil
+	end
+	local key = chunkKey(chunkX, chunkZ)
+	return ChunkFolders[key]
+end
+
+local function removeColumnFromLoadedChunk(tileX: number, tileZ: number)
+	local chunkX, chunkZ = getChunkCoordsFromTile(tileX, tileZ)
+	if chunkX == nil or chunkZ == nil then
+		return
+	end
+	local key = chunkKey(chunkX, chunkZ)
+	local chunk = LoadedChunks[key]
+	if not chunk then
+		return
+	end
+
+	local nextColumns = {} :: { TileColumnPayload }
+	for _, column in ipairs(chunk.Columns) do
+		if not (column.X == tileX and column.Z == tileZ) then
+			table.insert(nextColumns, column)
+		end
+	end
+	chunk.Columns = nextColumns
+	LoadedColumnsByKey[columnKey(tileX, tileZ)] = nil
+end
+
+local function collectRenderedTileInstances(tileX: number, tileZ: number): { Instance }
+	local chunkFolder = getChunkFolderForTile(tileX, tileZ)
+	if not chunkFolder then
+		return {}
+	end
+
+	local targets = {} :: { Instance }
+	local seen = {} :: { [Instance]: boolean }
+	local stoneName = string.format("Tile_%d_%d_Stone", tileX, tileZ)
+	local fillName = string.format("Tile_%d_%d_Fill", tileX, tileZ)
+	local capName = string.format("Tile_%d_%d_Cap", tileX, tileZ)
+	local waterName = string.format("Tile_%d_%d_Water", tileX, tileZ)
+	local undersideName = string.format("Tile_%d_%d_Underside", tileX, tileZ)
+	local waterfallPrefix = string.format("Waterfall_%d_%d_", tileX, tileZ)
+
+	for _, child in ipairs(chunkFolder:GetChildren()) do
+		if child:IsA("BasePart") then
+			if
+				child.Name == stoneName
+				or child.Name == fillName
+				or child.Name == capName
+				or child.Name == waterName
+				or child.Name == undersideName
+				or string.sub(child.Name, 1, #waterfallPrefix) == waterfallPrefix
+			then
+				if not seen[child] then
+					seen[child] = true
+					table.insert(targets, child)
+				end
+			end
+		end
+	end
+
+	for _, descendant in ipairs(chunkFolder:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local part = descendant :: BasePart
+			if string.sub(part.Name, 1, #waterfallPrefix) == waterfallPrefix then
+				if not seen[part] then
+					seen[part] = true
+					table.insert(targets, part)
+				end
+			end
+		elseif descendant:IsA("Model") then
+			local model = descendant :: Model
+			if model:GetAttribute("ColumnX") == tileX and model:GetAttribute("ColumnZ") == tileZ then
+				if not seen[model] then
+					seen[model] = true
+					table.insert(targets, model)
+				end
+			end
+		end
+	end
+
+	return targets
+end
+
+local function animateInstanceDrop(instance: Instance, dropStuds: number, durationSeconds: number)
+	if instance:IsA("BasePart") then
+		local part = instance :: BasePart
+		local goal = { CFrame = part.CFrame * CFrame.new(0, -dropStuds, 0) }
+		TweenService:Create(part, TweenInfo.new(durationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), goal):Play()
+		return
+	end
+
+	if instance:IsA("Model") then
+		local model = instance :: Model
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				local part = descendant :: BasePart
+				local goal = { CFrame = part.CFrame * CFrame.new(0, -dropStuds, 0) }
+				TweenService:Create(
+					part,
+					TweenInfo.new(durationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					goal
+				):Play()
+			end
+		end
+	end
+end
+
+local function handleCollapseTiles(payload: { [string]: any }?)
+	if not payload then
+		return
+	end
+	local tiles = payload.Tiles
+	if type(tiles) ~= "table" then
+		return
+	end
+
+	local animate = payload.Animate == true
+	local dropStuds = if type(payload.FallDistanceStuds) == "number" then math.max(1, payload.FallDistanceStuds) else 100
+	local durationSeconds = if type(payload.FallDurationSeconds) == "number"
+		then math.max(0.2, payload.FallDurationSeconds)
+		else 2.2
+
+	local touchedChunks = {} :: { [string]: { X: number, Z: number } }
+	for _, tile in ipairs(tiles) do
+		if type(tile) == "table" and type(tile.X) == "number" and type(tile.Z) == "number" then
+			local tileX = math.floor(tile.X)
+			local tileZ = math.floor(tile.Z)
+			local instances = collectRenderedTileInstances(tileX, tileZ)
+			removeColumnFromLoadedChunk(tileX, tileZ)
+
+			local chunkX, chunkZ = getChunkCoordsFromTile(tileX, tileZ)
+			if chunkX ~= nil and chunkZ ~= nil then
+				touchedChunks[chunkKey(chunkX, chunkZ)] = { X = chunkX, Z = chunkZ }
+			end
+
+			if animate then
+				for _, instance in ipairs(instances) do
+					animateInstanceDrop(instance, dropStuds, durationSeconds)
+				end
+				task.delay(durationSeconds, function()
+					for _, instance in ipairs(instances) do
+						if instance and instance.Parent then
+							instance:Destroy()
+						end
+					end
+				end)
+			else
+				for _, instance in ipairs(instances) do
+					if instance and instance.Parent then
+						instance:Destroy()
+					end
+				end
+			end
+		end
+	end
+
+	for _, chunkPos in pairs(touchedChunks) do
+		refreshWaterfallsAroundChunk(chunkPos.X, chunkPos.Z)
+	end
+end
+
+local function findRenderedPrefabModel(prefabId: string, columnX: number, columnZ: number): Model?
+	local root = ensureRenderRoot()
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("Model") then
+			local model = descendant :: Model
+			if model:GetAttribute("PrefabId") == prefabId
+				and model:GetAttribute("ColumnX") == columnX
+				and model:GetAttribute("ColumnZ") == columnZ then
+				return model
+			end
+		end
+	end
+	return nil
+end
+
+local function playTreasureClaimAnimation(payload: { [string]: any }?)
+	if not payload then
+		return
+	end
+
+	local prefabId = payload.PrefabId
+	local columnX = payload.ColumnX
+	local columnZ = payload.ColumnZ
+	if type(prefabId) ~= "string" or type(columnX) ~= "number" or type(columnZ) ~= "number" then
+		return
+	end
+
+	local model = findRenderedPrefabModel(prefabId, math.floor(columnX), math.floor(columnZ))
+	if not model then
+		return
+	end
+
+	local lidInstance = model:FindFirstChild("ChestLid")
+	if not lidInstance or not lidInstance:IsA("BasePart") then
+		return
+	end
+
+	local lid = lidInstance :: BasePart
+	if lid:GetAttribute("ChestOpened") == true then
+		return
+	end
+	lid:SetAttribute("ChestOpened", true)
+
+	local openCFrame = lid.CFrame
+		* CFrame.new(0, TREASURE_CHEST_OPEN_VERTICAL_LIFT, TREASURE_CHEST_OPEN_FORWARD_SHIFT)
+		* CFrame.Angles(math.rad(TREASURE_CHEST_OPEN_ANGLE_DEGREES), 0, 0)
+	TweenService:Create(lid, TREASURE_CHEST_OPEN_TWEEN, { CFrame = openCFrame }):Play()
+
+	local lockInstance = model:FindFirstChild("ChestLock")
+	if lockInstance and lockInstance:IsA("BasePart") then
+		local lock = lockInstance :: BasePart
+		TweenService:Create(lock, TREASURE_CHEST_LOCK_FADE_TWEEN, { Transparency = 1 }):Play()
+	end
+end
+
 function WorldServiceClient.GetSeed(): number
 	return CurrentSeed
 end
@@ -879,9 +1006,11 @@ function WorldServiceClient.GetWorldChangedSignal()
 	return WorldChanged
 end
 
-function WorldServiceClient.RequestRegenerate(seed: number?)
+function WorldServiceClient.RequestRegenerate(seed: number?, options: WorldRegenerateOptions?)
 	API:FireServer("RequestRegenerate", {
 		Seed = seed,
+		Biome = if options then options.Biome else nil,
+		SpawnDebug = if options then options.SpawnDebug else nil,
 	})
 end
 
@@ -927,6 +1056,10 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any }?)
 			WorldChanged:Fire("LoadChunk", payload)
 			updateStreaming(false)
 		end
+	elseif action == "TreasureClaimed" then
+		playTreasureClaimAnimation(payload)
+	elseif action == "CollapseTiles" then
+		handleCollapseTiles(payload)
 	end
 end)
 

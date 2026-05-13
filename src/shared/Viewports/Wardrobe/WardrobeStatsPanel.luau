@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local React = require(ReplicatedStorage.Packages.react)
 local NinePartBorder = require(ReplicatedStorage.Classes.UI.NinePartBorder)
 local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
+local ItemToolServiceClient = require(ReplicatedStorage.Services.ItemTool.ItemToolServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
 local WardrobeSelection = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeSelection)
 
@@ -25,6 +26,17 @@ type LoadoutSnapshot = {
 	Slots: { LoadoutSlot },
 }
 
+type ItemLoadoutSlot = {
+	Slot: number,
+	EntryId: string?,
+	ItemId: string?,
+	Name: string?,
+}
+
+type ItemLoadoutSnapshot = {
+	Slots: { ItemLoadoutSlot },
+}
+
 type HotbarInfo = {
 	Slot: number,
 	IsEquipped: boolean,
@@ -38,15 +50,10 @@ local CONTENT_PAD = 20
 local HEADER_HEIGHT = 38
 local PREVIEW_SIZE = 129
 local TOP_SECTION_Y = 62
-local ACTION_BUTTON_HEIGHT = 20
 local TOP_DIVIDER_Y = TOP_SECTION_Y + PREVIEW_SIZE + 16
 local ATTRIBUTE_TOP = TOP_DIVIDER_Y + 28
 local ATTRIBUTE_HEIGHT = 150
 local PASSIVES_TOP = ATTRIBUTE_TOP + ATTRIBUTE_HEIGHT + 18
-local ACTION_BAR_X = CONTENT_PAD + PREVIEW_SIZE + 16
-local ACTION_BAR_Y = TOP_DIVIDER_Y - ACTION_BUTTON_HEIGHT - 8
-local ACTION_BUTTON_GAP = 4
-local ACTION_BUTTON_WIDTH = math.floor((PANEL_WIDTH - ACTION_BAR_X - CONTENT_PAD - (ACTION_BUTTON_GAP * 4)) / 5)
 
 local WOOD_DARK = Color3.fromRGB(28, 20, 9)
 local WOOD_PANEL = Color3.fromRGB(34, 23, 10)
@@ -60,16 +67,7 @@ local PREVIEW_BG = Color3.fromRGB(33, 50, 60)
 local PASSIVE_BG = Color3.fromRGB(34, 54, 68)
 local PASSIVE_STROKE = Color3.fromRGB(77, 108, 130)
 local GREEN_TAG = Color3.fromRGB(30, 112, 62)
-local SLOT_ACTION_BG = WOOD_HEADER
-local SLOT_ACTION_STROKE = GOLD
-local SLOT_ACTION_TEXT = Color3.fromRGB(232, 188, 82)
 local RED_TAG = Color3.fromRGB(114, 33, 41)
-local RARITY_BADGE_COLORS = {
-	CRUDE = Color3.fromRGB(82, 84, 84),
-	REFINED = Color3.fromRGB(48, 84, 129),
-	EXALTED = Color3.fromRGB(132, 89, 34),
-	APEX = Color3.fromRGB(126, 28, 32),
-}
 
 local function formatNumber(value: any): string
 	if type(value) ~= "number" then
@@ -93,14 +91,6 @@ local function formatPercent(value: any): string
 	return formatNumber(percent) .. "%"
 end
 
-local function titleCase(value: string): string
-	if value == "" then
-		return value
-	end
-
-	return string.upper(string.sub(value, 1, 1)) .. string.lower(string.sub(value, 2))
-end
-
 local function firstValue(...: any): any
 	for index = 1, select("#", ...) do
 		local value = select(index, ...)
@@ -118,7 +108,7 @@ end
 
 local function getSelectedName(selectedItem: SelectedItem?): string
 	if not selectedItem then
-		return "Select a Weapon"
+		return "Select an Item"
 	end
 
 	if type(selectedItem.Name) == "string" and selectedItem.Name ~= "" then
@@ -134,26 +124,23 @@ end
 
 local function getSelectedClass(selectedItem: SelectedItem?): string
 	local data = getSelectedData(selectedItem)
-	return selectedItem and (selectedItem.Class or selectedItem.Type or data.Class or data.Type or "Weapon") or "Weapon"
+	local inventoryType = if type(data.InventoryData) == "table" and type(data.InventoryData.Type) == "string"
+		then data.InventoryData.Type
+		else nil
+	return selectedItem and (selectedItem.Class or selectedItem.Type or data.Class or data.Type or inventoryType or selectedItem.ItemKind or "Weapon")
+		or "Weapon"
 end
 
-local function getRarityText(selectedItem: SelectedItem?): string
-	local data = getSelectedData(selectedItem)
-	local rarity = data.Rarity
-	if type(rarity) ~= "string" or rarity == "" then
-		return "Crude"
-	end
-
-	return titleCase(rarity)
+local function isSelectedWeapon(selectedItem: SelectedItem?): boolean
+	return selectedItem ~= nil and selectedItem.ItemKind == "Weapon"
 end
 
-local function getRarityBadgeColor(rarityText: string): Color3
-	local normalized = string.upper(rarityText)
-	if normalized == "COMMON" then
-		normalized = "CRUDE"
-	end
+local function isSelectedArmor(selectedItem: SelectedItem?): boolean
+	return selectedItem ~= nil and selectedItem.ItemKind == "Armor"
+end
 
-	return RARITY_BADGE_COLORS[normalized] or RARITY_BADGE_COLORS.CRUDE
+local function isSelectedItem(selectedItem: SelectedItem?): boolean
+	return selectedItem ~= nil and selectedItem.ItemKind == "Item"
 end
 
 local function getEnchantText(selectedItem: SelectedItem?): string
@@ -225,7 +212,7 @@ end
 
 local function getSelectedDescription(selectedItem: SelectedItem?): string
 	if not selectedItem then
-		return "Select a weapon to inspect its story and details."
+		return "Select an inventory item to inspect details."
 	end
 
 	local data = getSelectedData(selectedItem)
@@ -240,7 +227,7 @@ local function getSelectedDescription(selectedItem: SelectedItem?): string
 		return databaseDescription
 	end
 
-	return "No description has been written for this weapon yet."
+	return "No description has been written for this item yet."
 end
 
 local function slotMatchesSelected(slot: LoadoutSlot?, selectedItem: SelectedItem?): boolean
@@ -304,39 +291,29 @@ local function getSelectedHotbarInfo(selectedItem: SelectedItem?, loadout: Loado
 	return nil
 end
 
-local function getSelectedHotbarInfoForSlot(selectedItem: SelectedItem?, loadout: LoadoutSnapshot, slotNumber: number): HotbarInfo?
-	if not selectedItem or selectedItem.ItemKind ~= "Weapon" then
+local function getSelectedItemSlot(selectedItem: SelectedItem?, loadout: ItemLoadoutSnapshot): number?
+	if not selectedItem or selectedItem.ItemKind ~= "Item" then
 		return nil
 	end
 
-	local slot = loadout.Slots[slotNumber]
-	if not slotMatchesSelected(slot, selectedItem) then
+	local entryId = selectedItem.EntryId
+	if type(entryId) ~= "string" or entryId == "" then
 		return nil
 	end
 
-	local resolvedSlotNumber = slot.Slot or slotNumber
-	return {
-		Slot = resolvedSlotNumber,
-		IsEquipped = slot.IsEquipped == true or loadout.EquippedIndex == resolvedSlotNumber,
-	}
+	for index, slot in ipairs(loadout.Slots) do
+		if slot and slot.EntryId == entryId then
+			return slot.Slot or index
+		end
+	end
+
+	return nil
 end
 
 local function canActOnSelectedItem(selectedItem: SelectedItem?): boolean
 	return selectedItem ~= nil
 		and selectedItem.Source == "Inventory"
-		and selectedItem.ItemKind == "Weapon"
 		and selectedItem.EntryId ~= nil
-end
-
-local function useSelectedSlotAction(selectedItem: SelectedItem?, loadout: LoadoutSnapshot, slotNumber: number): ()
-	if not canActOnSelectedItem(selectedItem) then
-		return
-	end
-
-	local slotHotbarInfo = getSelectedHotbarInfoForSlot(selectedItem, loadout, slotNumber)
-	if not slotHotbarInfo and selectedItem and selectedItem.EntryId then
-		WeaponServiceClient.EquipInventoryEntryToSlot(selectedItem.EntryId, slotNumber)
-	end
 end
 
 local function label(text: string, position: UDim2, size: UDim2, props: { [string]: any }?)
@@ -669,35 +646,27 @@ local function descriptionBox(text: string, position: UDim2, size: UDim2)
 	})
 end
 
-local function flatActionButton(
+local function headerActionButton(
 	name: string,
 	text: string,
-	index: number,
+	position: UDim2,
+	width: number,
 	isEnabled: boolean,
-	isDanger: boolean,
 	onActivated: () -> ()
 )
-	local x = (index - 1) * (ACTION_BUTTON_WIDTH + ACTION_BUTTON_GAP)
-
 	return React.createElement("TextButton", {
 		Active = isEnabled,
 		AutoButtonColor = isEnabled,
-		BackgroundColor3 = if isDanger
-			then RED_TAG
-			elseif isEnabled then SLOT_ACTION_BG
-			else Color3.fromRGB(55, 48, 39),
+		BackgroundColor3 = if isEnabled then WOOD_HEADER else Color3.fromRGB(55, 48, 39),
 		BackgroundTransparency = if isEnabled then 0.02 else 0.32,
 		BorderSizePixel = 0,
 		Font = Enum.Font.GothamBold,
 		Name = name,
-		Position = UDim2.fromOffset(x, 0),
+		Position = position,
 		Selectable = isEnabled,
-		Size = UDim2.fromOffset(ACTION_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT),
+		Size = UDim2.fromOffset(width, 18),
 		Text = text,
-		TextColor3 = if isDanger
-			then TEXT_MAIN
-			elseif isEnabled then SLOT_ACTION_TEXT
-			else TEXT_DIM,
+		TextColor3 = if isEnabled then Color3.fromRGB(232, 188, 82) else TEXT_DIM,
 		TextSize = 10,
 		ZIndex = 4,
 		[React.Event.Activated] = function()
@@ -707,67 +676,73 @@ local function flatActionButton(
 		end,
 	}, {
 		Stroke = React.createElement("UIStroke", {
-			Color = if isDanger
-				then Color3.fromRGB(174, 74, 71)
-				elseif isEnabled then SLOT_ACTION_STROKE
-				else GOLD_DIM,
+			Color = if isEnabled then GOLD else GOLD_DIM,
 			Thickness = 1,
 			Transparency = if isEnabled then 0.22 else 0.58,
 		}),
 	})
 end
 
-local function slotActionButton(selectedItem: SelectedItem?, loadout: LoadoutSnapshot, slotNumber: number)
-	local canAct = canActOnSelectedItem(selectedItem)
-	local slotHotbarInfo = getSelectedHotbarInfoForSlot(selectedItem, loadout, slotNumber)
-	local isEnabled = canAct and slotHotbarInfo == nil
+local function itemEquipOptions(
+	position: UDim2,
+	canAct: boolean,
+	selectedSlot: number?,
+	onEquipSlot: (number) -> (),
+	onUnequipSlot: (number) -> ()
+)
+	local function slotButton(slot: number, positionX: number)
+		local isSelected = selectedSlot == slot
+		local text = if isSelected then ("E%d"):format(slot) else tostring(slot)
 
-	return flatActionButton(("Slot%d"):format(slotNumber), tostring(slotNumber), slotNumber, isEnabled, false, function()
-		if isEnabled then
-			useSelectedSlotAction(selectedItem, loadout, slotNumber)
-		end
-	end)
-end
+		return headerActionButton(("ItemSlot%d"):format(slot), text, UDim2.fromOffset(positionX, 0), 22, canAct, function()
+			if isSelected then
+				onUnequipSlot(slot)
+			else
+				onEquipSlot(slot)
+			end
+		end)
+	end
 
-local function unequipActionButton(selectedItem: SelectedItem?, hotbarInfo: HotbarInfo?)
-	local isEnabled = canActOnSelectedItem(selectedItem) and hotbarInfo ~= nil
-	local text = if isEnabled then "Unequip" else ""
-
-	return flatActionButton("Unequip", text, 5, isEnabled, true, function()
-		if isEnabled and hotbarInfo then
-			WeaponServiceClient.UnequipSlot(hotbarInfo.Slot)
-		end
-	end)
-end
-
-local function slotActionButtons(selectedItem: SelectedItem?, hotbarInfo: HotbarInfo?, loadout: LoadoutSnapshot)
 	return React.createElement("Frame", {
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		Position = UDim2.fromOffset(ACTION_BAR_X, ACTION_BAR_Y),
-		Size = UDim2.fromOffset(PANEL_WIDTH - ACTION_BAR_X - CONTENT_PAD, ACTION_BUTTON_HEIGHT),
+		Position = position,
+		Size = UDim2.fromOffset(88, 18),
 		ZIndex = 4,
 	}, {
-		Slot1 = slotActionButton(selectedItem, loadout, 1),
-		Slot2 = slotActionButton(selectedItem, loadout, 2),
-		Slot3 = slotActionButton(selectedItem, loadout, 3),
-		Slot4 = slotActionButton(selectedItem, loadout, 4),
-		Unequip = unequipActionButton(selectedItem, hotbarInfo),
+		EquipLabel = label("Equip", UDim2.fromOffset(0, 0), UDim2.fromOffset(34, 18), {
+			Font = Enum.Font.GothamBold,
+			TextColor3 = GOLD,
+			TextSize = 10,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}),
+		SlotOne = slotButton(1, 36),
+		SlotTwo = slotButton(2, 62),
 	})
 end
 
-local function weaponHeader(selectedItem: SelectedItem?, hotbarInfo: HotbarInfo?, loadout: LoadoutSnapshot)
+local function weaponHeader(
+	selectedItem: SelectedItem?,
+	hotbarInfo: HotbarInfo?,
+	selectedItemSlot: number?,
+	onEquipItemSlot: (number) -> (),
+	onUnequipItemSlot: (number) -> ()
+)
 	local data = getSelectedData(selectedItem)
-	local baseDamage = if type(data.BaseDamage) == "number" then formatNumber(data.BaseDamage) else "-"
-	local weight = if type(data.Weight) == "number" then formatNumber(data.Weight) .. " wt" else "- wt"
-	local rarityText = getRarityText(selectedItem)
+	local damageText = if type(data.BaseDamage) == "number" then formatNumber(data.BaseDamage) else "-"
 	local typeText = getSelectedClass(selectedItem)
+	local canAct = canActOnSelectedItem(selectedItem)
+	local isWeapon = isSelectedWeapon(selectedItem)
+	local isItem = isSelectedItem(selectedItem)
+	local isArmor = isSelectedArmor(selectedItem)
 	local metaX = CONTENT_PAD + PREVIEW_SIZE + 16
 	local metaY = TOP_SECTION_Y + 42
-	local rarityWidth = 70
+	local actionWidth = if isItem then 88 else 70
 	local typeWidth = 64
 	local descriptionTop = metaY + 26
-	local descriptionHeight = math.max(36, ACTION_BAR_Y - descriptionTop - 8)
+	local descriptionHeight = math.max(36, TOP_DIVIDER_Y - descriptionTop - 8)
+	local equipText = if isWeapon then (if hotbarInfo then "Equipped" else "Equip") elseif isArmor then "Equip" else ""
+	local equipEnabled = canAct and ((isWeapon and hotbarInfo == nil) or isArmor)
 
 	return React.createElement(React.Fragment, nil, {
 		Preview = previewBox(selectedItem),
@@ -777,11 +752,21 @@ local function weaponHeader(selectedItem: SelectedItem?, hotbarInfo: HotbarInfo?
 			TextSize = 20,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
-		RarityMeta = metaBadge(rarityText, UDim2.fromOffset(metaX, metaY), rarityWidth, getRarityBadgeColor(rarityText)),
-		TypeMeta = metaBadge(typeText, UDim2.fromOffset(metaX + rarityWidth + 6, metaY), typeWidth, Color3.fromRGB(76, 52, 27), GOLD),
+		Equip = if isItem
+			then itemEquipOptions(UDim2.fromOffset(metaX, metaY), canAct, selectedItemSlot, onEquipItemSlot, onUnequipItemSlot)
+			else headerActionButton("EquipAction", equipText, UDim2.fromOffset(metaX, metaY), actionWidth, equipEnabled, function()
+				if not selectedItem or not selectedItem.EntryId then
+					return
+				end
+
+				if isWeapon and hotbarInfo == nil then
+					WeaponServiceClient.EquipInventoryEntry(selectedItem.EntryId)
+				end
+			end),
+		TypeMeta = metaBadge(typeText, UDim2.fromOffset(metaX + actionWidth + 6, metaY), typeWidth, Color3.fromRGB(76, 52, 27), GOLD),
 		Slot = if hotbarInfo then metaBadge(
 			("Slot %d"):format(hotbarInfo.Slot),
-			UDim2.fromOffset(metaX + rarityWidth + typeWidth + 12, metaY),
+			UDim2.fromOffset(metaX + actionWidth + typeWidth + 12, metaY),
 			58,
 			Color3.fromRGB(48, 36, 22),
 			if hotbarInfo.IsEquipped then GOLD else TEXT_MUTED
@@ -791,18 +776,17 @@ local function weaponHeader(selectedItem: SelectedItem?, hotbarInfo: HotbarInfo?
 			UDim2.fromOffset(metaX, descriptionTop),
 			UDim2.fromOffset(PANEL_WIDTH - metaX - CONTENT_PAD, descriptionHeight)
 		),
-		Damage = label(baseDamage, UDim2.fromOffset(PANEL_WIDTH - CONTENT_PAD - 42, TOP_SECTION_Y + 8), UDim2.fromOffset(42, 24), {
+		Damage = if isWeapon then label(
+			("Damage: %s"):format(damageText),
+			UDim2.fromOffset(PANEL_WIDTH - CONTENT_PAD - 125, TOP_SECTION_Y + 10),
+			UDim2.fromOffset(125, 24),
+			{
 			Font = Enum.Font.GothamBold,
 			TextColor3 = GOLD,
-			TextSize = 21,
+			TextSize = 18,
 			TextXAlignment = Enum.TextXAlignment.Right,
-		}),
-		Weight = label(weight, UDim2.fromOffset(PANEL_WIDTH - CONTENT_PAD - 68, TOP_SECTION_Y + 34), UDim2.fromOffset(68, 16), {
-			TextColor3 = TEXT_MUTED,
-			TextSize = 12,
-			TextXAlignment = Enum.TextXAlignment.Right,
-		}),
-		Actions = slotActionButtons(selectedItem, hotbarInfo, loadout),
+		}
+		) else nil,
 	})
 end
 
@@ -1011,18 +995,6 @@ local function getSelectedAbilityDetails(selectedItem: SelectedItem?): { { [stri
 	return normalizeDetailList(firstValue(databaseData.AbilityDetails, databaseData.Abilities))
 end
 
-local function hasPassiveSection(selectedItem: SelectedItem?): boolean
-	if not selectedItem then
-		return false
-	end
-
-	local data = getSelectedData(selectedItem)
-	return #getSelectedPassiveDetails(selectedItem) > 0
-		or #getSelectedAbilityDetails(selectedItem) > 0
-		or data.HasPassive == true
-		or data.HasAbility == true
-end
-
 local function getDetailTitle(detail: { [string]: any }, fallback: string): string
 	local title = firstValue(detail.Name, detail.Title, detail.Id)
 	if type(title) == "string" and title ~= "" then
@@ -1086,6 +1058,17 @@ local function passiveCards(selectedItem: SelectedItem?)
 
 	if data.HasAbility == true and #abilityDetails == 0 then
 		cards.AbilityFallback = passiveCard(order, "On Hit", RED_TAG, "Weapon Ability", "Ability details are not serialized yet.")
+		order += 1
+	end
+
+	if order == 1 then
+		cards.None = passiveCard(
+			order,
+			"None",
+			Color3.fromRGB(78, 78, 78),
+			"No Abilities",
+			if selectedItem then "No abilities are configured for this selection." else "Select an item to inspect abilities."
+		)
 	end
 
 	return cards
@@ -1097,6 +1080,9 @@ local function WardrobeStatsPanel()
 	end)
 	local loadout, setLoadout = React.useState(function()
 		return WeaponServiceClient.GetLoadoutData() :: LoadoutSnapshot
+	end)
+	local itemLoadout, setItemLoadout = React.useState(function()
+		return ItemToolServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot
 	end)
 
 	React.useEffect(function()
@@ -1124,8 +1110,38 @@ local function WardrobeStatsPanel()
 		end
 	end, {})
 
+	React.useEffect(function()
+		local connection = ItemToolServiceClient.GetLoadoutChangedSignal():Connect(function(nextLoadout: ItemLoadoutSnapshot)
+			setItemLoadout(nextLoadout)
+		end)
+
+		ItemToolServiceClient.RequestLoadout()
+		setItemLoadout(ItemToolServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot)
+
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
+
 	local selectedHotbarInfo = getSelectedHotbarInfo(selectedItem, loadout)
-	local shouldShowPassives = hasPassiveSection(selectedItem)
+	local selectedItemSlot = getSelectedItemSlot(selectedItem, itemLoadout)
+	local shouldShowAttributes = selectedItem ~= nil and not isSelectedItem(selectedItem)
+	local abilitiesTop = if shouldShowAttributes then PASSIVES_TOP else ATTRIBUTE_TOP
+	local equipSelectedItemToSlot = function(slot: number)
+		if not selectedItem then
+			return
+		end
+
+		local entryId = selectedItem.EntryId
+		if selectedItem.ItemKind ~= "Item" or type(entryId) ~= "string" or entryId == "" then
+			return
+		end
+
+		ItemToolServiceClient.EquipInventoryEntryToSlot(entryId, slot)
+	end
+	local unequipItemSlot = function(slot: number)
+		ItemToolServiceClient.UnequipSlot(slot)
+	end
 
 	return React.createElement("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
@@ -1160,7 +1176,7 @@ local function WardrobeStatsPanel()
 			Size = UDim2.new(1, -12, 0, HEADER_HEIGHT),
 			ZIndex = 2,
 		}, {
-			Title = label("Weapon Stats", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), {
+			Title = label("Item & Weapon Stats", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), {
 				Font = Enum.Font.GothamBold,
 				TextColor3 = Color3.fromRGB(232, 188, 82),
 				TextSize = 15,
@@ -1190,30 +1206,30 @@ local function WardrobeStatsPanel()
 			Size = UDim2.new(1, -12, 1, -(TOP_DIVIDER_Y + 7)),
 			ZIndex = 1,
 		}),
-		WeaponHeader = weaponHeader(selectedItem, selectedHotbarInfo, loadout),
-		AttributesLabel = label("ATTRIBUTES", UDim2.fromOffset(CONTENT_PAD, TOP_DIVIDER_Y + 10), UDim2.fromOffset(120, 18), {
+		WeaponHeader = weaponHeader(selectedItem, selectedHotbarInfo, selectedItemSlot, equipSelectedItemToSlot, unequipItemSlot),
+		AttributesLabel = if shouldShowAttributes then label("ATTRIBUTES", UDim2.fromOffset(CONTENT_PAD, TOP_DIVIDER_Y + 10), UDim2.fromOffset(120, 18), {
+			Font = Enum.Font.GothamBold,
+			TextColor3 = TEXT_MUTED,
+			TextSize = 10,
+		}) else nil,
+		Attributes = if shouldShowAttributes then attributeDiagram(selectedItem) else nil,
+		PassivesDivider = if shouldShowAttributes then React.createElement("Frame", {
+			BackgroundColor3 = Color3.fromRGB(53, 34, 14),
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(6, abilitiesTop - 28),
+			Size = UDim2.new(1, -12, 0, 1),
+			ZIndex = 2,
+		}) else nil,
+		PassivesLabel = label("ABILITIES", UDim2.fromOffset(CONTENT_PAD, abilitiesTop - 18), UDim2.fromOffset(120, 18), {
 			Font = Enum.Font.GothamBold,
 			TextColor3 = TEXT_MUTED,
 			TextSize = 10,
 		}),
-		Attributes = attributeDiagram(selectedItem),
-		PassivesDivider = if shouldShowPassives then React.createElement("Frame", {
-			BackgroundColor3 = Color3.fromRGB(53, 34, 14),
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(6, PASSIVES_TOP - 28),
-			Size = UDim2.new(1, -12, 0, 1),
-			ZIndex = 2,
-		}) else nil,
-		PassivesLabel = if shouldShowPassives then label("PASSIVES", UDim2.fromOffset(CONTENT_PAD, PASSIVES_TOP - 18), UDim2.fromOffset(120, 18), {
-			Font = Enum.Font.GothamBold,
-			TextColor3 = TEXT_MUTED,
-			TextSize = 10,
-		}) else nil,
-		Passives = if shouldShowPassives then React.createElement("Frame", {
+		Passives = React.createElement("Frame", {
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(CONTENT_PAD, PASSIVES_TOP),
-			Size = UDim2.new(1, -(CONTENT_PAD * 2), 1, -(PASSIVES_TOP + CONTENT_PAD)),
+			Position = UDim2.fromOffset(CONTENT_PAD, abilitiesTop),
+			Size = UDim2.new(1, -(CONTENT_PAD * 2), 1, -(abilitiesTop + CONTENT_PAD)),
 			ZIndex = 3,
 		}, {
 			Layout = React.createElement("UIListLayout", {
@@ -1221,7 +1237,7 @@ local function WardrobeStatsPanel()
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
 			Cards = React.createElement(React.Fragment, nil, passiveCards(selectedItem)),
-		}) else nil,
+		}),
 	})
 end
 

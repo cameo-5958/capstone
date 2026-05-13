@@ -36,20 +36,20 @@ return function(ctx, columns: TileColumn, config: WorldConfig, seed: number)
 		local radialDistance = math.sqrt(column.X * column.X + column.Z * column.Z)
 		local distance01 = math.clamp(radialDistance / config.RadiusTiles, 0, 1)
 		local angle = math.atan2(column.Z, column.X)
-		local coarseNoise = math.noise((column.X + heightNoiseX) * 0.1, (column.Z + heightNoiseZ) * 0.1, seed * 0.0007)
-		local fineNoise = math.noise((column.X - heightNoiseZ) * 0.25, (column.Z + heightNoiseX) * 0.25, seed * 0.0011)
+		local coarseNoise = math.noise((column.X + heightNoiseX) * 0.045, (column.Z + heightNoiseZ) * 0.045, seed * 0.0007)
+		local fineNoise = math.noise((column.X - heightNoiseZ) * 0.09, (column.Z + heightNoiseX) * 0.09, seed * 0.0011)
 		local mountainNoise =
-			math.noise((column.X + mountainNoiseX) * 0.07, (column.Z + mountainNoiseZ) * 0.07, seed * 0.0019)
+			math.noise((column.X + mountainNoiseX) * 0.035, (column.Z + mountainNoiseZ) * 0.035, seed * 0.0019)
 		local peakMask = math.clamp((mountainNoise + 0.1) * 0.9, 0, 1)
 		local mountainRing: number =
 			smoothstep(TerrainTuning.MountainRingStart, TerrainTuning.MountainRingEnd, distance01)
 		local mountainBase = mountainRing * TerrainTuning.MountainBaseHeight
 		local peakBoost = (peakMask ^ 2)
 			* (TerrainTuning.MountainPeakBase + mountainRing * TerrainTuning.MountainPeakScale)
-		local mountainHeight = config.BaseY + mountainBase + coarseNoise * 7 + fineNoise * 3 + peakBoost
+		local mountainHeight = config.BaseY + mountainBase + coarseNoise * 5 + fineNoise * 0.75 + peakBoost
 
 		local canyonNoise =
-			math.abs(math.noise((column.X + canyonNoiseX) * 0.075, (column.Z + canyonNoiseZ) * 0.075, seed * 0.0016))
+			math.abs(math.noise((column.X + canyonNoiseX) * 0.035, (column.Z + canyonNoiseZ) * 0.035, seed * 0.0016))
 		local noiseCanyon = 1 - smoothstep(TerrainTuning.CanyonNoiseLow, TerrainTuning.CanyonNoiseHigh, canyonNoise)
 		local spokeCanyon = 0
 		local spokeWidth = TerrainTuning.CanyonSpokeBaseWidth + distance01 * TerrainTuning.CanyonSpokeScaleWidth
@@ -62,7 +62,7 @@ return function(ctx, columns: TileColumn, config: WorldConfig, seed: number)
 		end
 		local canyonMask = math.max(noiseCanyon * 0.75, spokeCanyon)
 		local canyonFloorNoise =
-			math.noise((column.X + pathNoiseX) * 0.06, (column.Z + pathNoiseZ) * 0.06, seed * 0.0021)
+			math.noise((column.X + pathNoiseX) * 0.025, (column.Z + pathNoiseZ) * 0.025, seed * 0.0021)
 		local canyonHeight = config.BaseY
 			+ (1 - distance01) * TerrainTuning.CanyonFloorCenterLift
 			+ canyonFloorNoise * TerrainTuning.CanyonFloorNoiseAmplitude

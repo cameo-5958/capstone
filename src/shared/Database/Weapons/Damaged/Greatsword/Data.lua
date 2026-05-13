@@ -3,7 +3,7 @@ return {
 	["Type"] = "Claymore",
 	["Family"] = "Damaged",
 	["Rarity"] = "CRUDE",
-
+	["Icon"] = "rbxassetid://11860483433",
 	["BaseDamage"] = 28,
 	["__Stats"] = {
 		["Strength"] = 8,

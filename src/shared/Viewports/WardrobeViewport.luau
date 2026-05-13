@@ -6,10 +6,9 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
-local SerializedViewCamera = require(ReplicatedStorage.Viewports.Wardrobe.Viewpoints.ViewCamera)
+local SerializedViewCamera = require(ReplicatedStorage.Viewports.Forest.Viewpoints.ViewCamera)
 local React = require(ReplicatedStorage.Packages.react)
 local ReactRoblox = require(ReplicatedStorage.Packages["react-roblox"])
-local BorderedTextBox = require(ReplicatedStorage.Classes.UI.BorderedTextBox)
 local WardrobeInventoryPanel = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeInventoryPanel)
 local WardrobeOrbitBillboards = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeOrbitBillboards)
 local WardrobeSelection = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeSelection)
@@ -19,21 +18,24 @@ local WardrobeViewport = {}
 
 local VIEWPORTS_FOLDER_NAME = "Viewports"
 local WARDROBE_FOLDER_NAME = "Wardrobe"
+local FOREST_FOLDER_NAME = "Forest"
 local TAVERN_SET_NAME = "TavernSet"
 local VIEW_CAMERA_NAME = "ViewCamera"
 local PLAYER_POINT_NAME = "PlayerPoint"
+local PLAYER_SLOT_ONE_POINT_NAME = "PlayerPoint1"
 local PREVIEW_CHARACTER_NAME = "PreviewCharacter"
 local ORBIT_BILLBOARDS_FOLDER_NAME = "WardrobeOrbitBillboards"
 local WARDROBE_GUI_NAME = "WardrobeGui"
 local CAMERA_BIND_NAME = "WardrobeViewCamera"
+local PLAYER_LIGHT_NAME = "PlayerVisionLight"
 local FAR_AWAY_CFRAME = CFrame.new(0, 5000, 0)
 local NORMAL_UI_GUI_NAMES = {
 	"PlayerUI",
-	"PlayerStatsHud",
 }
 
 local mountedTavernSet: Model? = nil
 local previewCharacter: Model? = nil
+local secondaryPreviewCharacters: { Model } = {}
 local previewIdleTrack: AnimationTrack? = nil
 local orbitBillboardsRoot: any? = nil
 local orbitBillboardsContainer: Folder? = nil
@@ -50,6 +52,38 @@ local activeViewCameraCFrame: CFrame? = nil
 local activeViewCameraFocus: CFrame? = nil
 local activeViewCameraFieldOfView: number? = nil
 local hiddenGuiStates: { [string]: boolean } = {}
+local PLAYER_SLOT_MARKER_NAMES = {
+	"Person1",
+	"Person2",
+	"Person3",
+	"Person4",
+	"PlayerPoint1",
+	"PlayerPoint2",
+	"PlayerPoint3",
+	"PlayerPoint4",
+	"PlayerSlot1",
+	"PlayerSlot2",
+	"PlayerSlot3",
+	"PlayerSlot4",
+}
+local TEMP_FILL_OTHER_PLAYER_SLOTS_WITH_LOCAL_PREVIEW = true
+
+local function setPlayerVisionLightEnabled(isEnabled: boolean): ()
+	local character = Players.LocalPlayer.Character
+	if not character then
+		return
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local light = rootPart:FindFirstChild(PLAYER_LIGHT_NAME)
+	if light and light:IsA("PointLight") then
+		light.Enabled = isEnabled
+	end
+end
 
 local function getWardrobeFolder(): Instance?
 	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
@@ -65,6 +99,31 @@ local function getWardrobeFolder(): Instance?
 	end
 
 	return wardrobeFolder
+end
+
+local function getForestFolder(): Instance?
+	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
+	if not viewportFolder then
+		warn("WardrobeViewport: ReplicatedStorage.Viewports was not found.")
+		return nil
+	end
+
+	local forestFolder = viewportFolder:FindFirstChild(FOREST_FOLDER_NAME) or viewportFolder:WaitForChild(FOREST_FOLDER_NAME, 5)
+	if not forestFolder then
+		return nil
+	end
+
+	return forestFolder
+end
+
+local function getViewportsRoot(): Instance?
+	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
+	if not viewportFolder then
+		warn("WardrobeViewport: ReplicatedStorage.Viewports was not found.")
+		return nil
+	end
+
+	return viewportFolder
 end
 
 local function getOrCreateRuntimeWardrobeFolder(): Folder
@@ -86,6 +145,44 @@ local function getOrCreateRuntimeWardrobeFolder(): Folder
 end
 
 local function getTavernSetTemplate(): Model?
+	local forestFolder = getForestFolder()
+	if forestFolder then
+		local forestNamedTemplate = forestFolder:FindFirstChild(TAVERN_SET_NAME)
+		if forestNamedTemplate and forestNamedTemplate:IsA("Model") then
+			return forestNamedTemplate
+		end
+
+		local forestViewportTemplate = forestFolder:FindFirstChild("Viewport")
+		if forestViewportTemplate and forestViewportTemplate:IsA("Model") then
+			return forestViewportTemplate
+		end
+
+		for _, child in ipairs(forestFolder:GetChildren()) do
+			if child:IsA("Model") then
+				return child
+			end
+		end
+	end
+
+	local viewportsRoot = getViewportsRoot()
+	if viewportsRoot then
+		local rootNamedTemplate = viewportsRoot:FindFirstChild(TAVERN_SET_NAME)
+		if rootNamedTemplate and rootNamedTemplate:IsA("Model") then
+			return rootNamedTemplate
+		end
+
+		local rootViewportTemplate = viewportsRoot:FindFirstChild("Viewport")
+		if rootViewportTemplate and rootViewportTemplate:IsA("Model") then
+			return rootViewportTemplate
+		end
+
+		for _, child in ipairs(viewportsRoot:GetChildren()) do
+			if child:IsA("Model") then
+				return child
+			end
+		end
+	end
+
 	local wardrobeFolder = getWardrobeFolder()
 	if not wardrobeFolder then
 		return nil
@@ -126,13 +223,82 @@ local function ensureViewCamera(tavernSet: Model): Camera
 	return viewCamera
 end
 
+local function findPlayerPointByNames(tavernSet: Model, names: { string }): BasePart?
+	for _, name in ipairs(names) do
+		local playerPoint = tavernSet:FindFirstChild(name, true)
+		if playerPoint and playerPoint:IsA("BasePart") then
+			return playerPoint
+		end
+	end
+
+	return nil
+end
+
 local function findPlayerPoint(tavernSet: Model): BasePart?
-	local playerPoint = tavernSet:FindFirstChild(PLAYER_POINT_NAME, true)
+	local playerPoint = findPlayerPointByNames(tavernSet, {
+		PLAYER_SLOT_ONE_POINT_NAME,
+		"PlayerPoint01",
+		"PlayerPoint_1",
+		"PlayerSlot1",
+		"PlayerSlot01",
+		"PlayerPosition1",
+		"Pos1",
+		PLAYER_POINT_NAME,
+	})
 	if playerPoint and playerPoint:IsA("BasePart") then
 		return playerPoint
 	end
 
 	return nil
+end
+
+local function clearPlayerSlotMarkers(tavernSet: Model): ()
+	for _, markerName in ipairs(PLAYER_SLOT_MARKER_NAMES) do
+		local marker = tavernSet:FindFirstChild(markerName, true)
+		if marker and marker:IsA("BasePart") then
+			marker:Destroy()
+		end
+	end
+end
+
+local function findOtherPlayerPoints(tavernSet: Model): { CFrame }
+	local points = {} :: { CFrame }
+	for slot = 2, 4 do
+		local point = findPlayerPointByNames(tavernSet, {
+			"PlayerPoint" .. tostring(slot),
+			string.format("PlayerPoint0%d", slot),
+			"PlayerPoint_" .. tostring(slot),
+			"PlayerSlot" .. tostring(slot),
+			string.format("PlayerSlot0%d", slot),
+			"PlayerPosition" .. tostring(slot),
+			"Pos" .. tostring(slot),
+			"Person" .. tostring(slot),
+		})
+		if point then
+			table.insert(points, point.CFrame)
+		end
+	end
+	return points
+end
+
+local function clearSecondaryPreviewCharacters(): ()
+	for _, character in ipairs(secondaryPreviewCharacters) do
+		if character.Parent then
+			character:Destroy()
+		end
+	end
+	table.clear(secondaryPreviewCharacters)
+end
+
+local function spawnSecondaryPreviewCharacters(tavernSet: Model, sourcePreview: Model, points: { CFrame }): ()
+	clearSecondaryPreviewCharacters()
+	for index, pointCFrame in ipairs(points) do
+		local clone = sourcePreview:Clone()
+		clone.Name = string.format("PreviewCharacter%d", index + 1)
+		clone.Parent = tavernSet
+		clone:PivotTo(pointCFrame)
+		table.insert(secondaryPreviewCharacters, clone)
+	end
 end
 
 local function prepPreviewCharacter(character: Model): ()
@@ -269,14 +435,6 @@ local function renderWardrobeGui()
 	return React.createElement(React.Fragment, nil, {
 		Stats = React.createElement(WardrobeStatsPanel),
 		Inventory = React.createElement(WardrobeInventoryPanel),
-		BorderTextBoxTest = React.createElement(BorderedTextBox.Component, {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BorderThickness = 14,
-			PlaceholderText = "Border test",
-			Position = UDim2.new(0.5, 0, 1, -34),
-			Size = UDim2.fromOffset(220, 54),
-			ZIndex = 30,
-		}),
 	})
 end
 
@@ -304,9 +462,12 @@ end
 local function mountPreviewCharacter(tavernSet: Model): ()
 	local playerPoint = findPlayerPoint(tavernSet)
 	if not playerPoint then
-		warn("WardrobeViewport: PlayerPoint was not found on the wardrobe tavern set.")
+		warn("WardrobeViewport: PlayerPoint slot 1 was not found on the wardrobe viewport set.")
 		return
 	end
+	local playerPointCFrame = playerPoint.CFrame
+	local otherPlayerPointCFrames = findOtherPlayerPoints(tavernSet)
+	clearPlayerSlotMarkers(tavernSet)
 
 	local preview = previewCharacter
 	if not preview then
@@ -335,8 +496,11 @@ local function mountPreviewCharacter(tavernSet: Model): ()
 	end
 
 	preview.Parent = tavernSet
-	preview:PivotTo(playerPoint.CFrame)
+	preview:PivotTo(playerPointCFrame)
 	playSwordIdle(preview)
+	if TEMP_FILL_OTHER_PLAYER_SLOTS_WITH_LOCAL_PREVIEW then
+		spawnSecondaryPreviewCharacters(tavernSet, preview, otherPlayerPointCFrames)
+	end
 	mountOrbitBillboards(tavernSet, preview)
 end
 
@@ -348,6 +512,7 @@ local function createPreviewCharacter(character: Model): ()
 	end
 	if previewCharacter then
 		unmountOrbitBillboards()
+		clearSecondaryPreviewCharacters()
 		previewCharacter:Destroy()
 		previewCharacter = nil
 	end
@@ -387,6 +552,8 @@ local function destroyRuntimeTavernSet(tavernSet: Instance): ()
 	if orbitBillboardsContainer and orbitBillboardsContainer:IsDescendantOf(tavernSet) then
 		unmountOrbitBillboards()
 	end
+
+	clearSecondaryPreviewCharacters()
 
 	if previewCharacter and previewCharacter.Parent == tavernSet then
 		previewCharacter.Parent = nil
@@ -524,6 +691,7 @@ function WardrobeViewport.Show(): boolean
 
 	local didBindCamera = bindViewCamera(tavernSet)
 	if didBindCamera then
+		setPlayerVisionLightEnabled(false)
 		setNormalHudVisible(false)
 		mountWardrobeGui()
 	else
@@ -536,8 +704,10 @@ end
 function WardrobeViewport.Hide(): ()
 	isVisible = false
 	WardrobeSelection.SetSelectedItem(nil)
+	setPlayerVisionLightEnabled(true)
 	unmountWardrobeGui()
 	setNormalHudVisible(true)
+	clearSecondaryPreviewCharacters()
 	restoreCamera()
 end
 
@@ -554,6 +724,9 @@ end
 
 Players.LocalPlayer.CharacterAdded:Connect(function()
 	task.defer(createPreviewFromCurrentCharacter)
+	if isVisible then
+		task.defer(setPlayerVisionLightEnabled, false)
+	end
 end)
 Players.LocalPlayer.CharacterAppearanceLoaded:Connect(createPreviewCharacter)
 if Players.LocalPlayer.Character then

@@ -22,6 +22,7 @@ local BowHoldToken = 0
 local BOW_AIM_HOLD_DELAY = 0.2
 local PreloadedWeaponAnimationClasses: { [string]: boolean } = {}
 local IsWardrobeOpen = false
+local DebugMouseUnlocked = false
 
 local function CollectComboAnimationIds(weaponClass: string?): { string }
 	if not weaponClass then
@@ -120,6 +121,10 @@ local function SetCameraUpdateSuppressed(suppressed: boolean)
 	end
 end
 
+local function ApplyMouseLockState()
+	SetMouseLockSuppressed(IsWardrobeOpen or DebugMouseUnlocked)
+end
+
 local function RecreateMovementEngine()
 	engine = Movement.lnew()
 	if IsWardrobeOpen then
@@ -176,18 +181,18 @@ local function SetWardrobeOpen(isOpen: boolean)
 	if isOpen then
 		CancelBowCharge()
 		PlayerServiceClient.SetRightClickReleased()
-		SetMouseLockSuppressed(true)
+		ApplyMouseLockState()
 		SetCameraUpdateSuppressed(true)
 		engine:DisableAllMovement()
 		if not WardrobeViewport.Show() then
 			IsWardrobeOpen = false
 			SetCameraUpdateSuppressed(false)
-			SetMouseLockSuppressed(false)
+			ApplyMouseLockState()
 			engine:EnableAllMovement()
 		end
 	else
 		WardrobeViewport.Hide()
-		SetMouseLockSuppressed(false)
+		ApplyMouseLockState()
 		SetCameraUpdateSuppressed(false)
 		engine:EnableAllMovement()
 	end
@@ -195,6 +200,14 @@ end
 
 -- Attach to UserInputService
 UserInputService.InputBegan:Connect(function(input, processed)
+	-- DEBUG_MOUSE_UNLOCK_START (easy delete block)
+	if input.KeyCode == Enum.KeyCode.M and not UserInputService:GetFocusedTextBox() then
+		DebugMouseUnlocked = not DebugMouseUnlocked
+		ApplyMouseLockState()
+		return
+	end
+	-- DEBUG_MOUSE_UNLOCK_END
+
 	if input.KeyCode == Enum.KeyCode.B and not UserInputService:GetFocusedTextBox() then
 		SetWardrobeOpen(not IsWardrobeOpen)
 		return

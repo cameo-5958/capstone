@@ -14,6 +14,8 @@ local ToLoad = {
 	"Attack",
 	"Weapon",
 	"Player",
+	"Item",
+	"ItemTool",
 }
 
 -- Load all Services in ToLoad and initialize them

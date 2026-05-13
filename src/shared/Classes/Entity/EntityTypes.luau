@@ -27,6 +27,7 @@ export type Stat =
 	| "MagicalAttack"
 	| "PhysicalDamage"
 	| "MagicDamage"
+	| "DamageTakenMultiplier"
 	| "Speed"
 
 export type StatBlock = { [Stat]: number }

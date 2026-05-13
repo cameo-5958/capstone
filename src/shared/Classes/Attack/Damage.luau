@@ -140,6 +140,22 @@ local function ApplyDefense(to: Entity, damage: number, context: AttackContext?)
 	return damage * (100 / (defense + 100))
 end
 
+local function GetDamageTakenMultiplier(to: Entity, context: AttackContext?): number
+	if context then
+		local multiplier = context.FinalStats.To["DamageTakenMultiplier"]
+		if type(multiplier) == "number" then
+			return multiplier
+		end
+	end
+
+	local fallback = to:GetStat("DamageTakenMultiplier")
+	if type(fallback) == "number" then
+		return fallback
+	end
+
+	return 1
+end
+
 local function FireDamageIndicator(to: Entity, damage: number, didCrit: boolean?)
 	EnemyHandler:FireAllClients("DamageIndicator", {
 		UUID = to.UUID,
@@ -162,6 +178,7 @@ local function ApplyResolvedDamage(from: Entity, to: Entity, damage: number, con
 	end
 
 	to:TakeDamage(finalDamage, from)
+	GetEnemyServiceServer().RegisterDamagedBy(to, from)
 	FireDamageIndicator(to, finalDamage, context and context.DidCrit)
 
 	if context and context.DoesKnockback and to:IsAlive() then
@@ -222,7 +239,9 @@ function Damage.DirectDamageToEntity(from: Entity, to: Entity, damage: number, c
 		return 0
 	end
 
-	return ApplyResolvedDamage(from, to, ApplyDefense(to, damage, context), context)
+	local reducedByDefense = ApplyDefense(to, damage, context)
+	local withTakenMultiplier = reducedByDefense * GetDamageTakenMultiplier(to, context)
+	return ApplyResolvedDamage(from, to, withTakenMultiplier, context)
 end
 
 function Damage.TrueDamage(from: Entity, to: Entity, damage: number, context: AttackContext?): number

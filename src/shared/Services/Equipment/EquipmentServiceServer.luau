@@ -85,6 +85,27 @@ local function ClearManagedTools(entity: Entity)
 	end
 end
 
+local function EquipManagedToolForSlot(entity: Entity, toolbarSlot: number): ()
+	local humanoid = entity.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	local backpack = GetBackpack(entity)
+	if not backpack then
+		return
+	end
+
+	for _, child in ipairs(backpack:GetChildren()) do
+		if child:IsA("Tool")
+			and child:GetAttribute("ManagedByEquipmentService")
+			and child:GetAttribute("ToolbarSlot") == toolbarSlot then
+			humanoid:EquipTool(child)
+			return
+		end
+	end
+end
+
 local function ClearManagedToolForSlot(entity: Entity, toolbarSlot: number)
 	local existingWeapon = entity:GetToolbarWeapon(toolbarSlot)
 	if existingWeapon and existingWeapon.ToolInstance then
@@ -253,6 +274,11 @@ function EquipmentServiceServer.RestoreToolbarTools(entity: Entity): ()
 			weapon:SetToolInstance(nil)
 			GiveToolClone(entity, weapon, slot)
 		end
+	end
+
+	local equippedSlot = entity:GetEquippedIndex()
+	if type(equippedSlot) == "number" and entity:GetToolbarWeapon(equippedSlot) ~= nil then
+		EquipManagedToolForSlot(entity, equippedSlot)
 	end
 end
 

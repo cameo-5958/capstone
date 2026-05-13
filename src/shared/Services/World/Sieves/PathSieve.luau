@@ -29,7 +29,6 @@ return function(ctx, columns, config, seed)
 	local getRuntimeNodeAssemblyPool = ctx.getRuntimeNodeAssemblyPool
 	local getRuntimeNodePool = ctx.getRuntimeNodePool
 	local getRuntimeStructureScale = ctx.getRuntimeStructureScale
-	local getBiomeMaterials = ctx.getBiomeMaterials
 	local isHabitationStructureName = ctx.isHabitationStructureName
 	local isEnvironmentStructureName = ctx.isEnvironmentStructureName
 	local PrefabRegistry = ctx.PrefabRegistry
@@ -49,30 +48,6 @@ return function(ctx, columns, config, seed)
 	local sideMinDistanceSq = radius * radius * 0.45
 	local startColumn = centerColumn
 	local startAngle = endpointRng:NextNumber(0, math.pi * 2)
-	local startRadius = radius
-		* endpointRng:NextNumber(TerrainTuning.PathEndpointRadiusMin, TerrainTuning.PathEndpointRadiusMax)
-	local startTargetX = math.cos(startAngle) * startRadius
-	local startTargetZ = math.sin(startAngle) * startRadius
-	local sideStart =
-		getNearestSolidColumnToTarget(columns, startTargetX, startTargetZ, sideMinDistanceSq, centerColumn)
-	if sideStart then
-		startColumn = sideStart
-	else
-		local farthestSide: TileColumn? = nil
-		local farthestDistanceSq = -1
-		for _, column in pairs(columns) do
-			if column.Solid and not column.HasWater then
-				local distanceSq = column.X * column.X + column.Z * column.Z
-				if distanceSq > farthestDistanceSq then
-					farthestDistanceSq = distanceSq
-					farthestSide = column
-				end
-			end
-		end
-		if farthestSide then
-			startColumn = farthestSide
-		end
-	end
 	local startRadiusScale = randomNodeRadiusScale(endpointRng)
 	local usedNodes = {
 		{
@@ -386,179 +361,6 @@ return function(ctx, columns, config, seed)
 		return (nearestX * nearestX + nearestZ * nearestZ) <= (radius * radius + 1e-6)
 	end
 
-	local supportSearchRadius = math.max(2, TerrainTuning.SupportSearchRadius)
-	local function resolveSupportReference(x: number, z: number): TileColumn?
-		local existing = columns[makeColumnKey(x, z)]
-		if existing and existing.Solid then
-			return existing
-		end
-
-		return getSolidColumnNear(columns, x, z, supportSearchRadius)
-	end
-
-	local function ensureSupportedColumn(
-		x: number,
-		z: number,
-		targetHeight: number,
-		preferredBiome: string?,
-		minThickness: number
-	): TileColumn?
-		local key = makeColumnKey(x, z)
-		local column = columns[key]
-		if not column then
-			return nil
-		end
-		local wasSolid = column.Solid
-
-		local reference = resolveSupportReference(x, z)
-		local biome = preferredBiome
-		if biome == nil then
-			biome = if reference then reference.Biome else config.Biome
-		end
-		local materials = getBiomeMaterials(biome)
-
-		if not wasSolid then
-			column.Solid = true
-			column.Biome = biome
-			column.SurfaceMaterial = materials.Surface
-			column.FillMaterial = materials.Deep
-			column.PathMaterial = nil
-		end
-
-		if column.Biome == "" then
-			column.Biome = biome
-		end
-
-		column.HasWater = false
-		column.IsPath = false
-		column.PathMaterial = nil
-		column.StructureTag = nil
-
-		local surfaceY = snapHeight(targetHeight)
-		if reference then
-			local referenceSurface = reference.SurfaceY
-			local maxRiseFromReference = math.max(0, TerrainTuning.SupportMaxRiseFromReference)
-			if surfaceY > referenceSurface + maxRiseFromReference then
-				surfaceY = referenceSurface + maxRiseFromReference
-			end
-		end
-		if wasSolid then
-			-- Never carve existing terrain downward in support passes.
-			surfaceY = column.SurfaceY
-		end
-		column.SurfaceY = surfaceY
-
-		local supportThickness = math.max(minThickness, TerrainTuning.ThicknessMin)
-		local desiredBottom = surfaceY - supportThickness
-		if reference then
-			desiredBottom = math.min(desiredBottom, reference.BottomY + 2)
-		end
-		column.BottomY = math.min(column.BottomY, desiredBottom)
-
-		return column
-	end
-
-	local function paintSupportDisk(
-		centerX: number,
-		centerZ: number,
-		targetHeight: number,
-		radiusTiles: number,
-		preferredBiome: string?,
-		minThickness: number
-	)
-		local tileRange = math.max(1, math.ceil(radiusTiles + 0.85))
-		local edgeDrop = TerrainTuning.SupportBridgeEdgeDrop
-		for dx = -tileRange, tileRange do
-			for dz = -tileRange, tileRange do
-				local tileX = centerX + dx
-				local tileZ = centerZ + dz
-				if circleTouchesTile(tileX, tileZ, centerX, centerZ, radiusTiles) then
-					local localDistance = math.sqrt(dx * dx + dz * dz)
-					local edgeAlpha = smoothstep(0, radiusTiles + 0.25, localDistance)
-					local sampledHeight = targetHeight - edgeAlpha * edgeDrop
-					ensureSupportedColumn(tileX, tileZ, sampledHeight, preferredBiome, minThickness)
-				end
-			end
-		end
-	end
-
-	local function createSupportBridgeBetween(a: PathPoint, b: PathPoint)
-		local x0 = a.X
-		local z0 = a.Z
-		local x1 = b.X
-		local z1 = b.Z
-		local dx = math.abs(x1 - x0)
-		local sx = if x0 < x1 then 1 else -1
-		local dzAbs = math.abs(z1 - z0)
-		local dz = -dzAbs
-		local sz = if z0 < z1 then 1 else -1
-		local err = dx + dz
-		local stepCount = math.max(1, math.max(dx, dzAbs))
-		local stepIndex = 0
-		local bridgeHalfWidth = math.max(pathHalfWidth + 0.25, TerrainTuning.SupportBridgeHalfWidth)
-		local bridgeThickness = math.max(TerrainTuning.SupportBridgeThickness, TerrainTuning.SupportIslandThickness)
-		local startColumn = resolveSupportReference(a.X, a.Z)
-		local endColumn = resolveSupportReference(b.X, b.Z)
-		local preferredBiome = if startColumn
-			then startColumn.Biome
-			else if endColumn then endColumn.Biome else config.Biome
-		if not isMountainBiome(preferredBiome) then
-			return
-		end
-
-		while true do
-			local t = stepIndex / stepCount
-			local sampleHeight = a.Height + (b.Height - a.Height) * t
-			paintSupportDisk(x0, z0, sampleHeight, bridgeHalfWidth, preferredBiome, bridgeThickness)
-
-			if x0 == x1 and z0 == z1 then
-				break
-			end
-
-			local e2 = 2 * err
-			if e2 >= dz then
-				err += dz
-				x0 += sx
-			end
-			if e2 <= dx then
-				err += dx
-				z0 += sz
-			end
-			stepIndex += 1
-		end
-	end
-
-	for _, route in ipairs(allRoutes) do
-		for _, node in ipairs(route) do
-			local nodeBaseRadius = math.max(pathHalfWidth, pathHalfWidth * node.RadiusScale)
-			local supportRadius =
-				math.max(TerrainTuning.SupportIslandMinRadius, nodeBaseRadius + TerrainTuning.SupportIslandExtraRadius)
-			local referenceColumn = resolveSupportReference(node.X, node.Z)
-			local preferredBiome = if referenceColumn then referenceColumn.Biome else config.Biome
-			if not isMountainBiome(preferredBiome) then
-				continue
-			end
-			local targetHeight = node.Height
-			if referenceColumn then
-				targetHeight = math.min(targetHeight, referenceColumn.SurfaceY)
-			end
-			paintSupportDisk(
-				node.X,
-				node.Z,
-				targetHeight,
-				supportRadius,
-				preferredBiome,
-				TerrainTuning.SupportIslandThickness
-			)
-		end
-	end
-
-	for _, route in ipairs(allRoutes) do
-		for pointIndex = 1, #route - 1 do
-			createSupportBridgeBetween(route[pointIndex], route[pointIndex + 1])
-		end
-	end
-
 	for _, route in ipairs(allRoutes) do
 		for pointIndex = 1, #route - 1 do
 			rasterizeStraightSegment(route[pointIndex], route[pointIndex + 1])
@@ -661,76 +463,154 @@ return function(ctx, columns, config, seed)
 		end
 	end
 
-	local flattenNoiseOffsetX = (seed % 1297) * 0.09
-	local flattenNoiseOffsetZ = (seed % 1499) * 0.08
-	local pathTargetHeights = {} :: { [string]: number }
-	local originalPathSurfaceByKey = {} :: { [string]: number }
-	local nodeCoreInfluenceByKey = {} :: { [string]: number }
-	local nodeFlattenInfluenceByKey = {} :: { [string]: { SumHeight: number, SumWeight: number } }
-	local nodeFlattenProtectedKeys = {} :: { [string]: boolean }
-	local nonMountainPreserveAlpha = math.clamp(TerrainTuning.PathNonMountainPreserveAlpha, 0, 1)
-	local nonMountainMaxCutDepth = math.max(0, TerrainTuning.PathNonMountainMaxCutDepth)
-	local nodeFlattenMaxCutDepth = math.max(nonMountainMaxCutDepth, TerrainTuning.PathNodeFlattenMaxCutDepth)
-	local nodeFlattenStrength = math.clamp(TerrainTuning.PathNodeFlattenStrength, 0, 1)
 	local nodeFlattenRadiusMultiplier = math.max(1, TerrainTuning.PathNodeFlattenRadiusMultiplier)
-	local nodeFlattenCore = math.clamp(TerrainTuning.PathNodeFlattenCore, 0, 0.92)
 	local nodeFlattenMinimumRadiusTiles = math.max(1, TerrainTuning.PathNodeFlattenMinimumRadiusTiles)
-	local nodeFlattenHardRadiusRatio = math.clamp(TerrainTuning.PathNodeFlattenHardRadiusRatio, 0.05, 0.98)
-	if nodeFlattenHardRadiusRatio <= nodeFlattenCore then
-		nodeFlattenHardRadiusRatio = math.min(0.98, nodeFlattenCore + 0.05)
+	local pathTargetHeights = {} :: { [string]: number }
+	local pathCoreKeys = {} :: { [string]: boolean }
+	local pathSmoothingKeys = {} :: { [string]: boolean }
+	local nodeLockedTargets = {} :: { [string]: number }
+
+	local function smootherstep(edge0: number, edge1: number, value: number): number
+		if edge0 == edge1 then
+			return if value < edge0 then 0 else 1
+		end
+		local t = math.clamp((value - edge0) / (edge1 - edge0), 0, 1)
+		return t * t * t * (t * (t * 6 - 15) + 10)
 	end
-	local nodeFlattenEdgeFloorInfluence = math.clamp(TerrainTuning.PathNodeFlattenEdgeFloorInfluence, 0, 0.95)
+
+	local function getPercentile(values: { number }, percentile: number): number?
+		if #values <= 0 then
+			return nil
+		end
+		table.sort(values)
+		local index = math.clamp(math.floor((#values - 1) * percentile + 1.5), 1, #values)
+		return values[index]
+	end
+
+	local function getColumnFloor(column: TileColumn): number
+		return column.BottomY + 2
+	end
+
+	local function markSmoothingArea(x: number, z: number)
+		for dx = -1, 1 do
+			for dz = -1, 1 do
+				local key = makeColumnKey(x + dx, z + dz)
+				local column = columns[key]
+				if column and column.Solid then
+					pathSmoothingKeys[key] = true
+				end
+			end
+		end
+	end
+
+	local function setPathTarget(key: string, column: TileColumn, targetY: number, weight: number, isCorePath: boolean)
+		if weight <= 0 then
+			return
+		end
+		local minY = getColumnFloor(column)
+		local blendedY = column.SurfaceY * (1 - weight) + targetY * weight
+		local nextY = snapHeight(math.clamp(blendedY, minY, column.SurfaceY))
+		local existingY = pathTargetHeights[key]
+		if existingY == nil or nextY < existingY then
+			pathTargetHeights[key] = nextY
+		end
+		if isCorePath then
+			pathCoreKeys[key] = true
+			markSmoothingArea(column.X, column.Z)
+		end
+	end
+
+	local function lockNodeTarget(key: string, column: TileColumn, targetY: number)
+		local lockedY = snapHeight(math.clamp(targetY, getColumnFloor(column), column.SurfaceY))
+		local existingLockedY = nodeLockedTargets[key]
+		if existingLockedY == nil or lockedY < existingLockedY then
+			nodeLockedTargets[key] = lockedY
+		end
+		pathTargetHeights[key] = nodeLockedTargets[key]
+		pathCoreKeys[key] = true
+		markSmoothingArea(column.X, column.Z)
+	end
+
+	local function setPathMaterial(column: TileColumn)
+		column.HasWater = false
+		column.IsPath = true
+		column.StructureTag = nil
+		if isMountainBiome(column.Biome) then
+			column.PathMaterial = Enum.Material.Rock
+		elseif isPlainsBiome(column.Biome) then
+			column.PathMaterial = Enum.Material.Sand
+		elseif isForestBiome(column.Biome) then
+			column.PathMaterial = Enum.Material.Ground
+		end
+		if column.PathMaterial then
+			column.SurfaceMaterial = column.PathMaterial
+		end
+	end
+
+	local function collectCircleHeights(centerX: number, centerZ: number, radiusTiles: number): { number }
+		local heights = {} :: { number }
+		local tileRange = math.max(1, math.ceil(radiusTiles + 0.75))
+		for dx = -tileRange, tileRange do
+			for dz = -tileRange, tileRange do
+				local tileX = centerX + dx
+				local tileZ = centerZ + dz
+				if circleTouchesTile(tileX, tileZ, centerX, centerZ, radiusTiles) then
+					local column = columns[makeColumnKey(tileX, tileZ)]
+					if column and column.Solid then
+						table.insert(heights, column.SurfaceY)
+					end
+				end
+			end
+		end
+		return heights
+	end
+
+	for _, route in ipairs(allRoutes) do
+		for nodeIndex, node in ipairs(route) do
+			local isDirectionChangeNode = (#route > 2)
+				and (nodeIndex > 1)
+				and (nodeIndex < #route)
+				and (node.IsStructureNode ~= true)
+			if isDirectionChangeNode then
+				node.RadiusScale = 1
+			end
+
+			local pathRadiusTiles = getPathNodeBaseRadiusTiles(node.RadiusScale)
+			local carveRadiusTiles = pathRadiusTiles
+			if not isDirectionChangeNode then
+				carveRadiusTiles = math.max(
+					pathRadiusTiles,
+					math.max(pathRadiusTiles * nodeFlattenRadiusMultiplier, nodeFlattenMinimumRadiusTiles)
+				)
+			end
+			node.PathRadiusTiles = pathRadiusTiles
+			node.FlattenRadiusTiles = carveRadiusTiles
+
+			local heights = collectCircleHeights(node.X, node.Z, carveRadiusTiles)
+			node.CarveHeight = snapHeight(getPercentile(heights, 0.2) or node.Height)
+		end
+	end
 
 	for _, route in ipairs(allRoutes) do
 		for _, node in ipairs(route) do
-			local pathRadiusTiles = getPathNodeBaseRadiusTiles(node.RadiusScale)
-			local flattenRadiusTiles = math.max(
-				pathRadiusTiles,
-				math.max(pathRadiusTiles * nodeFlattenRadiusMultiplier, nodeFlattenMinimumRadiusTiles)
-			)
-			node.PathRadiusTiles = pathRadiusTiles
-			node.FlattenRadiusTiles = flattenRadiusTiles
-		end
-	end
-
-	if nodeFlattenStrength > 0 then
-		for _, route in ipairs(allRoutes) do
-			for _, node in ipairs(route) do
-				local flattenRadiusTiles = if node.FlattenRadiusTiles then node.FlattenRadiusTiles else pathHalfWidth
-				local tileRange = math.max(1, math.ceil(flattenRadiusTiles + 0.75))
-				for dx = -tileRange, tileRange do
-					for dz = -tileRange, tileRange do
-						local tileX = node.X + dx
-						local tileZ = node.Z + dz
-						if circleTouchesTile(tileX, tileZ, node.X, node.Z, flattenRadiusTiles) then
-							local candidate = columns[makeColumnKey(tileX, tileZ)]
-							if candidate and candidate.Solid then
-								local localDistance = math.sqrt(dx * dx + dz * dz)
-								local normalizedDistance = if flattenRadiusTiles > 0
-									then localDistance / flattenRadiusTiles
-									else 0
-								local radialInfluence = 1
-									- smoothstep(nodeFlattenHardRadiusRatio, 1, normalizedDistance)
-								local influenceAlpha = nodeFlattenEdgeFloorInfluence
-									+ radialInfluence * (1 - nodeFlattenEdgeFloorInfluence)
-								local coreInfluence = 1 - smoothstep(nodeFlattenCore, 1, normalizedDistance)
-								if influenceAlpha > 0 then
-									local candidateKey = makeColumnKey(candidate.X, candidate.Z)
-									local existingCoreInfluence = nodeCoreInfluenceByKey[candidateKey]
-									if existingCoreInfluence == nil or coreInfluence > existingCoreInfluence then
-										nodeCoreInfluenceByKey[candidateKey] = coreInfluence
-									end
-									if coreInfluence >= 0.65 then
-										nodeFlattenProtectedKeys[candidateKey] = true
-									end
-									local influence = nodeFlattenInfluenceByKey[candidateKey]
-									if not influence then
-										influence = { SumHeight = 0, SumWeight = 0 }
-										nodeFlattenInfluenceByKey[candidateKey] = influence
-									end
-									influence.SumHeight += node.Height * influenceAlpha
-									influence.SumWeight += influenceAlpha
-								end
+			local carveHeight = node.CarveHeight or node.Height
+			local flatRadius = math.max(pathHalfWidth, node.FlattenRadiusTiles or pathHalfWidth)
+			local outerRadius = flatRadius + math.max(1, pathHalfWidth * 1.25)
+			local tileRange = math.max(1, math.ceil(outerRadius + 0.75))
+			for dx = -tileRange, tileRange do
+				for dz = -tileRange, tileRange do
+					local tileX = node.X + dx
+					local tileZ = node.Z + dz
+					if circleTouchesTile(tileX, tileZ, node.X, node.Z, outerRadius) then
+						local column = columns[makeColumnKey(tileX, tileZ)]
+						if column and column.Solid then
+							local distance = math.sqrt(dx * dx + dz * dz)
+							local key = makeColumnKey(column.X, column.Z)
+							if distance <= flatRadius then
+								lockNodeTarget(key, column, carveHeight)
+							else
+								local weight = 1 - smootherstep(flatRadius, outerRadius, distance)
+								setPathTarget(key, column, carveHeight, weight, false)
 							end
 						end
 					end
@@ -739,531 +619,106 @@ return function(ctx, columns, config, seed)
 		end
 	end
 
-	local function getPathMinimumHeight(key: string, column: TileColumn): number
-		local minPathY = column.BottomY + 2
-		local originalSurfaceY = originalPathSurfaceByKey[key]
-		if originalSurfaceY ~= nil then
-			local maxCutDepth = nonMountainMaxCutDepth
-			local coreInfluence = nodeCoreInfluenceByKey[key]
-			if coreInfluence and coreInfluence > 0 then
-				maxCutDepth = nonMountainMaxCutDepth + (nodeFlattenMaxCutDepth - nonMountainMaxCutDepth) * coreInfluence
-			end
-			local cutFloorY = snapHeight(originalSurfaceY - maxCutDepth)
-			if cutFloorY > minPathY then
-				minPathY = cutFloorY
-			end
-		end
-		return minPathY
-	end
+	for _, route in ipairs(allRoutes) do
+		for pointIndex = 1, #route - 1 do
+			local a = route[pointIndex]
+			local b = route[pointIndex + 1]
+			local ax = a.X
+			local az = a.Z
+			local bx = b.X
+			local bz = b.Z
+			local dx = bx - ax
+			local dz = bz - az
+			local lengthSq = math.max(1e-6, dx * dx + dz * dz)
+			local innerRadius = math.max(1, pathHalfWidth * 0.72)
+			local outerRadius = math.max(innerRadius + 0.5, pathHalfWidth + 1.35)
+			local minX = math.floor(math.min(ax, bx) - outerRadius - 1)
+			local maxX = math.ceil(math.max(ax, bx) + outerRadius + 1)
+			local minZ = math.floor(math.min(az, bz) - outerRadius - 1)
+			local maxZ = math.ceil(math.max(az, bz) + outerRadius + 1)
 
-	for key, baseHeight in pairs(pathCells) do
-		local column = columns[key]
-		if column and column.Solid then
-			local originalSurfaceY = column.SurfaceY
-			originalPathSurfaceByKey[key] = originalSurfaceY
-			local flattenNoise = math.noise(
-				(column.X + flattenNoiseOffsetX) * 0.08,
-				(column.Z + flattenNoiseOffsetZ) * 0.08,
-				seed * 0.0027
-			) * TerrainTuning.PathFlattenNoiseAmplitude
-			local pathTargetY = snapHeight(baseHeight + flattenNoise)
-			if pathTargetY > originalSurfaceY then
-				pathTargetY = originalSurfaceY
-			end
-			local minPathY = getPathMinimumHeight(key, column)
-			if pathTargetY < minPathY then
-				pathTargetY = minPathY
-			end
-
-			local edgeBlend = math.clamp(TerrainTuning.PathEdgeBlend, 0, 1) * 0.55
-			local edgeSampleRadius = math.max(1, TerrainTuning.PathEdgeSampleRadius)
-			if edgeBlend > 0 then
-				local edgeSum = 0
-				local edgeCount = 0
-				for dx = -edgeSampleRadius, edgeSampleRadius do
-					for dz = -edgeSampleRadius, edgeSampleRadius do
-						if dx == 0 and dz == 0 then
-							continue
-						end
-						local neighborKey = makeColumnKey(column.X + dx, column.Z + dz)
-						if pathCells[neighborKey] == nil then
-							local neighbor = columns[neighborKey]
-							if neighbor and neighbor.Solid then
-								edgeSum += neighbor.SurfaceY
-								edgeCount += 1
-							end
+			for x = minX, maxX do
+				for z = minZ, maxZ do
+					local column = columns[makeColumnKey(x, z)]
+					if column and column.Solid then
+						local t = math.clamp(((x - ax) * dx + (z - az) * dz) / lengthSq, 0, 1)
+						local closestX = ax + dx * t
+						local closestZ = az + dz * t
+						local localDX = x - closestX
+						local localDZ = z - closestZ
+						local distance = math.sqrt(localDX * localDX + localDZ * localDZ)
+						if distance <= outerRadius then
+							local aHeight = a.CarveHeight or a.Height
+							local bHeight = b.CarveHeight or b.Height
+							local targetY = aHeight + (bHeight - aHeight) * t
+							local weight = if distance <= innerRadius
+								then 1
+								else 1 - smootherstep(innerRadius, outerRadius, distance)
+							local key = makeColumnKey(column.X, column.Z)
+							setPathTarget(key, column, targetY, weight, distance <= pathHalfWidth)
 						end
 					end
 				end
-				if edgeCount > 0 then
-					local edgeAverage = edgeSum / edgeCount
-					pathTargetY = snapHeight(pathTargetY * (1 - edgeBlend) + edgeAverage * edgeBlend)
-					if pathTargetY > originalSurfaceY then
-						pathTargetY = originalSurfaceY
-					end
-					if pathTargetY < minPathY then
-						pathTargetY = minPathY
-					end
-				end
-			end
-
-			-- Keep paths near local terrain while still leveling path micro-variation.
-			pathTargetY =
-				snapHeight(pathTargetY * (1 - nonMountainPreserveAlpha) + originalSurfaceY * nonMountainPreserveAlpha)
-			if pathTargetY < minPathY then
-				pathTargetY = minPathY
-			end
-			pathTargetHeights[key] = pathTargetY
-		end
-	end
-
-	if nodeFlattenStrength > 0 then
-		for key, influence in pairs(nodeFlattenInfluenceByKey) do
-			local column = columns[key]
-			if column and column.Solid and influence.SumWeight > 0 then
-				if originalPathSurfaceByKey[key] == nil then
-					originalPathSurfaceByKey[key] = column.SurfaceY
-				end
-				local desiredHeight = influence.SumHeight / influence.SumWeight
-				local currentTargetY = pathTargetHeights[key]
-				if currentTargetY == nil then
-					currentTargetY = column.SurfaceY
-				end
-				local flattenedY =
-					snapHeight(currentTargetY * (1 - nodeFlattenStrength) + desiredHeight * nodeFlattenStrength)
-				if flattenedY > column.SurfaceY then
-					flattenedY = column.SurfaceY
-				end
-				local minPathY = getPathMinimumHeight(key, column)
-				if flattenedY < minPathY then
-					flattenedY = minPathY
-				end
-				pathTargetHeights[key] = flattenedY
-				pathCells[key] = flattenedY
 			end
 		end
 	end
 
-	local mountainSmoothingPasses = math.max(0, TerrainTuning.MountainPathSmoothingPasses)
-	for _ = 1, mountainSmoothingPasses do
-		local nextHeights = {} :: { [string]: number }
-		for key, currentTargetY in pairs(pathTargetHeights) do
-			local column = columns[key]
-			if column and column.Solid and isMountainBiome(column.Biome) then
-				local sum = currentTargetY * 2
-				local weight = 2
-				local north = pathTargetHeights[makeColumnKey(column.X, column.Z - 1)]
-				if north then
-					sum += north
-					weight += 1
-				end
-				local south = pathTargetHeights[makeColumnKey(column.X, column.Z + 1)]
-				if south then
-					sum += south
-					weight += 1
-				end
-				local west = pathTargetHeights[makeColumnKey(column.X - 1, column.Z)]
-				if west then
-					sum += west
-					weight += 1
-				end
-				local east = pathTargetHeights[makeColumnKey(column.X + 1, column.Z)]
-				if east then
-					sum += east
-					weight += 1
-				end
-				local smoothed = snapHeight(sum / weight)
-				if smoothed > column.SurfaceY then
-					smoothed = column.SurfaceY
-				end
-				local minPathY = getPathMinimumHeight(key, column)
-				if smoothed < minPathY then
-					smoothed = minPathY
-				end
-				nextHeights[key] = smoothed
-			else
-				nextHeights[key] = currentTargetY
-			end
-		end
-		pathTargetHeights = nextHeights
-	end
-
-	local continuityPasses = math.max(1, TerrainTuning.PathContinuityPasses)
-	local continuityAlpha = math.clamp(TerrainTuning.PathContinuityBlendAlpha, 0, 1)
-	local maxNeighborStep = math.max(TerrainTuning.HeightSnapStep, TerrainTuning.PathMaxNeighborStep)
-	for _ = 1, continuityPasses do
-		local nextHeights = {} :: { [string]: number }
-		for key, currentTargetY in pairs(pathTargetHeights) do
+	local smoothingPasses = 2
+	local smoothingBlend = 0.45
+	for _ = 1, smoothingPasses do
+		local nextTargets = {} :: { [string]: number }
+		for key in pairs(pathSmoothingKeys) do
 			local column = columns[key]
 			if not column or not column.Solid then
 				continue
 			end
 
-			local hasNeighbor = false
-			local sum = currentTargetY
-			local weight = 1
-			local minAllowed = -math.huge
-			local maxAllowed = math.huge
-
-			local neighborNorth = pathTargetHeights[makeColumnKey(column.X, column.Z - 1)]
-			if neighborNorth then
-				hasNeighbor = true
-				sum += neighborNorth
-				weight += 1
-				minAllowed = math.max(minAllowed, neighborNorth - maxNeighborStep)
-				maxAllowed = math.min(maxAllowed, neighborNorth + maxNeighborStep)
-			end
-
-			local neighborSouth = pathTargetHeights[makeColumnKey(column.X, column.Z + 1)]
-			if neighborSouth then
-				hasNeighbor = true
-				sum += neighborSouth
-				weight += 1
-				minAllowed = math.max(minAllowed, neighborSouth - maxNeighborStep)
-				maxAllowed = math.min(maxAllowed, neighborSouth + maxNeighborStep)
-			end
-
-			local neighborWest = pathTargetHeights[makeColumnKey(column.X - 1, column.Z)]
-			if neighborWest then
-				hasNeighbor = true
-				sum += neighborWest
-				weight += 1
-				minAllowed = math.max(minAllowed, neighborWest - maxNeighborStep)
-				maxAllowed = math.min(maxAllowed, neighborWest + maxNeighborStep)
-			end
-
-			local neighborEast = pathTargetHeights[makeColumnKey(column.X + 1, column.Z)]
-			if neighborEast then
-				hasNeighbor = true
-				sum += neighborEast
-				weight += 1
-				minAllowed = math.max(minAllowed, neighborEast - maxNeighborStep)
-				maxAllowed = math.min(maxAllowed, neighborEast + maxNeighborStep)
-			end
-
-			local nextY = currentTargetY
-			if hasNeighbor then
-				local average = sum / weight
-				nextY = snapHeight(currentTargetY * (1 - continuityAlpha) + average * continuityAlpha)
-				if minAllowed <= maxAllowed then
-					nextY = math.clamp(nextY, minAllowed, maxAllowed)
-				end
-			end
-			if nextY > column.SurfaceY then
-				nextY = column.SurfaceY
-			end
-			local minPathY = getPathMinimumHeight(key, column)
-			if nextY < minPathY then
-				nextY = minPathY
-			end
-			nextHeights[key] = nextY
-		end
-
-		pathTargetHeights = nextHeights
-	end
-
-	if nodeFlattenStrength > 0 then
-		for key, influence in pairs(nodeFlattenInfluenceByKey) do
-			local column = columns[key]
-			local currentTargetY = pathTargetHeights[key]
-			if column and column.Solid and currentTargetY and influence.SumWeight > 0 then
-				local desiredHeight = influence.SumHeight / influence.SumWeight
-				local flattenedY =
-					snapHeight(currentTargetY * (1 - nodeFlattenStrength) + desiredHeight * nodeFlattenStrength)
-				if flattenedY > column.SurfaceY then
-					flattenedY = column.SurfaceY
-				end
-				local minPathY = getPathMinimumHeight(key, column)
-				if flattenedY < minPathY then
-					flattenedY = minPathY
-				end
-				pathTargetHeights[key] = flattenedY
-			end
-		end
-
-		local nodeSmoothingPasses = math.max(0, TerrainTuning.PathNodeFlattenSmoothingPasses)
-		for _ = 1, nodeSmoothingPasses do
-			local nextHeights = {} :: { [string]: number }
-			for key, currentTargetY in pairs(pathTargetHeights) do
-				if nodeFlattenInfluenceByKey[key] == nil then
-					nextHeights[key] = currentTargetY
-					continue
-				end
-
-				local column = columns[key]
-				if not column or not column.Solid then
-					nextHeights[key] = currentTargetY
-					continue
-				end
-
-				local sum = currentTargetY * 2
-				local weight = 2
-				local north = pathTargetHeights[makeColumnKey(column.X, column.Z - 1)]
-				if north then
-					sum += north
-					weight += 1
-				end
-				local south = pathTargetHeights[makeColumnKey(column.X, column.Z + 1)]
-				if south then
-					sum += south
-					weight += 1
-				end
-				local west = pathTargetHeights[makeColumnKey(column.X - 1, column.Z)]
-				if west then
-					sum += west
-					weight += 1
-				end
-				local east = pathTargetHeights[makeColumnKey(column.X + 1, column.Z)]
-				if east then
-					sum += east
-					weight += 1
-				end
-
-				local smoothed = snapHeight(sum / weight)
-				local smoothingBlend = math.min(0.75, nodeFlattenStrength * 0.55)
-				local nextY = snapHeight(currentTargetY * (1 - smoothingBlend) + smoothed * smoothingBlend)
-				if nextY > column.SurfaceY then
-					nextY = column.SurfaceY
-				end
-				local minPathY = getPathMinimumHeight(key, column)
-				if nextY < minPathY then
-					nextY = minPathY
-				end
-				nextHeights[key] = nextY
-			end
-			pathTargetHeights = nextHeights
-		end
-	end
-
-	local nonMountainSmoothingPasses = math.max(0, math.floor(TerrainTuning.PathNonMountainSmoothingPasses + 0.5))
-	local nonMountainSmoothingBlend = math.clamp(TerrainTuning.PathNonMountainSmoothingBlend, 0, 1)
-	for _ = 1, nonMountainSmoothingPasses do
-		local nextHeights = {} :: { [string]: number }
-		for key, currentTargetY in pairs(pathTargetHeights) do
-			local column = columns[key]
-			if not column or not column.Solid then
-				nextHeights[key] = currentTargetY
-				continue
-			end
-			if nodeFlattenProtectedKeys[key] then
-				nextHeights[key] = currentTargetY
-				continue
-			end
-
-			local north = pathTargetHeights[makeColumnKey(column.X, column.Z - 1)]
-			local south = pathTargetHeights[makeColumnKey(column.X, column.Z + 1)]
-			local west = pathTargetHeights[makeColumnKey(column.X - 1, column.Z)]
-			local east = pathTargetHeights[makeColumnKey(column.X + 1, column.Z)]
-
-			local sum = currentTargetY * 2
+			local currentTarget = pathTargetHeights[key] or column.SurfaceY
+			local sum = currentTarget * 2
 			local weight = 2
-			local minAllowed = -math.huge
-			local maxAllowed = math.huge
-			local hasNeighbor = false
-			local function includeNeighbor(neighborY: number?)
-				if neighborY ~= nil then
-					hasNeighbor = true
-					sum += neighborY
+			for _, offset in ipairs({
+				{ 1, 0 },
+				{ -1, 0 },
+				{ 0, 1 },
+				{ 0, -1 },
+			}) do
+				local neighborKey = makeColumnKey(column.X + offset[1], column.Z + offset[2])
+				local neighbor = columns[neighborKey]
+				if neighbor and neighbor.Solid then
+					sum += pathTargetHeights[neighborKey] or neighbor.SurfaceY
 					weight += 1
-					minAllowed = math.max(minAllowed, neighborY - 1)
-					maxAllowed = math.min(maxAllowed, neighborY + 1)
-				end
-			end
-			includeNeighbor(north)
-			includeNeighbor(south)
-			includeNeighbor(west)
-			includeNeighbor(east)
-
-			local nextY = currentTargetY
-			if hasNeighbor then
-				local averagedY = sum / weight
-				nextY =
-					snapHeight(currentTargetY * (1 - nonMountainSmoothingBlend) + averagedY * nonMountainSmoothingBlend)
-				if minAllowed <= maxAllowed then
-					nextY = math.clamp(nextY, minAllowed, maxAllowed)
 				end
 			end
 
-			if nextY > column.SurfaceY then
-				nextY = column.SurfaceY
+			local averagedY = sum / weight
+			local nextY = snapHeight(currentTarget * (1 - smoothingBlend) + averagedY * smoothingBlend)
+			if nextY < column.SurfaceY then
+				nextTargets[key] = math.max(nextY, getColumnFloor(column))
 			end
-			local minPathY = getPathMinimumHeight(key, column)
-			if nextY < minPathY then
-				nextY = minPathY
-			end
-			nextHeights[key] = nextY
 		end
-		pathTargetHeights = nextHeights
+		for key, targetY in pairs(nextTargets) do
+			pathTargetHeights[key] = targetY
+		end
+		for key, targetY in pairs(nodeLockedTargets) do
+			pathTargetHeights[key] = targetY
+		end
 	end
 
-	local aggressiveFlattenPasses = math.max(0, math.floor(TerrainTuning.PathAggressiveFlattenPasses + 0.5))
-	local aggressiveFlattenBlend = math.clamp(TerrainTuning.PathAggressiveFlattenBlend, 0, 1)
-	local maxPathRange = math.max(0, TerrainTuning.PathMaxHeightRange)
-	if aggressiveFlattenPasses > 0 and maxPathRange > 0 and next(pathTargetHeights) ~= nil then
-		local componentReferenceByKey = {} :: { [string]: number }
-		local visited = {} :: { [string]: boolean }
-		local neighborOffsets = {
-			{ DX = 1, DZ = 0 },
-			{ DX = -1, DZ = 0 },
-			{ DX = 0, DZ = 1 },
-			{ DX = 0, DZ = -1 },
-		}
-
-		local function assignComponentReference(startKey: string)
-			local queue = { startKey }
-			local headIndex = 1
-			visited[startKey] = true
-			local componentKeys = {} :: { string }
-			local heights = {} :: { number }
-
-			while headIndex <= #queue do
-				local key = queue[headIndex]
-				headIndex += 1
-				table.insert(componentKeys, key)
-				local currentHeight = pathTargetHeights[key]
-				if currentHeight ~= nil then
-					table.insert(heights, currentHeight)
-				end
-
-				local split = string.split(key, ":")
-				local x = tonumber(split[1])
-				local z = tonumber(split[2])
-				if x and z then
-					for _, offset in ipairs(neighborOffsets) do
-						local neighborKey = makeColumnKey(x + offset.DX, z + offset.DZ)
-						if pathTargetHeights[neighborKey] ~= nil and visited[neighborKey] ~= true then
-							visited[neighborKey] = true
-							table.insert(queue, neighborKey)
-						end
-					end
-				end
-			end
-
-			if #heights <= 0 then
-				return
-			end
-
-			table.sort(heights)
-			local medianIndex = math.clamp(math.floor((#heights + 1) * 0.5 + 0.5), 1, #heights)
-			local referenceHeight = heights[medianIndex]
-			for _, componentKey in ipairs(componentKeys) do
-				componentReferenceByKey[componentKey] = referenceHeight
-			end
-		end
-
-		for key in pairs(pathTargetHeights) do
-			if visited[key] ~= true then
-				assignComponentReference(key)
-			end
-		end
-
-		local maxDeviation = maxPathRange * 0.5
-		for _ = 1, aggressiveFlattenPasses do
-			local nextHeights = {} :: { [string]: number }
-			for key, currentTargetY in pairs(pathTargetHeights) do
-				local column = columns[key]
-				if not column or not column.Solid then
-					continue
-				end
-
-				local split = string.split(key, ":")
-				local x = tonumber(split[1])
-				local z = tonumber(split[2])
-				local sum = currentTargetY * 2
-				local weight = 2
-				if x and z then
-					local north = pathTargetHeights[makeColumnKey(x, z - 1)]
-					if north ~= nil then
-						sum += north
-						weight += 1
-					end
-					local south = pathTargetHeights[makeColumnKey(x, z + 1)]
-					if south ~= nil then
-						sum += south
-						weight += 1
-					end
-					local west = pathTargetHeights[makeColumnKey(x - 1, z)]
-					if west ~= nil then
-						sum += west
-						weight += 1
-					end
-					local east = pathTargetHeights[makeColumnKey(x + 1, z)]
-					if east ~= nil then
-						sum += east
-						weight += 1
-					end
-				end
-
-				local localAverage = sum / weight
-				local blendedY = currentTargetY * (1 - aggressiveFlattenBlend) + localAverage * aggressiveFlattenBlend
-				local referenceHeight = componentReferenceByKey[key] or blendedY
-				local boundedY = math.clamp(blendedY, referenceHeight - maxDeviation, referenceHeight + maxDeviation)
-				local nextY = snapHeight(boundedY)
-				if nextY > column.SurfaceY then
-					nextY = column.SurfaceY
-				end
-				local minPathY = getPathMinimumHeight(key, column)
-				if nextY < minPathY then
-					nextY = minPathY
-				end
-				nextHeights[key] = nextY
-			end
-			pathTargetHeights = nextHeights
-		end
+	for key, targetY in pairs(nodeLockedTargets) do
+		pathTargetHeights[key] = targetY
 	end
 
 	for key, pathTargetY in pairs(pathTargetHeights) do
 		local column = columns[key]
-		if column and column.Solid then
-			column.SurfaceY = pathTargetY
-			column.HasWater = false
-			column.IsPath = true
-			column.StructureTag = nil
-			if isMountainBiome(column.Biome) then
-				column.PathMaterial = Enum.Material.Rock
-			elseif isPlainsBiome(column.Biome) then
-				column.PathMaterial = Enum.Material.Sand
-			elseif isForestBiome(column.Biome) then
-				column.PathMaterial = Enum.Material.Ground
-			end
-			if column.PathMaterial then
-				column.SurfaceMaterial = column.PathMaterial
-			end
+		if column and column.Solid and pathTargetY < column.SurfaceY then
+			column.SurfaceY = math.max(pathTargetY, getColumnFloor(column))
 		end
 	end
 
-	local shoulderWidth = math.max(pathHalfWidth + 0.5, TerrainTuning.PathShoulderWidth)
-	local shoulderRadius = math.max(1, math.floor(shoulderWidth + 0.5))
-	for key, baseHeight in pairs(pathCells) do
-		local split = string.split(key, ":")
-		local bx = tonumber(split[1])
-		local bz = tonumber(split[2])
-		if bx and bz then
-			local pathColumn = columns[key]
-			local pathSurfaceY = if pathColumn and pathColumn.Solid then pathColumn.SurfaceY else baseHeight
-			for dx = -shoulderRadius, shoulderRadius do
-				for dz = -shoulderRadius, shoulderRadius do
-					local localDist = math.sqrt(dx * dx + dz * dz)
-					if localDist > pathHalfWidth and localDist <= shoulderWidth then
-						local neighbor = columns[makeColumnKey(bx + dx, bz + dz)]
-						if neighbor and neighbor.Solid then
-							if isMountainBiome(neighbor.Biome) and not neighbor.IsPath then
-								local shoulderAlpha = 1 - smoothstep(pathHalfWidth, shoulderWidth, localDist)
-								local cliffRise = shoulderAlpha * TerrainTuning.PathMountainCliffRise
-								local minCliffHeight = math.floor(pathSurfaceY + 2 + cliffRise)
-								if neighbor.SurfaceY < minCliffHeight then
-									local heightDelta = minCliffHeight - neighbor.SurfaceY
-									neighbor.SurfaceY = neighbor.SurfaceY
-										+ math.max(1, math.floor(heightDelta * 0.55 + 0.5))
-								end
-							end
-							if isForestBiome(neighbor.Biome) and localDist <= TerrainTuning.PathForestClearingWidth then
-								neighbor.StructureTag = nil
-							end
-						end
-					end
-				end
-			end
+	for key in pairs(pathCoreKeys) do
+		local column = columns[key]
+		if column and column.Solid then
+			setPathMaterial(column)
 		end
 	end
 

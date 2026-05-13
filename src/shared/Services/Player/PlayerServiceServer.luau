@@ -59,6 +59,7 @@ local STAT_NAMES = {
 	"MagicalAttack",
 	"PhysicalDamage",
 	"MagicDamage",
+	"DamageTakenMultiplier",
 	"Speed",
 }
 
@@ -79,7 +80,7 @@ local BASE_STAMINA_REGEN = 30
 local ATTACKING_STAMINA_REGEN = 4
 local RUNNING_STAMINA_DRAIN = 10
 local STAMINA_RAMP_DURATION = 0.4
-local RUN_SPEED_MULTIPLIER = 2.5
+local RUN_SPEED_MULTIPLIER = 1.8
 local RUNNING_SPEED_MODIFIER_ID = "system:running:speed"
 local PlayerNextDashIframeAt: { [string]: number } = {}
 local function HideHumanoidOverhead(character: Model)

@@ -94,19 +94,50 @@ local function LoadTrack(animator: Animator, animId: string): AnimationTrack
 end
 
 local function GetAnimator(character: Model): Animator?
-	local humanoid = character:FindFirstChild("Humanoid")
-	if not humanoid or not humanoid:IsA("Humanoid") then
-		return nil
+	local animationController = character:FindFirstChild("AnimationController")
+	if animationController and animationController:IsA("AnimationController") then
+		local existingControllerAnimator = animationController:FindFirstChild("Animator")
+		if existingControllerAnimator and existingControllerAnimator:IsA("Animator") then
+			return existingControllerAnimator
+		end
 	end
 
-	local animator = humanoid:FindFirstChild("Animator")
-	if animator and animator:IsA("Animator") then
+	local humanoid = character:FindFirstChild("Humanoid")
+	if humanoid and humanoid:IsA("Humanoid") then
+		local existingHumanoidAnimator = humanoid:FindFirstChild("Animator")
+		if existingHumanoidAnimator and existingHumanoidAnimator:IsA("Animator") then
+			return existingHumanoidAnimator
+		end
+	end
+
+	local existingAnimator = character:FindFirstChildWhichIsA("Animator", true)
+	if existingAnimator and existingAnimator:IsA("Animator") then
+		return existingAnimator
+	end
+
+	if humanoid and humanoid:IsA("Humanoid") then
+		local animator = humanoid:FindFirstChild("Animator")
+		if animator and animator:IsA("Animator") then
+			return animator
+		end
+
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
 		return animator
 	end
 
-	animator = Instance.new("Animator")
-	animator.Parent = humanoid
-	return animator
+	if animationController and animationController:IsA("AnimationController") then
+		local animator = animationController:FindFirstChild("Animator")
+		if animator and animator:IsA("Animator") then
+			return animator
+		end
+
+		animator = Instance.new("Animator")
+		animator.Parent = animationController
+		return animator
+	end
+
+	return nil
 end
 
 local function EnsureAnimationTrack(character: Model, animId: string): AnimationTrack?
@@ -158,9 +189,7 @@ local function Stop(character: Model, animId: AnimationId)
 		return
 	end
 
-	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid
-	local animator = humanoid:FindFirstChild("Animator") :: Animator
-
+	local animator = GetAnimator(character)
 	if not animator then
 		error("Attempted to stop animation of character without animator")
 	end
@@ -274,13 +303,8 @@ function AnimationServiceClient.IsLocalAnimationPlaying(animId: string): boolean
 		return false
 	end
 
-	local humanoid = character:FindFirstChild("Humanoid")
-	if not humanoid or not humanoid:IsA("Humanoid") then
-		return false
-	end
-
-	local animator = humanoid:FindFirstChild("Animator")
-	if not animator or not animator:IsA("Animator") then
+	local animator = GetAnimator(character)
+	if not animator then
 		return false
 	end
 

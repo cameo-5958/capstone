@@ -95,9 +95,9 @@ local MODE_CONFIGS: {
 		Name = "Default",
 		Fov = 66,
 		Offset = Vector3.new(2.2, 2.6, 8.5),
-		ZoomMin = 5.2,
-		ZoomMax = 5.2,
-		ZoomDefault = 5.2,
+		ZoomMin = 10.4,
+		ZoomMax = 10.4,
+		ZoomDefault = 10.4,
 		LookAtHeight = 0.65,
 		MouseSensitivity = 0.0035,
 		Smoothing = 7,
@@ -202,22 +202,59 @@ local function LerpAngle(current: number, target: number, alpha: number): number
 	return current + delta * alpha
 end
 
+local CAMERA_COLLISION_PADDING = 0.5
+local MIN_COLLISION_DISTANCE = 2.25
+local MIN_OCCLUDER_SIZE_MAGNITUDE = 2.4
+local MAX_COLLISION_RAYCAST_ITERATIONS = 6
+
+local function IsSignificantOccluder(instance: Instance): boolean
+	if not instance:IsA("BasePart") then
+		return false
+	end
+
+	-- Ignore tiny or non-collidable clutter so pickups/trinkets do not force hard zoom-ins.
+	if not instance.CanCollide then
+		return false
+	end
+
+	if instance.Transparency >= 0.98 then
+		return false
+	end
+
+	return instance.Size.Magnitude >= MIN_OCCLUDER_SIZE_MAGNITUDE
+end
+
 local function ResolveCameraCollision(origin: Vector3, desiredPosition: Vector3, character: Model?): Vector3
 	local direction = desiredPosition - origin
-	if direction.Magnitude <= 0.001 then
+	local desiredDistance = direction.Magnitude
+	if desiredDistance <= 0.001 then
 		return desiredPosition
 	end
 
+	local ignoredInstances: { Instance } = if character then { character } else {}
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = if character then { character } else {}
+	raycastParams.FilterDescendantsInstances = ignoredInstances
 
-	local result = workspace:Raycast(origin, direction, raycastParams)
-	if not result then
-		return desiredPosition
+	for _ = 1, MAX_COLLISION_RAYCAST_ITERATIONS do
+		local result = workspace:Raycast(origin, direction, raycastParams)
+		if not result then
+			return desiredPosition
+		end
+
+		if not IsSignificantOccluder(result.Instance) then
+			table.insert(ignoredInstances, result.Instance)
+			raycastParams.FilterDescendantsInstances = ignoredInstances
+			continue
+		end
+
+		local hitDistance = (result.Position - origin).Magnitude
+		local resolvedDistance = math.max(MIN_COLLISION_DISTANCE, hitDistance - CAMERA_COLLISION_PADDING)
+		resolvedDistance = math.min(resolvedDistance, desiredDistance)
+		return origin + direction.Unit * resolvedDistance
 	end
 
-	return result.Position + result.Normal * 0.5
+	return desiredPosition
 end
 
 function CameraController.ApplyMouseLock(self: CameraController)

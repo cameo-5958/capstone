@@ -99,6 +99,11 @@ local function cloneSerializable(value: any): any
 		return value
 	end
 
+	local robloxType = typeof(value)
+	if robloxType == "Vector3" or robloxType == "Vector2" or robloxType == "Color3" or robloxType == "CFrame" then
+		return value
+	end
+
 	return nil
 end
 

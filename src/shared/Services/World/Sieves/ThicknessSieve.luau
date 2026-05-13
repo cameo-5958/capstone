@@ -47,7 +47,7 @@ return function(ctx, columns, config, seed)
 		local distance01 = math.clamp(math.sqrt(column.X * column.X + column.Z * column.Z) / config.RadiusTiles, 0, 1)
 		local centerMass = (1 - distance01)
 		local thicknessNoise =
-			math.noise((column.X + thicknessNoiseX) * 0.15, (column.Z + thicknessNoiseZ) * 0.15, seed * 0.0013)
+			math.noise((column.X + thicknessNoiseX) * 0.045, (column.Z + thicknessNoiseZ) * 0.045, seed * 0.0013)
 		local anchorDepth = 0
 		for _, anchor in ipairs(anchors) do
 			local dx = column.X - anchor.X

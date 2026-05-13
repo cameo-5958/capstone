@@ -12,9 +12,9 @@ local STUD_UNIT = 1
 local MIN_PART_SIZE = 1
 local TREE_PREFAB_SCALE = 2.6
 local FOLIAGE_PREFAB_SCALE = 1.15
-local STRUCTURE_PREFAB_SCALE = 1.3
-local HABITATION_STRUCTURE_SCALE = 1.58
-local ENVIRONMENT_STRUCTURE_SCALE = 1.42
+local STRUCTURE_PREFAB_SCALE = 0.525
+local HABITATION_STRUCTURE_SCALE = 0.61
+local ENVIRONMENT_STRUCTURE_SCALE = 0.58
 local HASH_MODULUS = 2147483647
 local TREE_YAW_DEGREE_RANGE = 12
 local TREE_LEAN_DEGREE_RANGE = 3
@@ -532,7 +532,13 @@ function PrefabUtils.addPart(
 	color: Color3,
 	transparency: number?,
 	shape: PrefabPartShape?
-): Part
+): Part?
+	local treeModel = isTreeModel(model)
+	local partNameLower = string.lower(name)
+	if treeModel and isTreeRootPart(partNameLower) then
+		return nil
+	end
+
 	local part = Instance.new("Part")
 	part.Name = name
 	part.Anchored = true
@@ -554,8 +560,7 @@ function PrefabUtils.addPart(
 	end
 
 	local resolvedColor = color
-	if isTreeModel(model) then
-		local partNameLower = string.lower(name)
+	if treeModel then
 		local partRng = getPerPartRandom(model, name)
 		local treeHeight = readModelNumberAttribute(model, "TreeVariationHeight", 1)
 		local trunkWidth = readModelNumberAttribute(model, "TreeVariationTrunkWidth", 1)

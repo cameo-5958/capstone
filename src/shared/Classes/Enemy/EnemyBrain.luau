@@ -45,6 +45,8 @@ function Brain.new(movementEngine: MovementEngine, neurons: { Neuron }): Brain
 	self.Aggro = false
 	self.RetreatTarget = nil
 	self.RetreatUntil = 0
+	self.EscapeTarget = nil
+	self.EscapeUntil = 0
 	self.PendingStrafes = 0
 	self.PendingStumble = false
 	self.StumbleSourcePosition = nil
@@ -80,6 +82,8 @@ function Brain.Destroy(self: Brain)
 	self.Target = nil
 	self.RetreatTarget = nil
 	self.RetreatUntil = 0
+	self.EscapeTarget = nil
+	self.EscapeUntil = 0
 	self.PendingStrafes = 0
 	self.PendingStumble = false
 	self.StumbleSourcePosition = nil
@@ -90,6 +94,11 @@ end
 function Brain.QueueStumble(self: Brain, sourcePosition: Vector3?)
 	self.PendingStumble = true
 	self.StumbleSourcePosition = sourcePosition
+end
+
+function Brain.QueueEscapeFromPlayer(self: Brain, playerCharacter: Model, duration: number)
+	self.EscapeTarget = playerCharacter
+	self.EscapeUntil = math.max(self.EscapeUntil, workspace:GetServerTimeNow() + math.max(0, duration))
 end
 
 -- Brain thread
@@ -108,6 +117,14 @@ function Brain.Tick(self: Brain, dt: number)
 		if not retreatEntity or not retreatEntity:IsAlive() then
 			self.RetreatTarget = nil
 			self.RetreatUntil = 0
+		end
+	end
+
+	if self.EscapeTarget then
+		local escapeEntity = PlayerServiceServer.GetEntityFromCharacter(self.EscapeTarget)
+		if not escapeEntity or not escapeEntity:IsAlive() or workspace:GetServerTimeNow() > self.EscapeUntil then
+			self.EscapeTarget = nil
+			self.EscapeUntil = 0
 		end
 	end
 

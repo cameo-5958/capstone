@@ -10,9 +10,9 @@ local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServ
 local ORBIT_RADIUS = 4
 local ORBIT_HEIGHT = 0.85
 local ORBIT_SPEED = 0.2
-local BILLBOARD_SIZE_STUDS = 3.9
+local BILLBOARD_SIZE_PIXELS = 170
 local SLOT_OFFSET = Vector3.new(-0.65, -0.45, 0)
-local SLOT_NUMBER_BASE_TEXT_SIZE = 10
+local SLOT_NUMBER_BASE_TEXT_SIZE = 9
 local NAME_BASE_TEXT_SIZE = 12
 local WORLD_PREVIEW_SIZE_STUDS = 2.8
 local WORLD_PREVIEW_CAMERA_BACKSET_STUDS = 0.08
@@ -24,6 +24,12 @@ local FOREST_TEXT = Color3.fromRGB(239, 222, 190)
 local FOREST_MUTED_TEXT = Color3.fromRGB(196, 162, 118)
 local FOREST_ACCENT = Color3.fromRGB(223, 173, 91)
 local FOREST_SHADOW = Color3.fromRGB(14, 8, 4)
+local ORBIT_SLOT_LABELS = {
+	"Weapon",
+	"Armor",
+	"Item",
+	"Item",
+}
 
 local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
 
@@ -345,10 +351,11 @@ local function weaponSlot(
 )
 	local hasWeapon = slot ~= nil and type(slot.WeaponId) == "string" and slot.WeaponId ~= ""
 	local labelText = if slot and type(slot.Name) == "string" then slot.Name else "Empty"
+	local slotLabel = ORBIT_SLOT_LABELS[index] or tostring(index)
 	local slotNumberTextSize = SLOT_NUMBER_BASE_TEXT_SIZE
 	local nameTextSize = NAME_BASE_TEXT_SIZE
 	local barHeight = 22
-	local slotNumberWidth = 22
+	local slotNumberWidth = 56
 
 	return React.createElement("Frame", {
 		BackgroundTransparency = 1,
@@ -381,7 +388,7 @@ local function weaponSlot(
 				Font = Enum.Font.GothamBlack,
 				LayoutOrder = 1,
 				Size = UDim2.new(0, slotNumberWidth, 1, 0),
-				Text = tostring(index),
+				Text = slotLabel,
 				TextColor3 = FOREST_ACCENT,
 				TextSize = slotNumberTextSize,
 				TextStrokeColor3 = FOREST_SHADOW,
@@ -466,7 +473,7 @@ local function WardrobeOrbitBillboards(props: { Target: Model })
 				AlwaysOnTop = false,
 				LightInfluence = 0,
 				MaxDistance = 200,
-				Size = UDim2.fromScale(BILLBOARD_SIZE_STUDS, BILLBOARD_SIZE_STUDS),
+				Size = UDim2.fromOffset(BILLBOARD_SIZE_PIXELS, BILLBOARD_SIZE_PIXELS),
 				StudsOffsetWorldSpace = SLOT_OFFSET,
 			}, {
 				Slot = weaponSlot(slot, index),

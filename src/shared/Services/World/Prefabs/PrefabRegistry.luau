@@ -50,20 +50,12 @@ local RuntimeNaturePools: { [string]: { string } } = {
 		"PineHighlands::FallenPineLog",
 	},
 	Forest = {
-		"Forest::CanopyOakMassive",
-		"Forest::BirchSaplingCluster",
-		"Forest::FernCarpet",
-		"Forest::MushroomRing",
-		"Forest::RootBoulder",
-		"Forest::HollowLog",
-	},
-	DenseForest = {
-		"DenseForest::AncientTrunkGiant",
-		"DenseForest::VineWrappedTrunk",
-		"DenseForest::ThornBushCluster",
-		"DenseForest::MossSpireRock",
-		"DenseForest::RottingLogPile",
-		"DenseForest::GlowingMushroomPatch",
+		"Forest::AncientTrunkGiant",
+		"Forest::VineWrappedTrunk",
+		"Forest::ThornBushCluster",
+		"Forest::MossSpireRock",
+		"Forest::RottingLogPile",
+		"Forest::GlowingMushroomPatch",
 	},
 	Alpine = {
 		"Alpine::SnowPineTall",
@@ -298,3 +290,4 @@ function PrefabRegistry.GetRuntimeNaturePool(biome: string): { string }
 end
 
 return table.freeze(PrefabRegistry)
+

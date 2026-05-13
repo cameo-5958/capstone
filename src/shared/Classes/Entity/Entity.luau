@@ -42,6 +42,7 @@ local DEFAULT_STATS: EntityTypes.StatBlock = {
 	MagicalAttack = 10,
 	PhysicalDamage = 1,
 	MagicDamage = 1,
+	DamageTakenMultiplier = 1,
 	Speed = 6,
 }
 
@@ -57,6 +58,9 @@ local FINALIZE_MAP = {
 	PhysicalDamage = RoundHealthOrDamageStat,
 	MagicDamage = RoundHealthOrDamageStat,
 	CritRate = function(_: string, value: number): number
+		return math.max(0, value)
+	end,
+	DamageTakenMultiplier = function(_: string, value: number): number
 		return math.max(0, value)
 	end,
 } :: { [string]: (string, number) -> number }

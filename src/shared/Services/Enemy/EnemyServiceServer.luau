@@ -21,6 +21,7 @@ local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.Coll
 local DefaultAnimations = require(ReplicatedStorage.Database.Enemies.Default.Animations)
 local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
 local LevelScaling = require(ReplicatedStorage.Modules.Progression.LevelScaling)
+local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -58,6 +59,7 @@ local Enemies = {}
 local ENEMY_LEVEL_STEP = 5
 local DEFAULT_ENEMY_START_LEVEL = 5
 local NextSpawnLevel = DEFAULT_ENEMY_START_LEVEL
+local ESCAPE_MEMORY_DURATION = 30
 
 local function GetNextSpawnLevel(): number
 	local level = LevelScaling.ClampLevel(NextSpawnLevel)
@@ -131,6 +133,13 @@ local function WipeEntity(uuid: string, asDeath: boolean?)
 	end
 	__EnemyRuntime[uuid] = nil
 	__Enemies[uuid] = nil
+
+	-- Ensure server-side enemy model is fully removed from workspace.
+	local character = entity.Character
+	if character and character.Parent then
+		character:Destroy()
+	end
+
 	RemoveEnemyForClients(uuid)
 end
 
@@ -195,7 +204,7 @@ end)
 
 API.OnServerEvent:Connect(function(_: Player, action: string, payload: { [string]: any }?)
 	if action == "RequestSpawnEnemy" then
-		local enemyPath = payload and payload.EnemyPath or "Golem.Basalt"
+		local enemyPath = payload and payload.EnemyPath or "Skeletal.Base"
 		local levelOverride = payload and payload.Level
 		local spawnPart = workspace:FindFirstChild("SpawnPoint")
 		if spawnPart and spawnPart:IsA("Part") then
@@ -256,6 +265,135 @@ local function buildEnemyModel(enemyFolder: Instance, enemyPath: string): Model
 	error(string.format("Enemy '%s' is missing a Model or ModelBuilder", enemyPath))
 end
 
+local function findBestRootPart(model: Model): BasePart?
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+		return model.PrimaryPart
+	end
+
+	local namedRoot = model:FindFirstChild("HumanoidRootPart")
+	if namedRoot and namedRoot:IsA("BasePart") then
+		return namedRoot
+	end
+
+	local firstBasePart = model:FindFirstChildWhichIsA("BasePart", true)
+	if firstBasePart then
+		return firstBasePart
+	end
+
+	return nil
+end
+
+local function ensureEnemyRigRequirements(model: Model)
+	local rootPart = findBestRootPart(model)
+	if not rootPart then
+		error(string.format("Enemy model '%s' has no BasePart to serve as root", model.Name))
+	end
+
+	local humanoidRootPart = model:FindFirstChild("HumanoidRootPart")
+	if humanoidRootPart and not humanoidRootPart:IsA("BasePart") then
+		humanoidRootPart:Destroy()
+		humanoidRootPart = nil
+	end
+
+	if not humanoidRootPart then
+		local createdRoot = Instance.new("Part")
+		createdRoot.Name = "HumanoidRootPart"
+		createdRoot.Size = Vector3.new(2, 2, 1)
+		createdRoot.Transparency = 1
+		createdRoot.CanCollide = false
+		createdRoot.CanTouch = false
+		createdRoot.CanQuery = false
+		createdRoot.Anchored = false
+		createdRoot.Massless = true
+		createdRoot.CFrame = rootPart.CFrame
+		createdRoot.Parent = model
+
+		local rootWeld = Instance.new("WeldConstraint")
+		rootWeld.Name = "RootWeld"
+		rootWeld.Part0 = createdRoot
+		rootWeld.Part1 = rootPart
+		rootWeld.Parent = createdRoot
+
+		humanoidRootPart = createdRoot
+	end
+
+	local rootAttachment = humanoidRootPart:FindFirstChild("RootAttachment")
+	if not rootAttachment then
+		rootAttachment = Instance.new("Attachment")
+		rootAttachment.Name = "RootAttachment"
+		rootAttachment.Parent = humanoidRootPart
+	end
+
+	local humanoid = model:FindFirstChild("Humanoid")
+	if humanoid and not humanoid:IsA("Humanoid") then
+		humanoid:Destroy()
+		humanoid = nil
+	end
+	if not humanoid then
+		humanoid = Instance.new("Humanoid")
+		humanoid.Name = "Humanoid"
+		humanoid.Parent = model
+	end
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local part = descendant :: BasePart
+			local isRoot = part == humanoidRootPart
+			part.Anchored = false
+			-- Keep one stable grounding collider; non-root parts should not fight each other.
+			part.CanCollide = isRoot
+			part.CanTouch = isRoot
+		end
+	end
+
+	model.PrimaryPart = humanoidRootPart
+end
+
+local function tunePassivePreyCollider(model: Model)
+	local humanoidRootPart = model:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart or not humanoidRootPart:IsA("BasePart") then
+		return
+	end
+
+	local minX = math.huge
+	local minZ = math.huge
+	local maxX = -math.huge
+	local maxZ = -math.huge
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local part = descendant :: BasePart
+			if part ~= humanoidRootPart then
+				local halfX = part.Size.X * 0.5
+				local halfZ = part.Size.Z * 0.5
+				minX = math.min(minX, part.Position.X - halfX)
+				maxX = math.max(maxX, part.Position.X + halfX)
+				minZ = math.min(minZ, part.Position.Z - halfZ)
+				maxZ = math.max(maxZ, part.Position.Z + halfZ)
+			end
+		end
+	end
+
+	if minX == math.huge or minZ == math.huge then
+		return
+	end
+
+	local width = math.max(2, maxX - minX)
+	local depth = math.max(2, maxZ - minZ)
+	local targetX = math.clamp(width * 0.62, 2.4, 7)
+	local targetZ = math.clamp(depth * 0.62, 2.4, 7)
+	local rootY = math.max(2.2, humanoidRootPart.Size.Y)
+
+	local existingHull = model:FindFirstChild("CollisionHull")
+	if existingHull then
+		existingHull:Destroy()
+	end
+
+	humanoidRootPart.Size = Vector3.new(targetX, rootY, targetZ)
+	humanoidRootPart.CanCollide = true
+	humanoidRootPart.CanTouch = true
+	humanoidRootPart.CanQuery = true
+end
+
 function Enemies.Spawn(
 	e: string,
 	spawnTarget: Part | BasePart | CFrame | Vector3,
@@ -263,6 +401,7 @@ function Enemies.Spawn(
 	spawnOptions: { [string]: any }?
 ): Entity?
 	local spawnLevel = ResolveSpawnLevel(levelOverride)
+	local spawnCFrame = resolveSpawnCFrame(spawnTarget)
 
 	-- Grab enemy's data from the database
 	-- Split Enemy into multiple parts
@@ -271,6 +410,7 @@ function Enemies.Spawn(
 	-- Require the data to create the entity
 	local data = require(Enemy.Data) :: { ["Name"]: string, string: any }
 	local model = buildEnemyModel(Enemy, e)
+	ensureEnemyRigRequirements(model)
 	model:SetAttribute("EnemyLevel", spawnLevel)
 	local mergedAnimations = table.clone(DefaultAnimations)
 	for key, value in pairs(data.__Animations or {}) do
@@ -282,10 +422,12 @@ function Enemies.Spawn(
 
 	-- Create the entity here
 	local entity = Entity.new(model, data.Name)
-	model:PivotTo(resolveSpawnCFrame(spawnTarget))
+	model:PivotTo(spawnCFrame)
 	model.Name = entity.UUID
+	local spawnContext: { [string]: any }? = nil
 	if spawnOptions and type(spawnOptions.SpawnContext) == "table" then
 		local context = spawnOptions.SpawnContext
+		spawnContext = context
 		if type(context.SpawnPointId) == "string" then
 			model:SetAttribute("WorldSpawnPointId", context.SpawnPointId)
 		end
@@ -335,6 +477,31 @@ function Enemies.Spawn(
 	entity.__ScaledLevel = spawnLevel
 	LevelScaling.ApplyScaling(entity)
 
+	-- World spawns can grant additional HP based on distance from center.
+	if spawnContext and type(spawnContext.HealthBonus) == "number" then
+		local hpBonus = math.clamp(math.floor(spawnContext.HealthBonus), 0, 5)
+		if hpBonus > 0 then
+			local maxHealth = entity:GetStat("MaxHealth")
+			local currentHealth = entity:GetStat("Health")
+			if type(maxHealth) == "number" then
+				local boostedMax = maxHealth + hpBonus
+				entity:SetStat("MaxHealth", boostedMax)
+				if type(currentHealth) == "number" then
+					entity:SetStat("Health", math.min(boostedMax, currentHealth + hpBonus))
+				end
+			end
+		end
+	end
+
+	local brainProfile = data.__BrainProfile
+	if brainProfile == "PassivePrey" then
+		if not (data.__Stats and type(data.__Stats.Speed) == "number") then
+			entity:SetStat("Speed", 4)
+		end
+		tunePassivePreyCollider(model)
+		model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.pi, 0))
+	end
+
 	local toolbarWeapons = data.__Components and data.__Components.ToolbarWeapons
 	if toolbarWeapons then
 		for slot, weaponPath in ipairs(toolbarWeapons) do
@@ -349,14 +516,38 @@ function Enemies.Spawn(
 		entity:SetEquippedIndex(equippedIndex)
 	end
 
-	print(entity)
+	local spawnPosition = spawnCFrame.Position
+	if spawnContext and type(spawnContext.SpawnPointId) == "string" and spawnContext.SpawnPointId ~= "" then
+		print(string.format(
+			"[EnemyService] Spawn enemy=%s uuid=%s level=%d spawnPoint=%s position=(%.2f, %.2f, %.2f)",
+			e,
+			entity.UUID,
+			spawnLevel,
+			spawnContext.SpawnPointId,
+			spawnPosition.X,
+			spawnPosition.Y,
+			spawnPosition.Z
+		))
+	else
+		print(string.format(
+			"[EnemyService] Spawn enemy=%s uuid=%s level=%d position=(%.2f, %.2f, %.2f)",
+			e,
+			entity.UUID,
+			spawnLevel,
+			spawnPosition.X,
+			spawnPosition.Y,
+			spawnPosition.Z
+		))
+	end
 
 	-- Add to the database
 	__Enemies[entity.UUID] = entity
 
 	-- Give it its engines
 	local movementEngine = Movement.new(entity)
-	local brain = Brains.Aggressive(movementEngine, 32)
+	local brain = if brainProfile == "PassivePrey"
+		then Brains.PassivePrey(movementEngine, 32)
+		else Brains.Aggressive(movementEngine, 32)
 	local deathConnection = entity:GetStatChangedSignal("Health"):Connect(function(newValue: number)
 		if newValue <= 0 then
 			if spawnOptions and type(spawnOptions.OnDeath) == "function" then
@@ -391,6 +582,30 @@ function Enemies.Spawn(
 	return entity
 end
 
+function Enemies.RegisterDamagedBy(target: Entity, source: Entity)
+	if not target or not source then
+		return false
+	end
+
+	local runtime = __EnemyRuntime[target.UUID]
+	if not runtime or not runtime.Brain then
+		return false
+	end
+
+	local sourceCharacter = source.Character
+	if not sourceCharacter or not sourceCharacter:IsA("Model") then
+		return false
+	end
+
+	local sourcePlayerEntity = PlayerServiceServer.GetEntityFromCharacter(sourceCharacter)
+	if not sourcePlayerEntity then
+		return false
+	end
+
+	runtime.Brain:QueueEscapeFromPlayer(sourceCharacter, ESCAPE_MEMORY_DURATION)
+	return true
+end
+
 function Enemies.Despawn(uuid: string): boolean
 	if not __Enemies[uuid] then
 		return false
@@ -398,6 +613,19 @@ function Enemies.Despawn(uuid: string): boolean
 
 	WipeEntity(uuid, false)
 	return true
+end
+
+function Enemies.DespawnAll(): number
+	local uuids = {}
+	for uuid in pairs(__Enemies) do
+		table.insert(uuids, uuid)
+	end
+
+	for _, uuid in ipairs(uuids) do
+		WipeEntity(uuid, false)
+	end
+
+	return #uuids
 end
 
 function Enemies.GetClosest(position: Vector3, sight: number?): Entity?
@@ -419,6 +647,20 @@ end
 
 function Enemies.GetByUUID(uuid: string): Entity?
 	return __Enemies[uuid]
+end
+
+function Enemies.GetInRadius(position: Vector3, radius: number): { Entity }
+	local results = {}
+	local limit = math.max(0, radius)
+	for _, entity in pairs(__Enemies) do
+		if entity:IsAlive() then
+			local distance = (entity.RootPart.Position - position).Magnitude
+			if distance <= limit then
+				table.insert(results, entity)
+			end
+		end
+	end
+	return results
 end
 
 function Enemies.RegisterHeavyHit(target: Entity, source: Entity?)

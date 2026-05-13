@@ -16,7 +16,7 @@ return function(ctx, columns, config, seed)
 			end
 	
 			local materials = getBiomeMaterials(column.Biome)
-			column.FillMaterial = materials.Deep
+			column.FillMaterial = Enum.Material.Rock
 			column.SurfaceMaterial = materials.Surface
 		end
 end

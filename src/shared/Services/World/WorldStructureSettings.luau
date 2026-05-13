@@ -76,8 +76,7 @@ local Settings = {
 	RuntimeNatureChanceByBiome = {
 		TemperateGrassland = 0.035,
 		PineHighlands = 0.075,
-		Forest = 0.085,
-		DenseForest = 0.095,
+		Forest = 0.095,
 		Alpine = 0.06,
 		HighlandDesert = 0.055,
 		Marshland = 0.08,
@@ -86,15 +85,14 @@ local Settings = {
 	RuntimeNatureWeightsByBiome = {
 		TemperateGrassland = { 10, 8, 38, 30, 8, 6 },
 		PineHighlands = { 44, 32, 9, 6, 5, 4 },
-		Forest = { 46, 30, 10, 7, 4, 3 },
-		DenseForest = { 38, 34, 11, 8, 5, 4 },
+		Forest = { 38, 34, 11, 8, 5, 4 },
 		Alpine = { 43, 31, 10, 7, 5, 4 },
 		HighlandDesert = { 40, 32, 11, 7, 6, 4 },
 		Marshland = { 44, 31, 10, 7, 5, 3 },
 	},
 
-	RuntimeNodeStructuresEnabled = true,
-	RuntimeNodeStructureChance = 0.2,
+	RuntimeNodeStructuresEnabled = false,
+	RuntimeNodeStructureChance = 0.1,
 	RuntimeNodePoolByBiome = {
 		TemperateGrassland = {
 			"Shared::NodeFenceCamp",
@@ -119,18 +117,8 @@ local Settings = {
 		},
 		Forest = {
 			"Shared::NodeFenceCamp",
-			"Shared::LanternPostWood",
-			"Forest::ForagerSupplyCamp",
-			"Shared::TravelerCampfireRing",
-			"Shared::ProduceCartStand",
-			"Shared::TreasureChestCache",
-			"Shared::NodeTentOutpost",
-			"Shared::StoneWellPlaza",
-		},
-		DenseForest = {
-			"Shared::NodeFenceCamp",
 			"Shared::LanternPostIron",
-			"DenseForest::OvergrownStoneGate",
+			"Forest::OvergrownStoneGate",
 			"Shared::TravelerCampfireRing",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
@@ -167,8 +155,7 @@ local Settings = {
 	RuntimeNodeWeightsByBiome = {
 		TemperateGrassland = { 19, 14, 12, 13, 12, 12, 10, 8, 10 },
 		PineHighlands = { 18, 12, 12, 11, 16, 10, 9, 12 },
-		Forest = { 17, 11, 16, 14, 12, 8, 9, 13 },
-		DenseForest = { 18, 12, 10, 16, 12, 10, 9 },
+		Forest = { 18, 12, 10, 16, 12, 10, 9 },
 		Alpine = { 16, 12, 14, 14, 10, 10, 8 },
 		HighlandDesert = { 16, 11, 18, 15, 10, 10, 10 },
 		Marshland = { 14, 14, 12, 16, 12, 12, 10 },
@@ -269,12 +256,12 @@ local Settings = {
 				{ DX = 10, DZ = 10, PrefabId = "Shared::TreasureChestCache", Required = false },
 			},
 		},
-		["DenseForest::HideoutCluster"] = {
-			Id = "DenseForest::HideoutCluster",
+		["Forest::HideoutCluster"] = {
+			Id = "Forest::HideoutCluster",
 			Components = {
-				{ DX = 0, DZ = 0, PrefabId = "DenseForest::BanditShack", Required = true },
-				{ DX = 12, DZ = 2, PrefabId = "DenseForest::HiddenHunterHut", Required = true },
-				{ DX = -12, DZ = -2, PrefabId = "DenseForest::OvergrownStoneGate", Required = false },
+				{ DX = 0, DZ = 0, PrefabId = "Forest::BanditShack", Required = true },
+				{ DX = 12, DZ = 2, PrefabId = "Forest::HiddenHunterHut", Required = true },
+				{ DX = -12, DZ = -2, PrefabId = "Forest::OvergrownStoneGate", Required = false },
 				{ DX = 0, DZ = -10, PrefabId = "Shared::TravelerCampfireRing", Required = true },
 				{ DX = 11, DZ = 10, PrefabId = "Shared::TreasureChestCache", Required = false },
 			},
@@ -319,8 +306,7 @@ local Settings = {
 			"Shared::TownCluster",
 		},
 		PineHighlands = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "PineHighlands::LookoutCamp" },
-		Forest = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Forest::RangerCamp" },
-		DenseForest = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "DenseForest::HideoutCluster" },
+		Forest = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Forest::HideoutCluster" },
 		Alpine = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Alpine::SummitOutpost" },
 		HighlandDesert = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "HighlandDesert::OasisCluster" },
 		Marshland = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Marshland::StiltCamp" },
@@ -330,7 +316,6 @@ local Settings = {
 		TemperateGrassland = { 36, 26, 18, 12, 8 },
 		PineHighlands = { 36, 24, 18, 10 },
 		Forest = { 36, 24, 18, 10 },
-		DenseForest = { 36, 24, 18, 10 },
 		Alpine = { 36, 24, 18, 10 },
 		HighlandDesert = { 36, 24, 18, 10 },
 		Marshland = { 36, 24, 18, 10 },
@@ -344,7 +329,7 @@ local Settings = {
 		StudioOnly = true,
 		IncludeExecutorOnly = true,
 		IncludeNature = false,
-		IncludeStructures = true,
+		IncludeStructures = false,
 		IncludeMarkers = false,
 		TileSize = 8,
 		SpacingStuds = 32,
@@ -371,3 +356,5 @@ local Settings = {
 } :: WorldStructureSettings
 
 return table.freeze(Settings)
+
+

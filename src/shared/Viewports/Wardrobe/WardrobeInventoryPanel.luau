@@ -55,6 +55,8 @@ type HotbarInfoLookup = {
 	ByWeaponId: { [string]: { HotbarInfo } },
 }
 
+type InventoryCategory = "Items" | "Armor" | "Weapons"
+
 local PANEL_WIDTH = 320
 local PANEL_HEIGHT = 430
 local PANEL_RIGHT_MARGIN = 64
@@ -68,13 +70,10 @@ local PANEL_INNER_INSET = NinePartBorder.GetInnerInset(PANEL_BORDER_THICKNESS)
 local PANEL_CONTENT_WIDTH = PANEL_WIDTH - (PANEL_INNER_INSET * 2)
 local PANEL_CONTENT_HEIGHT = PANEL_HEIGHT - (PANEL_INNER_INSET * 2)
 local GRID_SCROLLBAR_GUTTER = 4
+local CATEGORY_TILE_GAP = 6
 local TILE_SIZE = math.floor(
-	(
-		PANEL_CONTENT_WIDTH
-		- (GRID_INSET * 2)
-		- GRID_SCROLLBAR_GUTTER
-		- ((GRID_COLUMNS - 1) * TILE_PADDING)
-	) / GRID_COLUMNS
+	(PANEL_CONTENT_WIDTH - (GRID_INSET * 2) - GRID_SCROLLBAR_GUTTER - ((GRID_COLUMNS - 1) * TILE_PADDING))
+		/ GRID_COLUMNS
 )
 local TITLE_SIGN_IMAGE = "rbxassetid://75446135539310"
 local TITLE_SIGN_SOURCE_SIZE = Vector2.new(368, 156)
@@ -85,6 +84,10 @@ local TITLE_SIGN_TOP_Y = PANEL_INNER_INSET
 local TITLE_SIGN_TEXT_CENTER_Y = (TITLE_SIGN_SOURCE_SIZE.Y - TITLE_SIGN_CENTER_FROM_BOTTOM) / TITLE_SIGN_SOURCE_SIZE.Y
 local TITLE_SIGN_TEXT_HEIGHT = math.floor(TITLE_SIGN_HEIGHT * 0.42)
 local LIST_TOP = math.floor(math.max(58, TITLE_SIGN_TOP_Y + TITLE_SIGN_HEIGHT + 8 - PANEL_INNER_INSET))
+local BOTTOM_SLOTS_COUNT = 3
+local BOTTOM_SLOTS_HEIGHT = 62
+local BOTTOM_SLOTS_GAP = 8
+local LIST_BOTTOM_INSET = BOTTOM_SLOTS_HEIGHT + BOTTOM_SLOTS_GAP + GRID_INSET
 
 local FOREST_PANEL_BACKGROUND = Color3.fromRGB(54, 35, 23)
 local FOREST_PANEL_STROKE = Color3.fromRGB(126, 84, 48)
@@ -144,9 +147,14 @@ end
 
 local function getEntryName(entry: InventoryEntry): string
 	local data = entry.Data
-	local name = data.Name
+	local name = data.Name or data.DisplayName
 	if type(name) == "string" and name ~= "" then
 		return name
+	end
+
+	local itemId = data.ItemId
+	if type(itemId) == "string" and itemId ~= "" then
+		return itemId
 	end
 
 	local weaponId = data.WeaponId
@@ -163,6 +171,14 @@ local function getEntryDetail(entry: InventoryEntry): string
 		local weaponClass = if type(data.Class) == "string" then data.Class else "Weapon"
 		local baseDamage = if type(data.BaseDamage) == "number" then data.BaseDamage else 0
 		return ("%s  DMG %s"):format(weaponClass, CombatNumbers.FormatTenth(baseDamage))
+	end
+
+	if entry.ItemKind == "Item" then
+		local category = if type(data.InventoryData) == "table"
+				and type(data.InventoryData.Category) == "string"
+			then data.InventoryData.Category
+			else "Consumable"
+		return ("%s  Stack %d"):format(category, entry.Quantity)
 	end
 
 	return ("Stack %d / %d"):format(entry.Quantity, entry.MaxStack)
@@ -188,6 +204,38 @@ end
 
 local function getEntryRarity(entry: InventoryEntry): string
 	return normalizeRarity(entry.Data.Rarity)
+end
+
+local function getEntryIcon(entry: InventoryEntry): string?
+	local data = entry.Data
+	local icon = data.Icon or data.IconImage or data.Image
+	if type(icon) == "string" and icon ~= "" then
+		return icon
+	end
+	return nil
+end
+
+local function getEntryCategory(entry: InventoryEntry): InventoryCategory
+	if entry.ItemKind == "Weapon" then
+		return "Weapons"
+	end
+
+	if entry.ItemKind == "Armor" then
+		return "Armor"
+	end
+
+	local data = entry.Data
+	local inventoryData = data.InventoryData
+	local inventoryType = if type(inventoryData) == "table" and type(inventoryData.Type) == "string"
+		then string.lower(inventoryData.Type)
+		else ""
+	local itemType = if type(data.Type) == "string" then string.lower(data.Type) else ""
+
+	if inventoryType == "armor" or itemType == "armor" then
+		return "Armor"
+	end
+
+	return "Items"
 end
 
 local function cloneEntryData(entry: InventoryEntry): { [string]: any }
@@ -270,10 +318,18 @@ end
 
 local function buildSelectedInventoryItem(entry: InventoryEntry, hotbarInfo: HotbarInfo?): SelectedItem
 	local data = entry.Data
-	local weaponId = if type(data.WeaponId) == "string" then data.WeaponId else entry.StackKey
+	local selectedId = if type(data.WeaponId) == "string"
+		then data.WeaponId
+		elseif type(data.ItemId) == "string" then data.ItemId
+		else entry.StackKey
 	local name = if type(data.Name) == "string" then data.Name else getEntryName(entry)
 	local class = if type(data.Class) == "string" then data.Class else nil
-	local itemType = if type(data.Type) == "string" then data.Type else nil
+	local itemType = if type(data.Type) == "string"
+		then data.Type
+		elseif
+			type(data.InventoryData) == "table" and type(data.InventoryData.Type) == "string"
+		then data.InventoryData.Type
+		else nil
 
 	return {
 		ItemKind = entry.ItemKind,
@@ -284,7 +340,7 @@ local function buildSelectedInventoryItem(entry: InventoryEntry, hotbarInfo: Hot
 		IsHotbar = hotbarInfo ~= nil,
 		IsEquipped = hotbarInfo ~= nil and hotbarInfo.IsEquipped or false,
 		Name = name,
-		Id = weaponId,
+		Id = selectedId,
 		Class = class,
 		Type = itemType,
 		Quantity = entry.Quantity,
@@ -319,7 +375,10 @@ local function resolveWeaponModelTemplate(entry: InventoryEntry): Instance?
 	end
 
 	for _, child in ipairs(current:GetChildren()) do
-		if child.Name ~= "Data" and (child:IsA("Tool") or child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) then
+		if
+			child.Name ~= "Data"
+			and (child:IsA("Tool") or child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder"))
+		then
 			return child
 		end
 	end
@@ -455,18 +514,24 @@ local function InventoryItemViewport(props: { Entry: InventoryEntry })
 	})
 end
 
-local function inventoryTile(entry: InventoryEntry, index: number, isSelected: boolean, hotbarInfo: HotbarInfo?, onSelected: () -> ())
+local function inventoryTile(
+	entry: InventoryEntry,
+	index: number,
+	isSelected: boolean,
+	hotbarInfo: HotbarInfo?,
+	onSelected: () -> ()
+)
 	local quantityText = if entry.Quantity > 1 then "x" .. tostring(entry.Quantity) else ""
 	local rarity = getEntryRarity(entry)
+	local icon = getEntryIcon(entry)
 	local tileBackground = RARITY_BACKGROUNDS[rarity] or FOREST_TILE_BACKGROUND
-	local strokeColor = if isSelected
-		then FOREST_ACCENT
-		elseif hotbarInfo then FOREST_HOTBAR
-		else FOREST_PANEL_STROKE
+	local strokeColor = if isSelected then FOREST_ACCENT elseif hotbarInfo then FOREST_HOTBAR else FOREST_PANEL_STROKE
 	local strokeTransparency = if isSelected then 0.05 elseif hotbarInfo then 0.25 else 0.35
 
 	return React.createElement("Frame", {
-		BackgroundColor3 = if index % 2 == 0 then tileBackground else tileBackground:Lerp(FOREST_TILE_BACKGROUND_ALT, 0.16),
+		BackgroundColor3 = if index % 2 == 0
+			then tileBackground
+			else tileBackground:Lerp(FOREST_TILE_BACKGROUND_ALT, 0.16),
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = index,
@@ -477,9 +542,23 @@ local function inventoryTile(entry: InventoryEntry, index: number, isSelected: b
 			Thickness = if isSelected then 2 else 1,
 			Transparency = strokeTransparency,
 		}),
-		Viewport = React.createElement(InventoryItemViewport, {
-			Entry = entry,
-		}),
+		-- Show viewport only if no icon is available
+		Viewport = if not icon
+			then React.createElement(InventoryItemViewport, {
+				Entry = entry,
+			})
+			else nil,
+		-- Show icon if available
+		Icon = if icon
+			then React.createElement("ImageLabel", {
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Image = icon,
+				ScaleType = Enum.ScaleType.Fit,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = 2,
+			})
+			else nil,
 		Name = React.createElement("TextLabel", {
 			AnchorPoint = Vector2.new(0, 1),
 			BackgroundColor3 = FOREST_LABEL_BACKGROUND,
@@ -507,36 +586,40 @@ local function inventoryTile(entry: InventoryEntry, index: number, isSelected: b
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
 		}),
-		Hotbar = if hotbarInfo then React.createElement("TextLabel", {
-			BackgroundColor3 = FOREST_LABEL_BACKGROUND,
-			BackgroundTransparency = 0.08,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(6, 22),
-			Size = UDim2.fromOffset(48, 16),
-			Text = ("Slot %d"):format(hotbarInfo.Slot),
-			TextColor3 = FOREST_ACCENT,
-			TextSize = 10,
-			TextStrokeColor3 = FOREST_SHADOW,
-			TextStrokeTransparency = 0.45,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = 4,
-		}) else nil,
-		Quantity = if quantityText ~= "" then React.createElement("TextLabel", {
-			BackgroundColor3 = FOREST_LABEL_BACKGROUND,
-			BackgroundTransparency = 0.08,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(1, -30, 0, 5),
-			Size = UDim2.fromOffset(24, 16),
-			Text = quantityText,
-			TextColor3 = FOREST_ACCENT,
-			TextSize = 10,
-			TextStrokeColor3 = FOREST_SHADOW,
-			TextStrokeTransparency = 0.45,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = 4,
-		}) else nil,
+		Hotbar = if hotbarInfo
+			then React.createElement("TextLabel", {
+				BackgroundColor3 = FOREST_LABEL_BACKGROUND,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(6, 22),
+				Size = UDim2.fromOffset(48, 16),
+				Text = ("Slot %d"):format(hotbarInfo.Slot),
+				TextColor3 = FOREST_ACCENT,
+				TextSize = 10,
+				TextStrokeColor3 = FOREST_SHADOW,
+				TextStrokeTransparency = 0.45,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 4,
+			})
+			else nil,
+		Quantity = if quantityText ~= ""
+			then React.createElement("TextLabel", {
+				BackgroundColor3 = FOREST_LABEL_BACKGROUND,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(1, -30, 0, 5),
+				Size = UDim2.fromOffset(24, 16),
+				Text = quantityText,
+				TextColor3 = FOREST_ACCENT,
+				TextSize = 10,
+				TextStrokeColor3 = FOREST_SHADOW,
+				TextStrokeTransparency = 0.45,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 4,
+			})
+			else nil,
 		SelectButton = React.createElement("TextButton", {
 			AutoButtonColor = false,
 			BackgroundTransparency = 1,
@@ -566,7 +649,10 @@ local function getSortedEntries(inventory: InventorySnapshot): { InventoryEntry 
 	return entries
 end
 
-local function getDisplayEntries(inventory: InventorySnapshot, loadout: LoadoutSnapshot): ({ InventoryEntry }, { [string]: HotbarInfo })
+local function getDisplayEntries(
+	inventory: InventorySnapshot,
+	loadout: LoadoutSnapshot
+): ({ InventoryEntry }, { [string]: HotbarInfo })
 	local entries = getSortedEntries(inventory)
 	local hotbarInfoByEntryId = getHotbarInfoByEntryId(entries, loadout)
 
@@ -594,16 +680,156 @@ local function getDisplayEntries(inventory: InventorySnapshot, loadout: LoadoutS
 	return entries, hotbarInfoByEntryId
 end
 
-local function buildTiles(entries: { InventoryEntry }, selectedEntryId: string?, hotbarInfoByEntryId: { [string]: HotbarInfo })
+local function buildTiles(
+	entries: { InventoryEntry },
+	selectedEntryId: string?,
+	hotbarInfoByEntryId: { [string]: HotbarInfo },
+	layoutOrderOffset: number?
+)
 	local tiles = {}
+	local orderOffset = layoutOrderOffset or 0
 	for index, entry in ipairs(entries) do
 		local hotbarInfo = hotbarInfoByEntryId[entry.EntryId]
-		tiles[entry.EntryId] = inventoryTile(entry, index, selectedEntryId == entry.EntryId, hotbarInfo, function()
-			WardrobeSelection.SetSelectedItem(buildSelectedInventoryItem(entry, hotbarInfo))
-		end)
+		tiles[entry.EntryId] = inventoryTile(
+			entry,
+			orderOffset + index,
+			selectedEntryId == entry.EntryId,
+			hotbarInfo,
+			function()
+				WardrobeSelection.SetSelectedItem(buildSelectedInventoryItem(entry, hotbarInfo))
+			end
+		)
 	end
 
 	return tiles
+end
+
+local function splitEntriesByCategory(entries: { InventoryEntry }): { [InventoryCategory]: { InventoryEntry } }
+	local grouped: { [InventoryCategory]: { InventoryEntry } } = {
+		Items = {},
+		Armor = {},
+		Weapons = {},
+	}
+
+	for _, entry in ipairs(entries) do
+		table.insert(grouped[getEntryCategory(entry)], entry)
+	end
+
+	return grouped
+end
+
+local function categoryHeader(text: string, order: number)
+	return React.createElement("TextLabel", {
+		BackgroundColor3 = FOREST_LABEL_BACKGROUND,
+		BackgroundTransparency = 0.15,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		LayoutOrder = order,
+		Size = UDim2.new(1, -2, 0, 20),
+		Text = text,
+		TextColor3 = FOREST_ACCENT,
+		TextSize = 12,
+		TextStrokeColor3 = FOREST_SHADOW,
+		TextStrokeTransparency = 0.6,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+end
+
+local function buildCategoryContent(
+	entries: { InventoryEntry },
+	selectedEntryId: string?,
+	hotbarInfoByEntryId: { [string]: HotbarInfo }
+): { [string]: any }
+	local grouped = splitEntriesByCategory(entries)
+	local children = {
+		Layout = React.createElement("UIListLayout", {
+			Padding = UDim.new(0, CATEGORY_TILE_GAP),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+
+	local order = 1
+	local tileOrderOffset = 0
+	for _, categoryName in ipairs({ "Items", "Armor", "Weapons" }) do
+		local categoryEntries = grouped[categoryName :: InventoryCategory]
+		children["Header_" .. categoryName] = categoryHeader(categoryName, order)
+		order += 1
+
+		if #categoryEntries == 0 then
+			children["Empty_" .. categoryName] = React.createElement("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				LayoutOrder = order,
+				Size = UDim2.new(1, -4, 0, 18),
+				Text = "No entries",
+				TextColor3 = FOREST_MUTED_TEXT,
+				TextSize = 11,
+				TextXAlignment = Enum.TextXAlignment.Left,
+			})
+			order += 1
+		else
+			local rows = math.ceil(#categoryEntries / GRID_COLUMNS)
+			local categoryHeight = rows * TILE_SIZE + math.max(0, rows - 1) * TILE_PADDING
+			children["Grid_" .. categoryName] = React.createElement("Frame", {
+				BackgroundTransparency = 1,
+				LayoutOrder = order,
+				Size = UDim2.new(1, 0, 0, categoryHeight),
+			}, {
+				Layout = React.createElement("UIGridLayout", {
+					CellPadding = UDim2.fromOffset(TILE_PADDING, TILE_PADDING),
+					CellSize = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+				Tiles = React.createElement(
+					React.Fragment,
+					nil,
+					buildTiles(categoryEntries, selectedEntryId, hotbarInfoByEntryId, tileOrderOffset)
+				),
+			})
+			tileOrderOffset += #categoryEntries
+			order += 1
+		end
+	end
+
+	return children
+end
+
+local function buildPermanentItemSlots(): { [string]: any }
+	local children = {
+		Layout = React.createElement("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+	}
+
+	for slot = 1, BOTTOM_SLOTS_COUNT do
+		children["Slot_" .. tostring(slot)] = React.createElement("Frame", {
+			BackgroundColor3 = FOREST_TILE_BACKGROUND,
+			BackgroundTransparency = 0.1,
+			BorderSizePixel = 0,
+			LayoutOrder = slot,
+			Size = UDim2.fromOffset(70, 44),
+		}, {
+			Stroke = React.createElement("UIStroke", {
+				Color = FOREST_PANEL_STROKE,
+				Thickness = 1,
+				Transparency = 0.25,
+			}),
+			Label = React.createElement("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Size = UDim2.fromScale(1, 1),
+				Text = ("Item %d"):format(slot),
+				TextColor3 = FOREST_MUTED_TEXT,
+				TextSize = 11,
+			}),
+		})
+	end
+
+	return children
 end
 
 local function WardrobeInventoryPanel()
@@ -618,9 +844,10 @@ local function WardrobeInventoryPanel()
 	end)
 
 	React.useEffect(function()
-		local connection = InventoryServiceClient.GetInventoryChangedSignal():Connect(function(nextInventory: InventorySnapshot)
-			setInventory(nextInventory)
-		end)
+		local connection = InventoryServiceClient.GetInventoryChangedSignal()
+			:Connect(function(nextInventory: InventorySnapshot)
+				setInventory(nextInventory)
+			end)
 
 		InventoryServiceClient.RequestInventory()
 		setInventory(InventoryServiceClient.GetInventory())
@@ -644,9 +871,10 @@ local function WardrobeInventoryPanel()
 	end, {})
 
 	React.useEffect(function()
-		local connection = WardrobeSelection.GetSelectionChangedSignal():Connect(function(nextSelectedItem: SelectedItem?)
-			setSelectedItem(nextSelectedItem)
-		end)
+		local connection = WardrobeSelection.GetSelectionChangedSignal()
+			:Connect(function(nextSelectedItem: SelectedItem?)
+				setSelectedItem(nextSelectedItem)
+			end)
 
 		setSelectedItem(WardrobeSelection.GetSelectedItem())
 
@@ -659,7 +887,9 @@ local function WardrobeInventoryPanel()
 	local selectedEntryId = if selectedItem and selectedItem.Source == "Inventory" then selectedItem.EntryId else nil
 	local itemCount = #entries
 	local gridRowCount = math.max(MIN_GRID_ROWS, math.ceil(itemCount / GRID_COLUMNS))
-	local canvasHeight = gridRowCount * TILE_SIZE + math.max(0, gridRowCount - 1) * TILE_PADDING + (GRID_INSET * 2)
+	local minimumCanvasHeight = gridRowCount * TILE_SIZE
+		+ math.max(0, gridRowCount - 1) * TILE_PADDING
+		+ (GRID_INSET * 2)
 	local titleSignImageTransparency = if TITLE_SIGN_IMAGE == "" then 1 else 0
 	local titleSignBackgroundTransparency = if TITLE_SIGN_IMAGE == "" then 0.18 else 1
 	local listChildren = if itemCount == 0
@@ -673,14 +903,7 @@ local function WardrobeInventoryPanel()
 				TextSize = 18,
 			}),
 		}
-		else {
-			Layout = React.createElement("UIGridLayout", {
-				CellPadding = UDim2.fromOffset(TILE_PADDING, TILE_PADDING),
-				CellSize = UDim2.fromOffset(TILE_SIZE, TILE_SIZE),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-			}),
-			Tiles = React.createElement(React.Fragment, nil, buildTiles(entries, selectedEntryId, hotbarInfoByEntryId)),
-		}
+		else buildCategoryContent(entries, selectedEntryId, hotbarInfoByEntryId)
 
 	return React.createElement("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -714,11 +937,11 @@ local function WardrobeInventoryPanel()
 				AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
-				CanvasSize = UDim2.fromOffset(0, canvasHeight),
+				CanvasSize = UDim2.fromOffset(0, minimumCanvasHeight),
 				Position = UDim2.fromOffset(0, LIST_TOP),
 				ScrollBarImageColor3 = FOREST_PANEL_STROKE,
 				ScrollBarThickness = GRID_SCROLLBAR_GUTTER,
-				Size = UDim2.new(1, 0, 1, -(LIST_TOP + GRID_INSET)),
+				Size = UDim2.new(1, 0, 1, -(LIST_TOP + LIST_BOTTOM_INSET)),
 				ZIndex = 2,
 			}, {
 				Padding = React.createElement("UIPadding", {
@@ -728,6 +951,22 @@ local function WardrobeInventoryPanel()
 					PaddingTop = UDim.new(0, GRID_INSET),
 				}),
 				Content = React.createElement(React.Fragment, nil, listChildren),
+			}),
+			PermanentItemSlots = React.createElement("Frame", {
+				AnchorPoint = Vector2.new(0.5, 1),
+				BackgroundColor3 = FOREST_LABEL_BACKGROUND,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Position = UDim2.new(0.5, 0, 1, -GRID_INSET),
+				Size = UDim2.new(1, -(GRID_INSET * 2), 0, BOTTOM_SLOTS_HEIGHT),
+				ZIndex = 4,
+			}, {
+				Stroke = React.createElement("UIStroke", {
+					Color = FOREST_PANEL_STROKE,
+					Thickness = 1,
+					Transparency = 0.28,
+				}),
+				Slots = React.createElement(React.Fragment, nil, buildPermanentItemSlots()),
 			}),
 		}),
 

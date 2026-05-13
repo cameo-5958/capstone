@@ -151,6 +151,13 @@ function MovementEngine.LookAt(self: MovementEngine, target: Vector3): ()
 	self.FacingTarget = target
 	local myPos = self.RootPart.Position
 	local flatTarget = Vector3.new(target.X, myPos.Y, target.Z)
+	local facingInverted = self.Character:GetAttribute("FacingInverted") == true
+	if facingInverted then
+		local delta = flatTarget - myPos
+		if delta.Magnitude > 0.001 then
+			flatTarget = myPos - delta
+		end
+	end
 	local hasLookDirection = (flatTarget - myPos).Magnitude > 0.001
 	if hasLookDirection then
 		self.RootPart.CFrame = CFrame.lookAt(myPos, flatTarget)

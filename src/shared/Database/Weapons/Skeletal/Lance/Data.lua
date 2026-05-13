@@ -3,6 +3,7 @@ return {
 	["Type"] = "Spear",
 	["Family"] = "Skeletal",
 	["Rarity"] = "Refined",
+	["Icon"] = "rbxassetid://11860483433",
 
 	["BaseDamage"] = 85,
 	["__Stats"] = {
@@ -18,5 +19,3 @@ return {
 
 	["Desc"] = "A Lance dropped from the bones of a long-gone warrior.",
 }
-
-

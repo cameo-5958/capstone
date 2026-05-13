@@ -37,6 +37,7 @@ local __AttackPredictors: {
 		ChargeStartedAt: number,
 		ChargeEndsAt: number,
 		ClearAt: number,
+		PredictorColor: Color3?,
 	},
 } = {}
 local __LookTargets: {
@@ -53,6 +54,12 @@ local __AttackHitboxes: {
 		ClearAt: number,
 		HitboxSize: Vector3,
 		HitboxOffset: CFrame,
+	},
+} = {}
+local __HopShakeState: {
+	[string]: {
+		Phase: number,
+		LastOffset: CFrame,
 	},
 } = {}
 local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
@@ -108,6 +115,7 @@ local function DestroyEnemyArtifacts(uuid: string)
 	DestroyEnemyTag(uuid)
 	ClearAttackHitbox(uuid)
 	ClearAttackPredictor(uuid)
+	__HopShakeState[uuid] = nil
 end
 
 local function DestroyEnemyDamageIndicators(uuid: string)
@@ -321,6 +329,49 @@ local function IsEnemyAlive(ent: Entity?): boolean
 	return ent:IsAlive()
 end
 
+local function ApplyHopShake(uuid: string, ent: Entity, dt: number)
+	if not ent.Character or not ent.Character.PrimaryPart then
+		__HopShakeState[uuid] = nil
+		return
+	end
+
+	local movementStyle = ent.Character:GetAttribute("MovementStyle")
+	if movementStyle ~= "HopShake" then
+		__HopShakeState[uuid] = nil
+		return
+	end
+
+	local humanoid = ent.Character:FindFirstChild("Humanoid")
+	if not humanoid or not humanoid:IsA("Humanoid") then
+		__HopShakeState[uuid] = nil
+		return
+	end
+
+	local state = __HopShakeState[uuid]
+	if not state then
+		state = {
+			Phase = 0,
+			LastOffset = CFrame.new(),
+		}
+		__HopShakeState[uuid] = state
+	end
+
+	local rootPart = ent.Character.PrimaryPart :: BasePart
+	local baseCFrame = rootPart.CFrame * state.LastOffset:Inverse()
+	local isMoving = humanoid.MoveDirection.Magnitude > 0.05
+
+	local nextOffset = CFrame.new()
+	if isMoving then
+		state.Phase += dt * 10
+		local hopHeight = math.abs(math.sin(state.Phase)) * 0.35
+		local swayRoll = math.sin(state.Phase * 0.8) * math.rad(8)
+		nextOffset = CFrame.new(0, hopHeight, 0) * CFrame.Angles(0, 0, swayRoll)
+	end
+
+	rootPart.CFrame = baseCFrame * nextOffset
+	state.LastOffset = nextOffset
+end
+
 function ClearAttackHitbox(uuid: string)
 	local state = __AttackHitboxes[uuid]
 	if not state then
@@ -376,6 +427,7 @@ local function EnsureAttackPredictor(uuid: string): Part
 	part.Material = Enum.Material.Neon
 	part.Color = Color3.fromHSV(0, 0.2, 0.95)
 	part.Transparency = 0.35
+	part.Shape = Enum.PartType.Block
 	part.Parent = workspace
 
 	return part
@@ -485,7 +537,7 @@ end
 
 function Enemies.RequestSpawnEnemy(enemyPath: string?)
 	API:FireServer("RequestSpawnEnemy", {
-		EnemyPath = enemyPath or "Golem.Basalt",
+		EnemyPath = enemyPath or "Skeletal.Base",
 	})
 end
 
@@ -527,11 +579,13 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 		local predictor = EnsureAttackPredictor(data.UUID)
 		predictor.Size = data.PredictorSize
 		predictor.CFrame = data.PredictorCFrame
+		predictor.Shape = if data.PredictorShape == "Cylinder" then Enum.PartType.Cylinder else Enum.PartType.Block
 		__AttackPredictors[data.UUID] = {
 			Part = predictor,
 			ChargeStartedAt = data.ChargeStartedAt,
 			ChargeEndsAt = data.ChargeEndsAt,
 			ClearAt = data.ClearAt,
+			PredictorColor = if typeof(data.PredictorColor) == "Color3" then data.PredictorColor else nil,
 		}
 	elseif action == "DamageIndicator" then
 		local ent = __Enemies[data.UUID]
@@ -548,7 +602,7 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 	end
 end)
 
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function(dt: number)
 	for uuid, target in pairs(__LookTargets) do
 		local ent = __Enemies[uuid]
 		if not target or not ent or not ent.Character or not ent.Character.PrimaryPart then
@@ -566,6 +620,7 @@ RunService.Heartbeat:Connect(function()
 	for uuid, ent in pairs(__Enemies) do
 		if IsEnemyAlive(ent) then
 			UpdateEnemyTag(uuid, ent)
+			ApplyHopShake(uuid, ent, dt)
 		else
 			DestroyEnemyArtifacts(uuid)
 		end
@@ -599,7 +654,11 @@ RunService.Heartbeat:Connect(function()
 
 		local duration = math.max(state.ChargeEndsAt - state.ChargeStartedAt, 0.001)
 		local alpha = math.clamp((now - state.ChargeStartedAt) / duration, 0, 1)
-		state.Part.Color = Color3.fromHSV(0, 0.2 + (0.8 * alpha), 0.95)
+		if state.PredictorColor then
+			state.Part.Color = state.PredictorColor
+		else
+			state.Part.Color = Color3.fromHSV(0, 0.2 + (0.8 * alpha), 0.95)
+		end
 		state.Part.Transparency = 0.55 - (0.25 * alpha)
 	end
 

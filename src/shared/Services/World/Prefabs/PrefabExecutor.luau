@@ -23,11 +23,10 @@ local BiomeSort: { [string]: number } = {
 	TemperateGrassland = 1,
 	PineHighlands = 2,
 	Forest = 3,
-	DenseForest = 4,
-	Alpine = 5,
-	HighlandDesert = 6,
-	Marshland = 7,
-	Shared = 8,
+	Alpine = 4,
+	HighlandDesert = 5,
+	Marshland = 6,
+	Shared = 7,
 }
 
 local CategorySort: { [string]: number } = {

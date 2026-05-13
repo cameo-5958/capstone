@@ -27,6 +27,6 @@ return {
 		["ArrowTravelDistance"] = 1,
 		["PhysicalDamage"] = 1,
 		["MagicDamage"] = 1,
-		["Speed"] = 8,
+		["Speed"] = 10,
 	},
 }

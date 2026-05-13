@@ -3,6 +3,7 @@ return {
 	["Type"] = "Sword",
 	["Family"] = "Skeletal",
 	["Rarity"] = "CRUDE",
+	["Icon"] = "rbxassetid://11860483433",
 
 	["BaseDamage"] = 20,
 	["__Stats"] = {

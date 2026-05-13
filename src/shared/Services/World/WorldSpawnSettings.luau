@@ -91,34 +91,38 @@ local Settings = {
 
 	Enemy = {
 		Enabled = true,
-		DefaultPoolId = "Golem.Default",
+		DefaultPoolId = "Animals.Herd",
 		Pools = {
-			["Golem.Default"] = {
+			["Animals.Herd"] = {
 				Entries = {
-					{ EnemyPath = "Golem.Basalt", Weight = 50 },
-					{ EnemyPath = "Golem.Granite", Weight = 30 },
-					{ EnemyPath = "Golem.Runic", Weight = 20 },
+					{ EnemyPath = "Animals.Cow", Weight = 22 },
+					{ EnemyPath = "Animals.Sheep", Weight = 36 },
+					{ EnemyPath = "Animals.Chicken", Weight = 42 },
+				},
+			},
+			["Skeletal.Default"] = {
+				Entries = {
+					{ EnemyPath = "Skeletal.Base", Weight = 70 },
+					{ EnemyPath = "Skeletal.Korblox", Weight = 30 },
 				},
 			},
 			["Camp.Guards"] = {
 				Entries = {
-					{ EnemyPath = "Golem.Basalt", Weight = 55 },
-					{ EnemyPath = "Golem.Granite", Weight = 30 },
-					{ EnemyPath = "Golem.Runic", Weight = 15 },
+					{ EnemyPath = "Animals.Cow", Weight = 22 },
+					{ EnemyPath = "Animals.Sheep", Weight = 36 },
+					{ EnemyPath = "Animals.Chicken", Weight = 42 },
 				},
 			},
 			["Camp.Elite"] = {
 				Entries = {
-					{ EnemyPath = "Golem.Granite", Weight = 40 },
-					{ EnemyPath = "Golem.Runic", Weight = 60 },
+					{ EnemyPath = "Animals.Cow", Weight = 100 },
 				},
 			},
 		},
 		BiomeLevelRanges = {
 			TemperateGrassland = { Min = 5, Max = 20, Step = 5 },
 			PineHighlands = { Min = 15, Max = 40, Step = 5 },
-			Forest = { Min = 12, Max = 35, Step = 5 },
-			DenseForest = { Min = 18, Max = 45, Step = 5 },
+			Forest = { Min = 18, Max = 45, Step = 5 },
 			Alpine = { Min = 22, Max = 55, Step = 5 },
 			HighlandDesert = { Min = 14, Max = 38, Step = 5 },
 			Marshland = { Min = 20, Max = 50, Step = 5 },
@@ -134,7 +138,7 @@ local Settings = {
 		Enabled = true,
 		DefaultLootTableId = "FieldCache",
 		DefaultPrompt = {
-			ActionText = "Claim",
+			ActionText = "Open",
 			ObjectText = "Treasure Cache",
 			HoldDuration = 0.35,
 			MaxActivationDistance = 10,
@@ -170,6 +174,18 @@ local Settings = {
 						MaxStack = 999,
 						Weight = 3,
 						Data = { DisplayName = "Crude Ore" },
+					},
+					{
+						ItemKind = "Item",
+						StackKey = "Item:RedWarFlag",
+						Min = 1,
+						Max = 1,
+						MaxStack = 8,
+						Weight = 2,
+						Data = {
+							Kind = "Item",
+							ItemId = "RedWarFlag",
+						},
 					},
 				},
 				StackRewardRolls = 1,

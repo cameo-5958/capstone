@@ -8,7 +8,7 @@ return {
 	["Type"] = "Sword",
 	["Family"] = "Unbound",
 	["Rarity"] = "EXALTED",
-
+	["Icon"] = "rbxassetid://11860483433",
 	["BaseDamage"] = 185,
 	["__Stats"] = {
 		["Strength"] = 100,

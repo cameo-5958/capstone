@@ -55,6 +55,7 @@ type WorldState = {
 type EnemyGeneratedData = {
 	EnemyPath: string,
 	Level: number,
+	HealthBonus: number,
 	LootTableId: string?,
 }
 
@@ -70,6 +71,13 @@ type TreasureGeneratedData = {
 	LootTableId: string,
 	StackGrants: { TreasureStackGrant },
 	WeaponGrants: { string },
+}
+
+type SpawnGenerationType = "Boss" | "Standard" | "Treasure" | "NoPath"
+
+type SpawnDebugOverrides = {
+	EnemyBaseLevel: number?,
+	GenerationType: SpawnGenerationType?,
 }
 
 type SpawnPointState = {
@@ -97,6 +105,13 @@ type SpawnPointState = {
 
 local Settings = WorldSpawnSettings :: WorldSpawnSettingsType
 local WorldSpawnServiceServer = {}
+local endpoint = script.Parent:FindFirstChild("WorldEndpoint")
+if not endpoint then
+	endpoint = Instance.new("RemoteEvent")
+	endpoint.Name = "WorldEndpoint"
+	endpoint.Parent = script.Parent
+end
+local WorldEndpoint = endpoint :: RemoteEvent
 
 local SpawnPointsById = {} :: { [string]: SpawnPointState }
 local SpawnPointIdsByChunk = {} :: { [string]: { string } }
@@ -107,6 +122,16 @@ local SpawnRoot: Folder? = nil
 local TreasureRoot: Folder? = nil
 local DebugRoot: Folder? = nil
 local ActiveGenerationToken = 0
+local TREASURE_CLAIM_DISTANCE_TOLERANCE = 2
+local GENERATION_TYPE_BOSS: SpawnGenerationType = "Boss"
+local GENERATION_TYPE_STANDARD: SpawnGenerationType = "Standard"
+local GENERATION_TYPE_TREASURE: SpawnGenerationType = "Treasure"
+local GENERATION_TYPE_NO_PATH: SpawnGenerationType = "NoPath"
+local DEFAULT_BOSS_POOL_ID = "Camp.Elite"
+local RuntimeDebugOverrides = {
+	EnemyBaseLevel = nil,
+	GenerationType = GENERATION_TYPE_STANDARD,
+} :: SpawnDebugOverrides
 
 local function chunkKey(chunkX: number, chunkZ: number): string
 	return tostring(chunkX) .. ":" .. tostring(chunkZ)
@@ -354,8 +379,52 @@ local function rollTreasureLoot(lootTableId: string, rng: Random): TreasureGener
 	}
 end
 
+local function normalizeGenerationType(value: any): SpawnGenerationType
+	if value == GENERATION_TYPE_BOSS then
+		return GENERATION_TYPE_BOSS
+	elseif value == GENERATION_TYPE_STANDARD then
+		return GENERATION_TYPE_STANDARD
+	elseif value == GENERATION_TYPE_TREASURE then
+		return GENERATION_TYPE_TREASURE
+	elseif value == GENERATION_TYPE_NO_PATH then
+		return GENERATION_TYPE_NO_PATH
+	end
+	return GENERATION_TYPE_STANDARD
+end
+
+local function getGenerationTypeOverride(): SpawnGenerationType
+	return normalizeGenerationType(RuntimeDebugOverrides.GenerationType)
+end
+
+local function normalizeEnemyBaseLevel(value: any): number?
+	if type(value) ~= "number" then
+		return nil
+	end
+	local clamped = math.clamp(math.floor(value), 1, 120)
+	return clamped
+end
+
+local function getEnemyBaseLevelOverride(): number?
+	return normalizeEnemyBaseLevel(RuntimeDebugOverrides.EnemyBaseLevel)
+end
+
+local function shouldGenerateEnemiesForType(generationType: SpawnGenerationType): boolean
+	return generationType ~= GENERATION_TYPE_TREASURE
+end
+
+local function shouldGenerateTreasureForType(generationType: SpawnGenerationType): boolean
+	return generationType ~= GENERATION_TYPE_BOSS
+end
+
+local function shouldGenerateFallbackPathForType(generationType: SpawnGenerationType): boolean
+	return generationType ~= GENERATION_TYPE_NO_PATH and generationType ~= GENERATION_TYPE_TREASURE
+end
+
 local function shouldEnableEnemyMarker(markerConfig: EnemyMarkerConfig?): boolean
 	if not Settings.Enabled or not Settings.Enemy.Enabled then
+		return false
+	end
+	if not shouldGenerateEnemiesForType(getGenerationTypeOverride()) then
 		return false
 	end
 	if markerConfig and markerConfig.Enabled == false then
@@ -366,6 +435,9 @@ end
 
 local function shouldEnableTreasureMarker(markerConfig: TreasureMarkerConfig?): boolean
 	if not Settings.Enabled or not Settings.Treasure.Enabled then
+		return false
+	end
+	if not shouldGenerateTreasureForType(getGenerationTypeOverride()) then
 		return false
 	end
 	if markerConfig and markerConfig.Enabled == false then
@@ -526,6 +598,69 @@ local function createDebugAnchor(state: SpawnPointState)
 	part.Parent = DebugRoot
 end
 
+local function getPlayerRootPart(player: Player): BasePart?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart
+	end
+	return nil
+end
+
+local function getActiveTreasureAnchor(state: SpawnPointState): BasePart?
+	local model = state.ActiveTreasureModel
+	if not model or not model.Parent then
+		return nil
+	end
+
+	local anchor = model:FindFirstChild("TreasureAnchor")
+	if anchor and anchor:IsA("BasePart") then
+		return anchor
+	end
+
+	if model.PrimaryPart then
+		return model.PrimaryPart
+	end
+	return nil
+end
+
+local function isTreasureClaimInRange(state: SpawnPointState, player: Player): boolean
+	local rootPart = getPlayerRootPart(player)
+	if not rootPart then
+		return false
+	end
+
+	local anchor = getActiveTreasureAnchor(state)
+	if not anchor then
+		return false
+	end
+
+	local maxActivationDistance = Settings.Treasure.DefaultPrompt.MaxActivationDistance
+	local claimPrompt = anchor:FindFirstChild("ClaimPrompt")
+	if claimPrompt and claimPrompt:IsA("ProximityPrompt") then
+		maxActivationDistance = claimPrompt.MaxActivationDistance
+	end
+
+	local allowedDistance = math.max(1, maxActivationDistance) + TREASURE_CLAIM_DISTANCE_TOLERANCE
+	local distance = (rootPart.Position - anchor.Position).Magnitude
+	return distance <= allowedDistance
+end
+
+local function broadcastTreasureClaimVisual(state: SpawnPointState)
+	WorldEndpoint:FireAllClients("TreasureClaimed", {
+		SpawnId = state.Id,
+		PrefabId = state.PrefabId,
+		ColumnX = state.ColumnX,
+		ColumnZ = state.ColumnZ,
+		MarkerId = state.MarkerId,
+		Position = state.Position,
+	})
+end
+
 local function claimTreasure(spawnId: string, player: Player): boolean
 	local state = SpawnPointsById[spawnId]
 	if not state or state.Type ~= "Treasure" then
@@ -537,12 +672,21 @@ local function claimTreasure(spawnId: string, player: Player): boolean
 	if state.Status == "Claimed" then
 		return false
 	end
+	if state.Status ~= "Active" then
+		return false
+	end
 	if not state.TreasureData then
 		return false
 	end
+	if not isTreasureClaimInRange(state, player) then
+		logVerbose(string.format("Rejected treasure claim out of range: %s by %s", spawnId, player.Name))
+		return false
+	end
 
+	disconnectPrompt(state)
 	grantTreasureLoot(player, state.TreasureData)
 	state.Status = "Claimed"
+	broadcastTreasureClaimVisual(state)
 	destroyTreasureModel(state)
 	logVerbose(string.format("Treasure claimed: %s by %s", spawnId, player.Name))
 	return true
@@ -605,25 +749,65 @@ local function spawnTreasure(state: SpawnPointState)
 	state.Status = "Active"
 end
 
+local FALLBACK_PATH_PREFAB_ID = "PathFallback"
+local FALLBACK_PATH_MARKER_ID = "Enemy"
+local FALLBACK_PATH_MARKER_INDEX = 1
+local FALLBACK_PATH_MIN_TILE_GAP = 14
+local FALLBACK_PATH_SPAWN_ODDS = 0.08
+local FALLBACK_PATH_MAX_ENEMIES_PER_CHUNK = 2
+local DISTANCE_HEALTH_BONUS_MAX = 5
+local function computeDistanceHealthBonus(columnX: number, columnZ: number, radiusTiles: number): number
+	local safeRadius = math.max(1, radiusTiles)
+	local distance = math.sqrt(columnX * columnX + columnZ * columnZ)
+	local normalized = math.clamp(distance / safeRadius, 0, 1)
+	local scaled = normalized * DISTANCE_HEALTH_BONUS_MAX
+	return math.clamp(math.floor(scaled + 0.5), 0, DISTANCE_HEALTH_BONUS_MAX)
+end
+
 local function buildEnemyGeneratedData(
 	biome: string,
+	columnX: number,
+	columnZ: number,
+	worldRadiusTiles: number,
 	markerConfig: EnemyMarkerConfig?,
 	rng: Random
 ): EnemyGeneratedData?
-	local enemyPath = resolveEnemyPath(markerConfig, rng)
+	local generationType = getGenerationTypeOverride()
+	local enemyPath: string? = nil
+	if generationType == GENERATION_TYPE_BOSS then
+		local bossPool = Settings.Enemy.Pools[DEFAULT_BOSS_POOL_ID]
+		if bossPool then
+			enemyPath = chooseWeightedEnemyPath(bossPool, rng)
+		end
+		if not enemyPath then
+			enemyPath = resolveEnemyPath(markerConfig, rng)
+		end
+	else
+		enemyPath = resolveEnemyPath(markerConfig, rng)
+	end
 	if not enemyPath then
 		return nil
 	end
 
 	local levelRange = resolveEnemyRange(biome, markerConfig)
 	local level = rollLevel(levelRange, rng)
-	local lootTableId = if markerConfig and type(markerConfig.LootTableId) == "string" and markerConfig.LootTableId ~= ""
+	local baseLevelOverride = getEnemyBaseLevelOverride()
+	if baseLevelOverride then
+		level = math.max(level, baseLevelOverride)
+	end
+	if generationType == GENERATION_TYPE_BOSS then
+		level = math.max(level, levelRange.Max)
+	end
+	local lootTableId = if markerConfig
+			and type(markerConfig.LootTableId) == "string"
+			and markerConfig.LootTableId ~= ""
 		then markerConfig.LootTableId
 		else nil
 
 	return {
 		EnemyPath = enemyPath,
 		Level = level,
+		HealthBonus = computeDistanceHealthBonus(columnX, columnZ, worldRadiusTiles),
 		LootTableId = lootTableId,
 	}
 end
@@ -635,6 +819,22 @@ local function buildTreasureGeneratedData(markerConfig: TreasureMarkerConfig?, r
 	end
 
 	return rollTreasureLoot(lootTableId, rng)
+end
+
+local function shouldCreateFallbackPathSpawn(seed: number, column: TileColumn): boolean
+	if not column.Solid or not column.IsPath then
+		return false
+	end
+
+	local spacing = math.abs(column.X) % FALLBACK_PATH_MIN_TILE_GAP == 0
+		or math.abs(column.Z) % FALLBACK_PATH_MIN_TILE_GAP == 0
+	if not spacing then
+		return false
+	end
+
+	local rollSeed = foldHash(seed, foldHash(seed, column.X + 4096) + column.Z + 4096)
+	local rng = Random.new(math.max(1, rollSeed))
+	return rng:NextNumber() <= FALLBACK_PATH_SPAWN_ODDS
 end
 
 local function spawnEnemy(state: SpawnPointState)
@@ -655,6 +855,7 @@ local function spawnEnemy(state: SpawnPointState)
 			PrefabId = state.PrefabId,
 			MarkerId = state.MarkerId,
 			Biome = state.Biome,
+			HealthBonus = state.EnemyData.HealthBonus,
 		},
 		OnDeath = function(enemyUUID: string, _enemy: Entity)
 			local tracked = SpawnPointsById[state.Id]
@@ -814,6 +1015,7 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 	local chunkSize = world.Config.ChunkSize
 	local seed = math.max(1, world.Seed)
 	local spawnCount = 0
+	local fallbackEnemyCountByChunk = {} :: { [string]: number }
 
 	for _, column in pairs(world.Columns) do
 		if not column.Solid or column.StructureTag == nil then
@@ -881,7 +1083,14 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 			}
 
 			if spawnType == "Enemy" then
-				state.EnemyData = buildEnemyGeneratedData(column.Biome, markerConfigEnemy, rng)
+				state.EnemyData = buildEnemyGeneratedData(
+					column.Biome,
+					column.X,
+					column.Z,
+					world.Config.RadiusTiles,
+					markerConfigEnemy,
+					rng
+				)
 				if not state.EnemyData then
 					continue
 				end
@@ -900,6 +1109,76 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 				SpawnPointIdsByChunk[cKey] = spawnList
 			end
 			table.insert(spawnList, spawnId)
+			createDebugAnchor(state)
+			spawnCount += 1
+		end
+	end
+
+	if shouldGenerateFallbackPathForType(getGenerationTypeOverride()) then
+		for _, column in pairs(world.Columns) do
+			if not shouldCreateFallbackPathSpawn(seed, column) then
+				continue
+			end
+
+			local spawnChunkX = math.floor(column.X / chunkSize)
+			local spawnChunkZ = math.floor(column.Z / chunkSize)
+			local cKey = chunkKey(spawnChunkX, spawnChunkZ)
+			local existingCount = fallbackEnemyCountByChunk[cKey] or 0
+			if existingCount >= FALLBACK_PATH_MAX_ENEMIES_PER_CHUNK then
+				continue
+			end
+
+			local markerSeed = hashString(
+				string.format("%s:%s:%d", FALLBACK_PATH_PREFAB_ID, FALLBACK_PATH_MARKER_ID, FALLBACK_PATH_MARKER_INDEX),
+				foldHash(seed, foldHash(seed, column.X + 8192) + column.Z + 8192)
+			)
+			local rng = Random.new(math.max(1, markerSeed))
+			local enemyData =
+				buildEnemyGeneratedData(column.Biome, column.X, column.Z, world.Config.RadiusTiles, nil, rng)
+			if not enemyData then
+				continue
+			end
+
+			local spawnPosition = Vector3.new(column.X * tileSize, column.SurfaceY, column.Z * tileSize)
+			local spawnId = makeSpawnPointId(
+				seed,
+				column.X,
+				column.Z,
+				FALLBACK_PATH_PREFAB_ID,
+				FALLBACK_PATH_MARKER_ID,
+				FALLBACK_PATH_MARKER_INDEX
+			)
+			local state: SpawnPointState = {
+				Id = spawnId,
+				Type = "Enemy",
+				Biome = column.Biome,
+				ChunkX = spawnChunkX,
+				ChunkZ = spawnChunkZ,
+				ColumnX = column.X,
+				ColumnZ = column.Z,
+				PrefabId = FALLBACK_PATH_PREFAB_ID,
+				MarkerId = FALLBACK_PATH_MARKER_ID,
+				Position = spawnPosition,
+				CFrame = CFrame.new(spawnPosition),
+				Status = "Dormant",
+				EnemyData = enemyData,
+				TreasureData = nil,
+				PromptActionText = nil,
+				PromptObjectText = nil,
+				ActiveEnemyUUID = nil,
+				ActiveTreasureModel = nil,
+				PromptConnection = nil,
+				GenerationToken = ActiveGenerationToken,
+			}
+
+			SpawnPointsById[spawnId] = state
+			local spawnList = SpawnPointIdsByChunk[cKey]
+			if not spawnList then
+				spawnList = {}
+				SpawnPointIdsByChunk[cKey] = spawnList
+			end
+			table.insert(spawnList, spawnId)
+			fallbackEnemyCountByChunk[cKey] = existingCount + 1
 			createDebugAnchor(state)
 			spawnCount += 1
 		end
@@ -946,6 +1225,25 @@ function WorldSpawnServiceServer.GetSpawnPointCount(): number
 		count += 1
 	end
 	return count
+end
+
+function WorldSpawnServiceServer.SetDebugOverrides(overrides: { [string]: any }?)
+	local nextGenerationType = GENERATION_TYPE_STANDARD
+	local nextEnemyBaseLevel = nil :: number?
+	if type(overrides) == "table" then
+		nextGenerationType = normalizeGenerationType(overrides.GenerationType)
+		nextEnemyBaseLevel = normalizeEnemyBaseLevel(overrides.EnemyBaseLevel)
+	end
+
+	RuntimeDebugOverrides.GenerationType = nextGenerationType
+	RuntimeDebugOverrides.EnemyBaseLevel = nextEnemyBaseLevel
+end
+
+function WorldSpawnServiceServer.GetDebugOverrides(): SpawnDebugOverrides
+	return {
+		GenerationType = RuntimeDebugOverrides.GenerationType,
+		EnemyBaseLevel = RuntimeDebugOverrides.EnemyBaseLevel,
+	}
 end
 
 Players.PlayerRemoving:Connect(function(player)
