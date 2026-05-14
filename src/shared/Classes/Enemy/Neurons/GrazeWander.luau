@@ -11,6 +11,7 @@ setmetatable(GrazeWander, SuperNeuron)
 local RAYCAST_PARAMS = RaycastParams.new()
 RAYCAST_PARAMS.FilterType = Enum.RaycastFilterType.Exclude
 RAYCAST_PARAMS.FilterDescendantsInstances = { workspace:FindFirstChild("EntitiesFolder") or workspace }
+RAYCAST_PARAMS.RespectCanCollide = true
 
 local function snapToGround(x: number, z: number, fallbackY: number): Vector3
 	local start = Vector3.new(x, fallbackY + 24, z)

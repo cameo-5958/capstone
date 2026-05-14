@@ -1,18 +1,18 @@
 --!strict
-
-local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local React = require(ReplicatedStorage.Packages.react)
 local NinePartBorder = require(ReplicatedStorage.Classes.UI.NinePartBorder)
 local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
-local ItemToolServiceClient = require(ReplicatedStorage.Services.ItemTool.ItemToolServiceClient)
+local ItemLoadoutServiceClient = require(ReplicatedStorage.Services.ItemLoadout.ItemLoadoutServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WardrobePreviewLoader = require(ReplicatedStorage.Viewports.Wardrobe.WardrobePreviewLoader)
 local WardrobeSelection = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeSelection)
 
 type SelectedItem = WardrobeSelection.SelectedItem
 
 local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
+local InventoryItemsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("InventoryItems")
 
 type LoadoutSlot = {
 	Slot: number,
@@ -43,17 +43,24 @@ type HotbarInfo = {
 }
 
 local PANEL_WIDTH = 500
-local PANEL_HEIGHT = 560
+local PANEL_HEIGHT = 420
 local PANEL_LEFT_MARGIN = 24
 local BORDER_THICKNESS = 24
 local CONTENT_PAD = 20
 local HEADER_HEIGHT = 38
-local PREVIEW_SIZE = 129
-local TOP_SECTION_Y = 62
-local TOP_DIVIDER_Y = TOP_SECTION_Y + PREVIEW_SIZE + 16
-local ATTRIBUTE_TOP = TOP_DIVIDER_Y + 28
-local ATTRIBUTE_HEIGHT = 150
-local PASSIVES_TOP = ATTRIBUTE_TOP + ATTRIBUTE_HEIGHT + 18
+local PREVIEW_SIZE = 104
+local BODY_TOP = HEADER_HEIGHT + 8
+local TOP_SECTION_Y = 8
+local TOP_SECTION_HEIGHT = PREVIEW_SIZE + 10
+local TOP_DIVIDER_Y = TOP_SECTION_Y + TOP_SECTION_HEIGHT + 8
+local ATTRIBUTE_LABEL_TOP = TOP_DIVIDER_Y + 10
+local ATTRIBUTE_TOP = ATTRIBUTE_LABEL_TOP + 18
+local ATTRIBUTE_HEIGHT = 120
+local PASSIVES_LABEL_TOP = ATTRIBUTE_TOP + ATTRIBUTE_HEIGHT + 12
+local PASSIVES_TOP = PASSIVES_LABEL_TOP + 18
+local SCROLLBAR_THICKNESS = 5
+local CARD_HEIGHT = 48
+local CARD_GAP = 8
 
 local WOOD_DARK = Color3.fromRGB(28, 20, 9)
 local WOOD_PANEL = Color3.fromRGB(34, 23, 10)
@@ -68,6 +75,14 @@ local PASSIVE_BG = Color3.fromRGB(34, 54, 68)
 local PASSIVE_STROKE = Color3.fromRGB(77, 108, 130)
 local GREEN_TAG = Color3.fromRGB(30, 112, 62)
 local RED_TAG = Color3.fromRGB(114, 33, 41)
+
+local function isConsumableKind(itemKind: string?): boolean
+	return itemKind == "Consumable" or itemKind == "Item"
+end
+
+local function isLoadoutItemKind(itemKind: string?): boolean
+	return isConsumableKind(itemKind) or itemKind == "InventoryItem"
+end
 
 local function formatNumber(value: any): string
 	if type(value) ~= "number" then
@@ -108,7 +123,7 @@ end
 
 local function getSelectedName(selectedItem: SelectedItem?): string
 	if not selectedItem then
-		return "Select an Item"
+		return "Select an Item or Weapon"
 	end
 
 	if type(selectedItem.Name) == "string" and selectedItem.Name ~= "" then
@@ -140,7 +155,7 @@ local function isSelectedArmor(selectedItem: SelectedItem?): boolean
 end
 
 local function isSelectedItem(selectedItem: SelectedItem?): boolean
-	return selectedItem ~= nil and selectedItem.ItemKind == "Item"
+	return selectedItem ~= nil and isLoadoutItemKind(selectedItem.ItemKind)
 end
 
 local function getEnchantText(selectedItem: SelectedItem?): string
@@ -182,6 +197,10 @@ local function getSelectedWeaponId(selectedItem: SelectedItem?): string?
 end
 
 local function getWeaponDatabaseData(selectedItem: SelectedItem?): { [string]: any }
+	if not isSelectedWeapon(selectedItem) then
+		return {}
+	end
+
 	local weaponId = getSelectedWeaponId(selectedItem)
 	if type(weaponId) ~= "string" or weaponId == "" then
 		return {}
@@ -210,6 +229,34 @@ local function getWeaponDatabaseData(selectedItem: SelectedItem?): { [string]: a
 	return {}
 end
 
+local function getInventoryItemDatabaseData(selectedItem: SelectedItem?): { [string]: any }
+	if not selectedItem or selectedItem.ItemKind ~= "InventoryItem" then
+		return {}
+	end
+
+	local itemId = selectedItem.Data.ItemId
+	if type(itemId) ~= "string" or itemId == "" then
+		return {}
+	end
+
+	local folder = InventoryItemsDatabase:FindFirstChild(itemId)
+	if not folder or not folder:IsA("Folder") then
+		return {}
+	end
+
+	local dataModule = folder:FindFirstChild("Data")
+	if not dataModule or not dataModule:IsA("ModuleScript") then
+		return {}
+	end
+
+	local ok, databaseData = pcall(require, dataModule)
+	if ok and type(databaseData) == "table" then
+		return databaseData
+	end
+
+	return {}
+end
+
 local function getSelectedDescription(selectedItem: SelectedItem?): string
 	if not selectedItem then
 		return "Select an inventory item to inspect details."
@@ -221,10 +268,14 @@ local function getSelectedDescription(selectedItem: SelectedItem?): string
 		return description
 	end
 
-	local databaseData = getWeaponDatabaseData(selectedItem)
-	local databaseDescription = firstValue(databaseData.Description, databaseData.Desc)
-	if type(databaseDescription) == "string" and databaseDescription ~= "" then
-		return databaseDescription
+	for _, databaseData in ipairs({
+		getWeaponDatabaseData(selectedItem),
+		getInventoryItemDatabaseData(selectedItem),
+	}) do
+		local databaseDescription = firstValue(databaseData.Description, databaseData.Desc)
+		if type(databaseDescription) == "string" and databaseDescription ~= "" then
+			return databaseDescription
+		end
 	end
 
 	return "No description has been written for this item yet."
@@ -292,7 +343,7 @@ local function getSelectedHotbarInfo(selectedItem: SelectedItem?, loadout: Loado
 end
 
 local function getSelectedItemSlot(selectedItem: SelectedItem?, loadout: ItemLoadoutSnapshot): number?
-	if not selectedItem or selectedItem.ItemKind ~= "Item" then
+	if not selectedItem or not isLoadoutItemKind(selectedItem.ItemKind) then
 		return nil
 	end
 
@@ -398,30 +449,8 @@ local function getAttributeRows(selectedItem: SelectedItem?)
 	return rows
 end
 
-local function preloadVisualAssets(instance: Instance, context: string): boolean
-	local loadedCleanly = true
-	local ok, err = pcall(function()
-		ContentProvider:PreloadAsync({ instance }, function(_contentId: string, status: Enum.AssetFetchStatus)
-			if status ~= Enum.AssetFetchStatus.Success then
-				loadedCleanly = false
-			end
-		end)
-	end)
-
-	if not ok then
-		warn(("[WardrobeStats] Failed to preload %s preview assets: %s"):format(context, tostring(err)))
-		return false
-	end
-
-	if not loadedCleanly then
-		warn(("[WardrobeStats] %s preview had assets that did not preload cleanly."):format(context))
-	end
-
-	return loadedCleanly
-end
-
 local function resolveWeaponModelTemplate(selectedItem: SelectedItem?): Instance?
-	if not selectedItem or selectedItem.ItemKind ~= "Weapon" then
+	if not isSelectedWeapon(selectedItem) then
 		return nil
 	end
 
@@ -454,6 +483,53 @@ local function resolveWeaponModelTemplate(selectedItem: SelectedItem?): Instance
 	return nil
 end
 
+local function buildInventoryItemModel(selectedItem: SelectedItem?): Model?
+	if not selectedItem or selectedItem.ItemKind ~= "InventoryItem" then
+		return nil
+	end
+
+	local itemId = selectedItem.Data.ItemId
+	if type(itemId) ~= "string" or itemId == "" then
+		return nil
+	end
+
+	local folder = InventoryItemsDatabase:FindFirstChild(itemId)
+	if not folder or not folder:IsA("Folder") then
+		return nil
+	end
+
+	local namedModel = folder:FindFirstChild("Model")
+	if namedModel and namedModel:IsA("Model") then
+		return namedModel:Clone()
+	end
+
+	local modelBuilder = folder:FindFirstChild("ModelBuilder")
+	if modelBuilder and modelBuilder:IsA("ModuleScript") then
+		local ok, exported = pcall(require, modelBuilder)
+		if not ok then
+			return nil
+		end
+
+		local builderFn: (() -> Model)? = nil
+		if type(exported) == "function" then
+			builderFn = exported
+		elseif type(exported) == "table" and type((exported :: any).Build) == "function" then
+			builderFn = function()
+				return (exported :: any).Build()
+			end
+		end
+
+		if builderFn then
+			local built = builderFn()
+			if built and built:IsA("Model") then
+				return built
+			end
+		end
+	end
+
+	return nil
+end
+
 local function prepVisualClone(instance: Instance): ()
 	for _, descendant in ipairs(instance:GetDescendants()) do
 		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
@@ -467,13 +543,21 @@ local function prepVisualClone(instance: Instance): ()
 	end
 end
 
-local function cloneWeaponVisual(selectedItem: SelectedItem?): Model?
-	local template = resolveWeaponModelTemplate(selectedItem)
-	if not template then
+local function cloneSelectedVisual(selectedItem: SelectedItem?): Model?
+	local clone: Instance? = nil
+	if isSelectedWeapon(selectedItem) then
+		local template = resolveWeaponModelTemplate(selectedItem)
+		if template then
+			clone = template:Clone()
+		end
+	elseif selectedItem and selectedItem.ItemKind == "InventoryItem" then
+		clone = buildInventoryItemModel(selectedItem)
+	end
+
+	if not clone then
 		return nil
 	end
 
-	local clone = template:Clone()
 	prepVisualClone(clone)
 
 	if clone:IsA("Model") then
@@ -503,7 +587,7 @@ local function cloneWeaponVisual(selectedItem: SelectedItem?): Model?
 	return previewModel
 end
 
-local function frameWeaponModel(camera: Camera, model: Model): ()
+local function framePreviewModel(camera: Camera, model: Model): ()
 	model:PivotTo(CFrame.Angles(0, math.rad(-35), math.rad(-12)))
 
 	local boundingCFrame, size = model:GetBoundingBox()
@@ -517,10 +601,13 @@ local function frameWeaponModel(camera: Camera, model: Model): ()
 	camera.FieldOfView = fieldOfView
 end
 
-local function WeaponPreviewViewport(props: { SelectedItem: SelectedItem? })
+local function SelectedItemPreviewViewport(props: { SelectedItem: SelectedItem? })
 	local viewportRef = React.useRef(nil :: ViewportFrame?)
 	local selectedItem = props.SelectedItem
-	local selectedWeaponId = getSelectedWeaponId(selectedItem) or ""
+	local selectedItemId = if isSelectedWeapon(selectedItem)
+		then getSelectedWeaponId(selectedItem) or ""
+		elseif selectedItem and type(selectedItem.Data.ItemId) == "string" then selectedItem.Data.ItemId
+		else ""
 	local selectedName = getSelectedName(selectedItem)
 
 	React.useEffect(function()
@@ -539,36 +626,36 @@ local function WeaponPreviewViewport(props: { SelectedItem: SelectedItem? })
 		worldModel.Parent = viewport
 
 		local camera = Instance.new("Camera")
-		camera.Name = "WeaponCamera"
+		camera.Name = "ItemCamera"
 		camera.Parent = viewport
 		viewport.CurrentCamera = camera
 
-		local weaponModel = cloneWeaponVisual(selectedItem)
-		if weaponModel then
+		local previewModel = cloneSelectedVisual(selectedItem)
+		if previewModel then
 			task.spawn(function()
-				preloadVisualAssets(weaponModel, selectedName)
+				WardrobePreviewLoader.PreloadInstanceAssets(previewModel)
 
 				if disposed or viewportRef.current ~= viewport then
-					weaponModel:Destroy()
+					previewModel:Destroy()
 					return
 				end
 
-				weaponModel.Parent = worldModel
-				frameWeaponModel(camera, weaponModel)
+				previewModel.Parent = worldModel
+				framePreviewModel(camera, previewModel)
 			end)
 		end
 
 		return function()
 			disposed = true
-			if weaponModel and weaponModel.Parent == nil then
-				weaponModel:Destroy()
+			if previewModel and previewModel.Parent == nil then
+				previewModel:Destroy()
 			end
 
 			viewport.CurrentCamera = nil
 			worldModel:Destroy()
 			camera:Destroy()
 		end
-	end, { selectedWeaponId, selectedName })
+	end, { selectedItem and selectedItem.ItemKind or "", selectedItemId, selectedName })
 
 	return React.createElement("ViewportFrame", {
 		ref = viewportRef,
@@ -596,7 +683,7 @@ local function previewBox(selectedItem: SelectedItem?)
 			Thickness = 1,
 			Transparency = 0.1,
 		}),
-		Viewport = React.createElement(WeaponPreviewViewport, {
+		Viewport = React.createElement(SelectedItemPreviewViewport, {
 			SelectedItem = selectedItem,
 		}),
 	})
@@ -725,13 +812,14 @@ local function weaponHeader(
 	selectedItem: SelectedItem?,
 	hotbarInfo: HotbarInfo?,
 	selectedItemSlot: number?,
+	isLocked: boolean,
 	onEquipItemSlot: (number) -> (),
 	onUnequipItemSlot: (number) -> ()
 )
 	local data = getSelectedData(selectedItem)
 	local damageText = if type(data.BaseDamage) == "number" then formatNumber(data.BaseDamage) else "-"
 	local typeText = getSelectedClass(selectedItem)
-	local canAct = canActOnSelectedItem(selectedItem)
+	local canAct = canActOnSelectedItem(selectedItem) and not isLocked
 	local isWeapon = isSelectedWeapon(selectedItem)
 	local isItem = isSelectedItem(selectedItem)
 	local isArmor = isSelectedArmor(selectedItem)
@@ -792,7 +880,8 @@ end
 
 local function attributeDiagram(selectedItem: SelectedItem?)
 	local rows = getAttributeRows(selectedItem)
-	local hubCenter = Vector2.new(90, 74)
+	local frameHeight = ATTRIBUTE_HEIGHT
+	local hubCenter = Vector2.new(90, math.floor(frameHeight * 0.5))
 	local hubRadius = 46
 	local hubStroke = 3
 	local lineEndX = 278
@@ -1074,7 +1163,15 @@ local function passiveCards(selectedItem: SelectedItem?)
 	return cards
 end
 
-local function WardrobeStatsPanel()
+local function countCards(cards: { [string]: any }): number
+	local total = 0
+	for _ in pairs(cards) do
+		total += 1
+	end
+	return total
+end
+
+local function WardrobeStatsPanel(props: { IsLocked: boolean? })
 	local selectedItem, setSelectedItem = React.useState(function()
 		return WardrobeSelection.GetSelectedItem()
 	end)
@@ -1082,7 +1179,7 @@ local function WardrobeStatsPanel()
 		return WeaponServiceClient.GetLoadoutData() :: LoadoutSnapshot
 	end)
 	local itemLoadout, setItemLoadout = React.useState(function()
-		return ItemToolServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot
+		return ItemLoadoutServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot
 	end)
 
 	React.useEffect(function()
@@ -1111,12 +1208,12 @@ local function WardrobeStatsPanel()
 	end, {})
 
 	React.useEffect(function()
-		local connection = ItemToolServiceClient.GetLoadoutChangedSignal():Connect(function(nextLoadout: ItemLoadoutSnapshot)
+		local connection = ItemLoadoutServiceClient.GetLoadoutChangedSignal():Connect(function(nextLoadout: ItemLoadoutSnapshot)
 			setItemLoadout(nextLoadout)
 		end)
 
-		ItemToolServiceClient.RequestLoadout()
-		setItemLoadout(ItemToolServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot)
+		ItemLoadoutServiceClient.RequestLoadout()
+		setItemLoadout(ItemLoadoutServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot)
 
 		return function()
 			connection:Disconnect()
@@ -1125,22 +1222,28 @@ local function WardrobeStatsPanel()
 
 	local selectedHotbarInfo = getSelectedHotbarInfo(selectedItem, loadout)
 	local selectedItemSlot = getSelectedItemSlot(selectedItem, itemLoadout)
+	local isLocked = props.IsLocked == true
 	local shouldShowAttributes = selectedItem ~= nil and not isSelectedItem(selectedItem)
-	local abilitiesTop = if shouldShowAttributes then PASSIVES_TOP else ATTRIBUTE_TOP
+	local passiveCardElements = passiveCards(selectedItem)
+	local passiveCardCount = countCards(passiveCardElements)
+	local passiveListHeight = math.max(56, passiveCardCount * CARD_HEIGHT + math.max(0, passiveCardCount - 1) * CARD_GAP)
+	local passivesLabelTop = if shouldShowAttributes then PASSIVES_LABEL_TOP else ATTRIBUTE_LABEL_TOP
+	local passivesTop = if shouldShowAttributes then PASSIVES_TOP else ATTRIBUTE_TOP
+	local contentHeight = passivesTop + passiveListHeight + CONTENT_PAD
 	local equipSelectedItemToSlot = function(slot: number)
 		if not selectedItem then
 			return
 		end
 
 		local entryId = selectedItem.EntryId
-		if selectedItem.ItemKind ~= "Item" or type(entryId) ~= "string" or entryId == "" then
+		if not isLoadoutItemKind(selectedItem.ItemKind) or type(entryId) ~= "string" or entryId == "" then
 			return
 		end
 
-		ItemToolServiceClient.EquipInventoryEntryToSlot(entryId, slot)
+		ItemLoadoutServiceClient.EquipInventoryEntryToSlot(entryId, slot)
 	end
 	local unequipItemSlot = function(slot: number)
-		ItemToolServiceClient.UnequipSlot(slot)
+		ItemLoadoutServiceClient.UnequipSlot(slot)
 	end
 
 	return React.createElement("Frame", {
@@ -1191,52 +1294,79 @@ local function WardrobeStatsPanel()
 				ZIndex = 3,
 			}),
 		}),
-		TopDivider = React.createElement("Frame", {
-			BackgroundColor3 = Color3.fromRGB(53, 34, 14),
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(6, TOP_DIVIDER_Y),
-			Size = UDim2.new(1, -12, 0, 1),
-			ZIndex = 2,
-		}),
 		BodyShade = React.createElement("Frame", {
 			BackgroundColor3 = WOOD_PANEL,
 			BackgroundTransparency = 0.2,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(6, TOP_DIVIDER_Y + 1),
-			Size = UDim2.new(1, -12, 1, -(TOP_DIVIDER_Y + 7)),
+			Position = UDim2.fromOffset(6, HEADER_HEIGHT + 7),
+			Size = UDim2.new(1, -12, 1, -(HEADER_HEIGHT + 13)),
 			ZIndex = 1,
 		}),
-		WeaponHeader = weaponHeader(selectedItem, selectedHotbarInfo, selectedItemSlot, equipSelectedItemToSlot, unequipItemSlot),
-		AttributesLabel = if shouldShowAttributes then label("ATTRIBUTES", UDim2.fromOffset(CONTENT_PAD, TOP_DIVIDER_Y + 10), UDim2.fromOffset(120, 18), {
-			Font = Enum.Font.GothamBold,
-			TextColor3 = TEXT_MUTED,
-			TextSize = 10,
-		}) else nil,
-		Attributes = if shouldShowAttributes then attributeDiagram(selectedItem) else nil,
-		PassivesDivider = if shouldShowAttributes then React.createElement("Frame", {
-			BackgroundColor3 = Color3.fromRGB(53, 34, 14),
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(6, abilitiesTop - 28),
-			Size = UDim2.new(1, -12, 0, 1),
-			ZIndex = 2,
-		}) else nil,
-		PassivesLabel = label("ABILITIES", UDim2.fromOffset(CONTENT_PAD, abilitiesTop - 18), UDim2.fromOffset(120, 18), {
-			Font = Enum.Font.GothamBold,
-			TextColor3 = TEXT_MUTED,
-			TextSize = 10,
-		}),
-		Passives = React.createElement("Frame", {
+		ContentScroll = React.createElement("ScrollingFrame", {
+			Active = true,
+			AutomaticCanvasSize = Enum.AutomaticSize.None,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(CONTENT_PAD, abilitiesTop),
-			Size = UDim2.new(1, -(CONTENT_PAD * 2), 1, -(abilitiesTop + CONTENT_PAD)),
-			ZIndex = 3,
+			CanvasSize = UDim2.fromOffset(0, contentHeight),
+			Position = UDim2.fromOffset(0, BODY_TOP),
+			ScrollBarImageColor3 = GOLD_DIM,
+			ScrollBarThickness = SCROLLBAR_THICKNESS,
+			Size = UDim2.new(1, 0, 1, -BODY_TOP),
+			ZIndex = 2,
 		}, {
-			Layout = React.createElement("UIListLayout", {
-				Padding = UDim.new(0, 8),
-				SortOrder = Enum.SortOrder.LayoutOrder,
+			Content = React.createElement("Frame", {
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Size = UDim2.new(1, 0, 0, contentHeight),
+				ZIndex = 2,
+			}, {
+				TopDivider = React.createElement("Frame", {
+					BackgroundColor3 = Color3.fromRGB(53, 34, 14),
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(6, TOP_DIVIDER_Y),
+					Size = UDim2.new(1, -12, 0, 1),
+					ZIndex = 2,
+				}),
+				WeaponHeader = weaponHeader(
+					selectedItem,
+					selectedHotbarInfo,
+					selectedItemSlot,
+					isLocked,
+					equipSelectedItemToSlot,
+					unequipItemSlot
+				),
+				AttributesLabel = if shouldShowAttributes then label("ATTRIBUTES", UDim2.fromOffset(CONTENT_PAD, ATTRIBUTE_LABEL_TOP), UDim2.fromOffset(120, 18), {
+					Font = Enum.Font.GothamBold,
+					TextColor3 = TEXT_MUTED,
+					TextSize = 10,
+				}) else nil,
+				Attributes = if shouldShowAttributes then attributeDiagram(selectedItem) else nil,
+				PassivesDivider = if shouldShowAttributes then React.createElement("Frame", {
+					BackgroundColor3 = Color3.fromRGB(53, 34, 14),
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(6, passivesLabelTop - 10),
+					Size = UDim2.new(1, -12, 0, 1),
+					ZIndex = 2,
+				}) else nil,
+				PassivesLabel = label("ABILITIES", UDim2.fromOffset(CONTENT_PAD, passivesLabelTop), UDim2.fromOffset(120, 18), {
+					Font = Enum.Font.GothamBold,
+					TextColor3 = TEXT_MUTED,
+					TextSize = 10,
+				}),
+				Passives = React.createElement("Frame", {
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(CONTENT_PAD, passivesTop),
+					Size = UDim2.new(1, -(CONTENT_PAD * 2) - SCROLLBAR_THICKNESS, 0, passiveListHeight),
+					ZIndex = 3,
+				}, {
+					Layout = React.createElement("UIListLayout", {
+						Padding = UDim.new(0, CARD_GAP),
+						SortOrder = Enum.SortOrder.LayoutOrder,
+					}),
+					Cards = React.createElement(React.Fragment, nil, passiveCardElements),
+				}),
 			}),
-			Cards = React.createElement(React.Fragment, nil, passiveCards(selectedItem)),
 		}),
 	})
 end

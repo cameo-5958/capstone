@@ -4,13 +4,26 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
+local Signal = require(ReplicatedStorage.Classes.Modifier.Signal)
 local EnemyServiceClient = require(ReplicatedStorage.Services.Enemy.EnemyServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WorldServiceClient = require(ReplicatedStorage.Services.World.WorldServiceClient)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 
 type Entity = EntityTypes.Entity
 
 type CameraModeName = "Default" | "Aiming" | "Focus"
+
+type CinematicModeConfig = {
+	Fov: number,
+	Height: number,
+	DepthOffset: number,
+	LookAtHeight: number,
+	Smoothing: number,
+	MoveSpeed: number,
+	BoostMultiplier: number,
+	ToggleKey: Enum.KeyCode,
+}
 
 type OrbitModeConfig = {
 	Name: CameraModeName,
@@ -60,15 +73,23 @@ type CameraController = {
 	LastFocusMidpoint: Vector3?,
 	MouseLockSuppressed: boolean,
 	UpdateSuppressed: boolean,
+	CinematicEnabled: boolean,
+	CinematicFocus: Vector3?,
+	CinematicModeChanged: any,
 	RenderStepName: string,
 	CharacterConnection: RBXScriptConnection?,
 	InputChangedConnection: RBXScriptConnection?,
+	InputBeganConnection: RBXScriptConnection?,
 	Init: (self: CameraController) -> (),
 	BindCharacter: (self: CameraController, character: Model) -> (),
 	CycleMode: (self: CameraController, direction: number) -> CameraModeName,
 	ToggleOrbitFocusMode: (self: CameraController) -> CameraModeName,
 	SetMode: (self: CameraController, modeName: CameraModeName) -> CameraModeName,
 	GetMode: (self: CameraController) -> CameraModeName,
+	SetCinematicMode: (self: CameraController, enabled: boolean) -> boolean,
+	ToggleCinematicMode: (self: CameraController) -> boolean,
+	IsCinematicModeActive: (self: CameraController) -> boolean,
+	GetCinematicModeChangedSignal: (self: CameraController) -> any,
 	Update: (self: CameraController, deltaTime: number) -> (),
 	SetMouseLockSuppressed: (self: CameraController, suppressed: boolean) -> (),
 	SetUpdateSuppressed: (self: CameraController, suppressed: boolean) -> (),
@@ -77,6 +98,7 @@ type CameraController = {
 	AdjustZoom: (self: CameraController, delta: number) -> number,
 	BuildOrbitCamera: (self: CameraController, config: OrbitModeConfig) -> (CFrame, number),
 	BuildFocusCamera: (self: CameraController, config: FocusModeConfig, deltaTime: number) -> (CFrame, number),
+	BuildCinematicCamera: (self: CameraController, deltaTime: number) -> (CFrame, number),
 	SnapAimingToNearestEnemy: (self: CameraController) -> (),
 	ApplyMouseLock: (self: CameraController) -> (),
 	new: () -> CameraController,
@@ -132,6 +154,17 @@ local MODE_CONFIGS: {
 	},
 }
 
+local CINEMATIC_CONFIG: CinematicModeConfig = {
+	Fov = 44,
+	Height = 165,
+	DepthOffset = 72,
+	LookAtHeight = 0,
+	Smoothing = 7,
+	MoveSpeed = 180,
+	BoostMultiplier = 2.25,
+	ToggleKey = Enum.KeyCode.V,
+}
+
 local CameraController = {}
 CameraController.__index = CameraController
 local SharedController: CameraController? = nil
@@ -177,6 +210,9 @@ local function GetCharacterPivot(self: CameraController, lookAtHeight: number): 
 end
 
 local function ShouldForceFaceCamera(self: CameraController): boolean
+	if self.CinematicEnabled then
+		return false
+	end
 	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
 	return equippedWeapon ~= nil
 		and equippedWeapon.Class == "Bow"
@@ -258,7 +294,7 @@ local function ResolveCameraCollision(origin: Vector3, desiredPosition: Vector3,
 end
 
 function CameraController.ApplyMouseLock(self: CameraController)
-	if self.MouseLockSuppressed then
+	if self.MouseLockSuppressed or self.CinematicEnabled then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
 		return
@@ -295,7 +331,31 @@ function CameraController.BindCharacter(self: CameraController, character: Model
 	if rootPart then
 		local lookVector = rootPart.CFrame.LookVector
 		self.Yaw = math.atan2(-lookVector.X, -lookVector.Z)
+		if self.CinematicFocus == nil then
+			self.CinematicFocus = rootPart.Position
+		end
 	end
+end
+
+local function GetCinematicMoveVector(): Vector3
+	local inputX = 0
+	local inputZ = 0
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+		inputX -= 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+		inputX += 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+		inputZ -= 1
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+		inputZ += 1
+	end
+	if inputX == 0 and inputZ == 0 then
+		return Vector3.zero
+	end
+	return Vector3.new(inputX, 0, inputZ).Unit
 end
 
 function CameraController.ResolveFocusTarget(self: CameraController, config: FocusModeConfig): Entity?
@@ -449,6 +509,41 @@ function CameraController.GetMode(self: CameraController): CameraModeName
 	return self.CurrentModeName
 end
 
+function CameraController.GetCinematicModeChangedSignal(self: CameraController)
+	return self.CinematicModeChanged
+end
+
+function CameraController.IsCinematicModeActive(self: CameraController): boolean
+	return self.CinematicEnabled
+end
+
+function CameraController.SetCinematicMode(self: CameraController, enabled: boolean): boolean
+	if self.CinematicEnabled == enabled then
+		return self.CinematicEnabled
+	end
+
+	self.CinematicEnabled = enabled
+	self.LastCameraCFrame = nil
+	self.LastFocusMidpoint = nil
+	if enabled then
+		local rootPart = self.RootPart or GetRootPart(self.Character) or GetRootPart(self.Player.Character)
+		if rootPart then
+			self.CinematicFocus = rootPart.Position
+		elseif self.CinematicFocus == nil then
+			self.CinematicFocus = Vector3.zero
+		end
+		WorldServiceClient.SetStreamingFocus(self.CinematicFocus)
+	else
+		WorldServiceClient.SetStreamingFocus(nil)
+	end
+	self.CinematicModeChanged:Fire(self.CinematicEnabled)
+	return self.CinematicEnabled
+end
+
+function CameraController.ToggleCinematicMode(self: CameraController): boolean
+	return self:SetCinematicMode(not self.CinematicEnabled)
+end
+
 function CameraController.SetMode(self: CameraController, modeName: CameraModeName): CameraModeName
 	if modeName == "Focus" then
 		local focusConfig = self.Modes.Focus :: FocusModeConfig
@@ -476,6 +571,32 @@ function CameraController.CycleMode(self: CameraController, direction: number): 
 	local totalModes = #self.ModeOrder
 	local nextIndex = ((self.CurrentModeIndex - 1 + direction) % totalModes) + 1
 	return self:SetMode(self.ModeOrder[nextIndex])
+end
+
+function CameraController.BuildCinematicCamera(self: CameraController, deltaTime: number): (CFrame, number)
+	local focus = self.CinematicFocus
+	if focus == nil then
+		local rootPart = self.RootPart or GetRootPart(self.Player.Character)
+		focus = if rootPart then rootPart.Position else Vector3.zero
+	end
+
+	local moveVector = GetCinematicMoveVector()
+	if moveVector.Magnitude > 0 then
+		local speed = CINEMATIC_CONFIG.MoveSpeed
+		if
+			UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		then
+			speed *= CINEMATIC_CONFIG.BoostMultiplier
+		end
+		focus += Vector3.new(moveVector.X, 0, moveVector.Z) * speed * deltaTime
+	end
+	self.CinematicFocus = focus
+	WorldServiceClient.SetStreamingFocus(focus)
+
+	local lookAt = focus + Vector3.new(0, CINEMATIC_CONFIG.LookAtHeight, 0)
+	local desiredPosition = lookAt + Vector3.new(0, CINEMATIC_CONFIG.Height, CINEMATIC_CONFIG.DepthOffset)
+	return CFrame.lookAt(desiredPosition, lookAt, Vector3.yAxis), CINEMATIC_CONFIG.Fov
 end
 
 function CameraController.Update(self: CameraController, deltaTime: number)
@@ -506,18 +627,24 @@ function CameraController.Update(self: CameraController, deltaTime: number)
 	self:ApplyMouseLock()
 	camera.CameraType = Enum.CameraType.Scriptable
 
-	local modeConfig = self.Modes[self.CurrentModeName]
 	local desiredCFrame: CFrame
 	local desiredFov: number
+	local smoothing: number
 
-	if modeConfig.Name == "Focus" then
-		desiredCFrame, desiredFov = self:BuildFocusCamera(modeConfig :: FocusModeConfig, deltaTime)
+	if self.CinematicEnabled then
+		desiredCFrame, desiredFov = self:BuildCinematicCamera(deltaTime)
+		smoothing = CINEMATIC_CONFIG.Smoothing
 	else
-		self.LastFocusMidpoint = nil
-		desiredCFrame, desiredFov = self:BuildOrbitCamera(modeConfig :: OrbitModeConfig)
+		local modeConfig = self.Modes[self.CurrentModeName]
+		if modeConfig.Name == "Focus" then
+			desiredCFrame, desiredFov = self:BuildFocusCamera(modeConfig :: FocusModeConfig, deltaTime)
+		else
+			self.LastFocusMidpoint = nil
+			desiredCFrame, desiredFov = self:BuildOrbitCamera(modeConfig :: OrbitModeConfig)
+		end
+		smoothing = modeConfig.Smoothing
 	end
 
-	local smoothing = modeConfig.Smoothing
 	local alpha = GetSmoothingAlpha(smoothing, deltaTime)
 	if self.LastCameraCFrame then
 		camera.CFrame = self.LastCameraCFrame:Lerp(desiredCFrame, alpha)
@@ -540,6 +667,9 @@ function CameraController.Init(self: CameraController)
 	if self.InputChangedConnection then
 		self.InputChangedConnection:Disconnect()
 	end
+	if self.InputBeganConnection then
+		self.InputBeganConnection:Disconnect()
+	end
 
 	self.CharacterConnection = player.CharacterAdded:Connect(function(nextCharacter)
 		self.LastCameraCFrame = nil
@@ -556,6 +686,15 @@ function CameraController.Init(self: CameraController)
 				return
 			end
 			self:AdjustZoom(-input.Position.Z * 1.5)
+		end
+	end)
+
+	self.InputBeganConnection = UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or UserInputService:GetFocusedTextBox() then
+			return
+		end
+		if input.KeyCode == CINEMATIC_CONFIG.ToggleKey then
+			self:ToggleCinematicMode()
 		end
 	end)
 
@@ -585,9 +724,13 @@ function CameraController.new(): CameraController
 	self.LastFocusMidpoint = nil
 	self.MouseLockSuppressed = false
 	self.UpdateSuppressed = false
+	self.CinematicEnabled = false
+	self.CinematicFocus = nil
+	self.CinematicModeChanged = Signal.new()
 	self.RenderStepName = "CapstoneCameraController"
 	self.CharacterConnection = nil
 	self.InputChangedConnection = nil
+	self.InputBeganConnection = nil
 
 	return (self :: any) :: CameraController
 end

@@ -12,6 +12,7 @@ Handler.Parent = script.Parent
 Handler.Name = "EnemyHandler"
 
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Brains = require(ReplicatedStorage.Classes.Enemy.Brains)
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
@@ -19,9 +20,11 @@ local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local Movement = require(ReplicatedStorage.Classes.Entity.EntityMovement)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
 local DefaultAnimations = require(ReplicatedStorage.Database.Enemies.Default.Animations)
+local InventoryItemRegistry = require(ReplicatedStorage.Database.InventoryItems.Registry)
 local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
 local LevelScaling = require(ReplicatedStorage.Modules.Progression.LevelScaling)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
+local ItemDropServiceServer = nil :: any
 
 -- Use Entities class
 type Entity = EntityTypes.Entity
@@ -44,8 +47,10 @@ local __EnemyRuntime: {
 		Brain: any,
 		DeathConnection: any,
 		SpawnOptions: { [string]: any }?,
+		IsDying: boolean?,
 	},
-} = {}
+} =
+	{}
 local __Deaths: {
 	[string]: {
 		UUID: string,
@@ -56,10 +61,26 @@ local __Deaths: {
 } = {}
 
 local Enemies = {}
-local ENEMY_LEVEL_STEP = 5
-local DEFAULT_ENEMY_START_LEVEL = 5
+local ENEMY_LEVEL_STEP = 0
+local DEFAULT_ENEMY_START_LEVEL = 1
 local NextSpawnLevel = DEFAULT_ENEMY_START_LEVEL
 local ESCAPE_MEMORY_DURATION = 30
+local DEATH_DESPAWN_DELAY = 2.5
+local DEATH_BURST_HORIZONTAL_SPEED = 16
+local DEATH_BURST_VERTICAL_SPEED = 10
+local DEATH_BURST_RANDOM_SPEED = 5
+local DEATH_BURST_ANGULAR_SPEED = 8
+local DROP_SCATTER_RADIUS = 2.25
+
+type EnemyDropDefinition = {
+	ItemKind: string,
+	ItemId: string?,
+	StackKey: string?,
+	Quantity: number?,
+	MaxStack: number?,
+	Chance: number?,
+	Data: { [string]: any }?,
+}
 
 local function GetNextSpawnLevel(): number
 	local level = LevelScaling.ClampLevel(NextSpawnLevel)
@@ -103,6 +124,120 @@ local function RemoveEnemyForClients(uuid: string)
 	})
 end
 
+local function DestroyEnemyRuntime(runtime: {
+	Entity: Entity,
+	MovementEngine: any,
+	Brain: any,
+	DeathConnection: any,
+	SpawnOptions: { [string]: any }?,
+	IsDying: boolean?,
+}?)
+	if not runtime then
+		return
+	end
+
+	if runtime.DeathConnection then
+		runtime.DeathConnection:Disconnect()
+		runtime.DeathConnection = nil
+	end
+	if runtime.Brain then
+		runtime.Brain:Destroy()
+		runtime.Brain = nil
+	end
+	if runtime.MovementEngine then
+		runtime.MovementEngine:Destroy()
+		runtime.MovementEngine = nil
+	end
+end
+
+local function cloneData(data: { [string]: any }?): { [string]: any }
+	local clone = {}
+	if not data then
+		return clone
+	end
+
+	for key, value in pairs(data) do
+		clone[key] = value
+	end
+
+	return clone
+end
+
+local function getItemDropServiceServer()
+	if ItemDropServiceServer == nil then
+		ItemDropServiceServer = require(ReplicatedStorage.Services.ItemDrop.ItemDropServiceServer)
+	end
+	return ItemDropServiceServer
+end
+
+local function resolveDropGrant(drop: EnemyDropDefinition): (string?, { [string]: any }?, string?, number?)
+	local itemKind = drop.ItemKind
+	if type(itemKind) ~= "string" or itemKind == "" then
+		return nil, nil, nil, nil
+	end
+
+	if itemKind == "InventoryItem" then
+		local itemId = drop.ItemId
+		if type(itemId) ~= "string" or itemId == "" then
+			return nil, nil, nil, nil
+		end
+
+		local definition = InventoryItemRegistry.Get(itemId)
+		if not definition then
+			return nil, nil, nil, nil
+		end
+
+		return itemKind, {
+			Kind = "Item",
+			ItemId = definition.Id,
+		}, "InventoryItem:" .. definition.Id, definition.MaxStack
+	end
+
+	return itemKind, cloneData(drop.Data), drop.StackKey, drop.MaxStack
+end
+
+local function spawnEnemyDrops(entity: Entity)
+	local enemyDrops = (entity :: any).__Drops
+	if type(enemyDrops) ~= "table" or #enemyDrops <= 0 then
+		return
+	end
+
+	local origin = entity.RootPart and entity.RootPart.Position
+	if typeof(origin) ~= "Vector3" then
+		return
+	end
+
+	local rng = Random.new()
+	local droppedCount = 0
+	for _, drop in ipairs(enemyDrops) do
+		if type(drop) ~= "table" then
+			continue
+		end
+
+		local quantity = math.max(0, math.floor(drop.Quantity or 1))
+		local chance = math.clamp(type(drop.Chance) == "number" and drop.Chance or 1, 0, 1)
+		if quantity <= 0 or chance <= 0 or rng:NextNumber() > chance then
+			continue
+		end
+
+		local itemKind, data, stackKey, maxStack = resolveDropGrant(drop :: EnemyDropDefinition)
+		if not itemKind or not stackKey then
+			continue
+		end
+
+		droppedCount += 1
+		local angle = (droppedCount / math.max(1, #enemyDrops)) * math.pi * 2
+		local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * DROP_SCATTER_RADIUS
+		getItemDropServiceServer().DropStackGrant(origin + offset, {
+			ItemKind = itemKind,
+			StackKey = stackKey,
+			Quantity = quantity,
+			MaxStack = maxStack,
+			Data = data,
+		})
+	end
+end
+
 local function WipeEntity(uuid: string, asDeath: boolean?)
 	local runtime = __EnemyRuntime[uuid]
 	local entity = runtime and runtime.Entity or __Enemies[uuid]
@@ -110,18 +245,7 @@ local function WipeEntity(uuid: string, asDeath: boolean?)
 		return
 	end
 
-	if runtime then
-		if runtime.DeathConnection then
-			runtime.DeathConnection:Disconnect()
-			runtime.DeathConnection = nil
-		end
-		if runtime.Brain then
-			runtime.Brain:Destroy()
-		end
-		if runtime.MovementEngine then
-			runtime.MovementEngine:Destroy()
-		end
-	end
+	DestroyEnemyRuntime(runtime)
 
 	if asDeath ~= false then
 		__Deaths[uuid] = {
@@ -141,6 +265,94 @@ local function WipeEntity(uuid: string, asDeath: boolean?)
 	end
 
 	RemoveEnemyForClients(uuid)
+end
+
+local function BurstEnemyParts(character: Model, origin: Vector3)
+	local randomizer = Random.new()
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("Humanoid") then
+			local humanoid = descendant :: Humanoid
+			humanoid.BreakJointsOnDeath = false
+			humanoid.PlatformStand = true
+		elseif
+			descendant:IsA("Motor6D")
+			or descendant:IsA("Weld")
+			or descendant:IsA("WeldConstraint")
+			or descendant:IsA("Snap")
+		then
+			descendant:Destroy()
+		end
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if not descendant:IsA("BasePart") then
+			continue
+		end
+
+		local part = descendant :: BasePart
+		local isRoot = part.Name == "HumanoidRootPart"
+		part.Anchored = false
+		part.Massless = false
+		part.CanCollide = not isRoot
+		part.CanTouch = false
+		part.CanQuery = not isRoot
+
+		local direction = part.Position - origin
+		if direction.Magnitude < 0.05 then
+			direction = Vector3.new(
+				randomizer:NextNumber(-1, 1),
+				randomizer:NextNumber(0.15, 0.75),
+				randomizer:NextNumber(-1, 1)
+			)
+		end
+
+		local unitDirection = direction.Unit
+		local randomVelocity = Vector3.new(
+			randomizer:NextNumber(-DEATH_BURST_RANDOM_SPEED, DEATH_BURST_RANDOM_SPEED),
+			randomizer:NextNumber(0, DEATH_BURST_RANDOM_SPEED),
+			randomizer:NextNumber(-DEATH_BURST_RANDOM_SPEED, DEATH_BURST_RANDOM_SPEED)
+		)
+		part.AssemblyLinearVelocity = (unitDirection * DEATH_BURST_HORIZONTAL_SPEED)
+			+ Vector3.new(0, DEATH_BURST_VERTICAL_SPEED, 0)
+			+ randomVelocity
+		part.AssemblyAngularVelocity = Vector3.new(
+			randomizer:NextNumber(-DEATH_BURST_ANGULAR_SPEED, DEATH_BURST_ANGULAR_SPEED),
+			randomizer:NextNumber(-DEATH_BURST_ANGULAR_SPEED, DEATH_BURST_ANGULAR_SPEED),
+			randomizer:NextNumber(-DEATH_BURST_ANGULAR_SPEED, DEATH_BURST_ANGULAR_SPEED)
+		)
+	end
+
+	Debris:AddItem(character, DEATH_DESPAWN_DELAY + 0.5)
+end
+
+local function StartEnemyDeath(uuid: string)
+	local runtime = __EnemyRuntime[uuid]
+	local entity = runtime and runtime.Entity or __Enemies[uuid]
+	if not runtime or not entity or runtime.IsDying then
+		return
+	end
+
+	runtime.IsDying = true
+	DestroyEnemyRuntime(runtime)
+
+	__Deaths[uuid] = {
+		UUID = uuid,
+		Position = entity.RootPart.Position,
+		DiedAt = workspace:GetServerTimeNow(),
+		Entity = entity,
+	}
+
+	local character = entity.Character
+	if character and character.Parent then
+		BurstEnemyParts(character, entity.RootPart.Position)
+	end
+
+	task.delay(DEATH_DESPAWN_DELAY, function()
+		if __Enemies[uuid] == entity then
+			WipeEntity(uuid, false)
+		end
+	end)
 end
 
 local function resolveSpawnCFrame(spawnTarget: any): CFrame
@@ -334,6 +546,7 @@ local function ensureEnemyRigRequirements(model: Model)
 		humanoid.Name = "Humanoid"
 		humanoid.Parent = model
 	end
+	humanoid.BreakJointsOnDeath = false
 
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -421,7 +634,7 @@ function Enemies.Spawn(
 	CollisionServiceServer.AssignModel(model, "Enemy")
 
 	-- Create the entity here
-	local entity = Entity.new(model, data.Name)
+	local entity = Entity.new(model, data.Name, spawnLevel)
 	model:PivotTo(spawnCFrame)
 	model.Name = entity.UUID
 	local spawnContext: { [string]: any }? = nil
@@ -439,9 +652,6 @@ function Enemies.Spawn(
 		end
 	end
 	entity.__Animations = mergedAnimations
-	model.Parent = EnemyFolder
-	SetServerNetworkOwnership(model)
-
 	-- Set default enemy stats
 	for key, value in pairs(default) do
 		entity:SetStat(key, value)
@@ -473,8 +683,6 @@ function Enemies.Spawn(
 		end
 	end
 
-	entity.Level = spawnLevel
-	entity.__ScaledLevel = spawnLevel
 	LevelScaling.ApplyScaling(entity)
 
 	-- World spawns can grant additional HP based on distance from center.
@@ -482,16 +690,18 @@ function Enemies.Spawn(
 		local hpBonus = math.clamp(math.floor(spawnContext.HealthBonus), 0, 5)
 		if hpBonus > 0 then
 			local maxHealth = entity:GetStat("MaxHealth")
-			local currentHealth = entity:GetStat("Health")
 			if type(maxHealth) == "number" then
 				local boostedMax = maxHealth + hpBonus
 				entity:SetStat("MaxHealth", boostedMax)
-				if type(currentHealth) == "number" then
-					entity:SetStat("Health", math.min(boostedMax, currentHealth + hpBonus))
-				end
+				-- Spawned enemies should always start at full health after scaling.
+				entity:SetStat("Health", boostedMax)
 			end
 		end
 	end
+
+	-- Parent only after stats/scaling are finalized so clients see the final values immediately.
+	model.Parent = EnemyFolder
+	SetServerNetworkOwnership(model)
 
 	local brainProfile = data.__BrainProfile
 	if brainProfile == "PassivePrey" then
@@ -518,26 +728,30 @@ function Enemies.Spawn(
 
 	local spawnPosition = spawnCFrame.Position
 	if spawnContext and type(spawnContext.SpawnPointId) == "string" and spawnContext.SpawnPointId ~= "" then
-		print(string.format(
-			"[EnemyService] Spawn enemy=%s uuid=%s level=%d spawnPoint=%s position=(%.2f, %.2f, %.2f)",
-			e,
-			entity.UUID,
-			spawnLevel,
-			spawnContext.SpawnPointId,
-			spawnPosition.X,
-			spawnPosition.Y,
-			spawnPosition.Z
-		))
+		print(
+			string.format(
+				"[EnemyService] Spawn enemy=%s uuid=%s level=%d spawnPoint=%s position=(%.2f, %.2f, %.2f)",
+				e,
+				entity.UUID,
+				spawnLevel,
+				spawnContext.SpawnPointId,
+				spawnPosition.X,
+				spawnPosition.Y,
+				spawnPosition.Z
+			)
+		)
 	else
-		print(string.format(
-			"[EnemyService] Spawn enemy=%s uuid=%s level=%d position=(%.2f, %.2f, %.2f)",
-			e,
-			entity.UUID,
-			spawnLevel,
-			spawnPosition.X,
-			spawnPosition.Y,
-			spawnPosition.Z
-		))
+		print(
+			string.format(
+				"[EnemyService] Spawn enemy=%s uuid=%s level=%d position=(%.2f, %.2f, %.2f)",
+				e,
+				entity.UUID,
+				spawnLevel,
+				spawnPosition.X,
+				spawnPosition.Y,
+				spawnPosition.Z
+			)
+		)
 	end
 
 	-- Add to the database
@@ -550,15 +764,22 @@ function Enemies.Spawn(
 		else Brains.Aggressive(movementEngine, 32)
 	local deathConnection = entity:GetStatChangedSignal("Health"):Connect(function(newValue: number)
 		if newValue <= 0 then
+			spawnEnemyDrops(entity)
 			if spawnOptions and type(spawnOptions.OnDeath) == "function" then
 				local ok, callbackError = pcall(function()
 					spawnOptions.OnDeath(entity.UUID, entity)
 				end)
 				if not ok then
-					warn(string.format("[EnemyServiceServer] OnDeath callback failed for %s: %s", entity.UUID, tostring(callbackError)))
+					warn(
+						string.format(
+							"[EnemyServiceServer] OnDeath callback failed for %s: %s",
+							entity.UUID,
+							tostring(callbackError)
+						)
+					)
 				end
 			end
-			WipeEntity(entity.UUID, true)
+			StartEnemyDeath(entity.UUID)
 		end
 	end)
 	__EnemyRuntime[entity.UUID] = {

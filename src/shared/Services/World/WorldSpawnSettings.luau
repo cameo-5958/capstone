@@ -67,6 +67,11 @@ export type TreasureSettings = {
 	LootTables: { [string]: TreasureLootTable },
 }
 
+export type HarvestSettings = {
+	Enabled: boolean,
+	DefaultPrompt: PromptSettings,
+}
+
 export type DebugSettings = {
 	Verbose: boolean,
 	ShowSpawnAnchors: boolean,
@@ -77,6 +82,7 @@ export type WorldSpawnSettings = {
 	ChunkLifecycle: ChunkLifecycleSettings,
 	Enemy: EnemySettings,
 	Treasure: TreasureSettings,
+	Harvest: HarvestSettings,
 	Debug: DebugSettings,
 }
 
@@ -91,7 +97,7 @@ local Settings = {
 
 	Enemy = {
 		Enabled = true,
-		DefaultPoolId = "Animals.Herd",
+		DefaultPoolId = "Skeletal.Default",
 		Pools = {
 			["Animals.Herd"] = {
 				Entries = {
@@ -108,24 +114,23 @@ local Settings = {
 			},
 			["Camp.Guards"] = {
 				Entries = {
-					{ EnemyPath = "Animals.Cow", Weight = 22 },
-					{ EnemyPath = "Animals.Sheep", Weight = 36 },
-					{ EnemyPath = "Animals.Chicken", Weight = 42 },
+					{ EnemyPath = "ROBLOX.Noob", Weight = 65 },
+					{ EnemyPath = "ROBLOX.Guest", Weight = 35 },
 				},
 			},
 			["Camp.Elite"] = {
 				Entries = {
-					{ EnemyPath = "Animals.Cow", Weight = 100 },
+					{ EnemyPath = "ROBLOX.Builder", Weight = 55 },
+					{ EnemyPath = "ROBLOX.Bacon", Weight = 45 },
 				},
 			},
 		},
 		BiomeLevelRanges = {
-			TemperateGrassland = { Min = 5, Max = 20, Step = 5 },
-			PineHighlands = { Min = 15, Max = 40, Step = 5 },
+			Plains = { Min = 5, Max = 20, Step = 5 },
 			Forest = { Min = 18, Max = 45, Step = 5 },
-			Alpine = { Min = 22, Max = 55, Step = 5 },
-			HighlandDesert = { Min = 14, Max = 38, Step = 5 },
-			Marshland = { Min = 20, Max = 50, Step = 5 },
+			Tundra = { Min = 22, Max = 55, Step = 5 },
+			Desert = { Min = 14, Max = 38, Step = 5 },
+			Mountain = { Min = 24, Max = 60, Step = 5 },
 		},
 		DefaultLevelRange = {
 			Min = 10,
@@ -176,14 +181,14 @@ local Settings = {
 						Data = { DisplayName = "Crude Ore" },
 					},
 					{
-						ItemKind = "Item",
+						ItemKind = "Consumable",
 						StackKey = "Item:RedWarFlag",
 						Min = 1,
 						Max = 1,
 						MaxStack = 8,
 						Weight = 2,
 						Data = {
-							Kind = "Item",
+							Kind = "Consumable",
 							ItemId = "RedWarFlag",
 						},
 					},
@@ -283,6 +288,17 @@ local Settings = {
 				},
 				WeaponRolls = 1,
 			},
+		},
+	},
+
+	Harvest = {
+		Enabled = true,
+		DefaultPrompt = {
+			ActionText = "Harvest",
+			ObjectText = "Forage",
+			HoldDuration = 0.18,
+			MaxActivationDistance = 10,
+			RequiresLineOfSight = false,
 		},
 	},
 

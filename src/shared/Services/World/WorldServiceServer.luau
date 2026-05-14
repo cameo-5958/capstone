@@ -19,8 +19,11 @@ local PrefabExecutor = require(script.Parent.Prefabs.PrefabExecutor)
 local WorldStructureSettings = require(script.Parent.WorldStructureSettings)
 local WorldSpawnServiceServer = require(script.Parent.WorldSpawnServiceServer)
 local EnemyServiceServer = require(script.Parent.Parent.Enemy.EnemyServiceServer)
+local SpawnCampScene = require(script.Parent.Prefabs.Biomes.Shared.SpawnCampScene)
+local TransitionCampScene = require(script.Parent.Prefabs.Biomes.Shared.TransitionCampScene)
 local FootprintSieve = require(script.Parent.Sieves.FootprintSieve)
 local HeightSieve = require(script.Parent.Sieves.HeightSieve)
+local MountainHeightSieve = require(script.Parent.Sieves.MountainHeightSieve)
 local BiomeSieve = require(script.Parent.Sieves.BiomeSieve)
 local BiomeEdgeSmoothingSieve = require(script.Parent.Sieves.BiomeEdgeSmoothingSieve)
 local ThicknessSieve = require(script.Parent.Sieves.ThicknessSieve)
@@ -32,7 +35,6 @@ local SurfaceSmoothingSieve = require(script.Parent.Sieves.SurfaceSmoothingSieve
 local PathSieve = require(script.Parent.Sieves.PathSieve)
 local StructureFootprintFlatteningSieve = require(script.Parent.Sieves.StructureFootprintFlatteningSieve)
 local HeightSnapSieve = require(script.Parent.Sieves.HeightSnapSieve)
-
 
 type WorldConfig = {
 	Seed: number,
@@ -100,17 +102,24 @@ type WorldState = {
 	CollisionParts: number,
 	PathStart: TileColumn?,
 	PathEndpoints: { TileColumn },
+	BossEndpoint: TileColumn?,
 	PathNodeCount: number,
-	PathRoutes: { { {
-		X: number,
-		Z: number,
-		Height: number,
-		RadiusScale: number,
-		IsStructureNode: boolean?,
-		PathRadiusTiles: number?,
-		FlattenRadiusTiles: number?,
-		CarveHeight: number?,
-	} } },
+	PathRoutes: {
+		{
+			{
+				X: number,
+				Z: number,
+				Height: number,
+				RadiusScale: number,
+				IsOccurrenceNode: boolean?,
+				IsIncidentNode: boolean?,
+				IsStructureNode: boolean?,
+				PathRadiusTiles: number?,
+				FlattenRadiusTiles: number?,
+				CarveHeight: number?,
+			}
+		}
+	},
 }
 
 type DepthAnchor = {
@@ -125,6 +134,8 @@ type PathPoint = {
 	Z: number,
 	Height: number,
 	RadiusScale: number,
+	IsOccurrenceNode: boolean?,
+	IsIncidentNode: boolean?,
 	IsStructureNode: boolean?,
 	PathRadiusTiles: number?,
 	FlattenRadiusTiles: number?,
@@ -157,13 +168,15 @@ local WorldServiceServer = {}
 local WorldRoot: Folder? = nil
 local VisualRoot: Folder? = nil
 local CollisionRoot: Folder? = nil
-local PathBridgeRoot: Folder? = nil
 local ActiveSpawnLocation: SpawnLocation? = nil
 
 local CurrentSeed = 0
 local CurrentWorld: WorldState? = nil
 local CollapseGeneration = 0
 local CollapseTask: thread? = nil
+local MatchStarted = false
+local WorldGenerationInProgress = false
+local PlayerReadyStates: { [Player]: boolean } = {}
 
 local TerrainTuning = {
 	MountainRingStart = 0.2,
@@ -218,8 +231,11 @@ local TerrainTuning = {
 	PathNodeHeightSmoothingPasses = 4,
 	PathNodeHeightSmoothingBlend = 0.62,
 	PathNodeMaxRouteHeightDelta = 0,
-	PathNodeStructureChance = 0.34,
-	AmbientStructureNodeCount = 18,
+	PathOccurrenceChance = 0.06,
+	PathNodeStructureChance = 0.1,
+	IncidentNodeCount = 15,
+	IncidentNodeStructureChance = 0.12,
+	AmbientStructureNodeCount = 8,
 	AmbientStructureNodeAttempts = 260,
 	AmbientStructureNodeMinSpacing = 16,
 	CityNodeCount = 2,
@@ -265,13 +281,12 @@ local CollapseTuning = {
 	Enabled = true,
 	InitialDelaySeconds = 60,
 	TickSeconds = 6,
-	TilesPerTick = 4,
+	MaxTilesPerTick = 6,
 	StartRadiusTiles = 4,
 	RadiusStepTiles = 2,
 	MaxRadiusTiles = 220,
-	SpawnSafeRadiusTiles = 18,
-	CollisionRebuildBatchInterval = 4,
-	SpawnRebuildBatchInterval = 8,
+	CollisionRebuildBatchInterval = 1,
+	SpawnRebuildBatchInterval = 1,
 	AnimationRangeStuds = 360,
 	FallDistanceStuds = 100,
 	FallDurationSeconds = 2.2,
@@ -285,13 +300,8 @@ local ENVIRONMENT_STRUCTURE_SCALE = 0.58
 local RuntimeNatureChanceByBiome: { [string]: number } = WorldStructureSettings.RuntimeNatureChanceByBiome
 local RuntimeNatureWeightsByBiome: { [string]: { number } } = WorldStructureSettings.RuntimeNatureWeightsByBiome
 local RuntimeNodeStructuresEnabled = WorldStructureSettings.RuntimeNodeStructuresEnabled
-local RuntimeNodeStructureChance = math.clamp(
-	if type(WorldStructureSettings.RuntimeNodeStructureChance) == "number"
-		then WorldStructureSettings.RuntimeNodeStructureChance
-		else TerrainTuning.PathNodeStructureChance,
-	0,
-	1
-)
+local RuntimePathOccurrenceChance = TerrainTuning.PathOccurrenceChance
+local RuntimeNodeStructureChance = TerrainTuning.PathNodeStructureChance
 local RuntimeNodePoolByBiome: { [string]: { string } } = WorldStructureSettings.RuntimeNodePoolByBiome
 local RuntimeNodeWeightsByBiome: { [string]: { number } } = WorldStructureSettings.RuntimeNodeWeightsByBiome
 local RuntimeNodeSharedPool: { string } = WorldStructureSettings.RuntimeNodeSharedPool
@@ -304,10 +314,21 @@ local RuntimeNodeAssemblyWeightsByBiome: { [string]: { number } } =
 local RuntimeNodeAssemblySharedPool: { string } = WorldStructureSettings.RuntimeNodeAssemblySharedPool
 local RuntimeNodeAssemblySharedWeights: { number } = WorldStructureSettings.RuntimeNodeAssemblySharedWeights
 local ManualStructurePreviewSettings = WorldStructureSettings.ManualStructurePreview
+local TransitionCampPreviewSettings = WorldStructureSettings.TransitionCampPreview
 local StructureFlatteningSettings = WorldStructureSettings.StructureFlattening
+local SPAWN_CAMP_MODEL_NAME = "SpawnCampScene"
+local TRANSITION_CAMP_STAGING_FOLDER_NAME = "PrefabStaging"
+local TRANSITION_CAMP_STAGING_MODEL_NAME = "TransitionCampScene"
 
 local function makeColumnKey(x: number, z: number): string
 	return tostring(x) .. ":" .. tostring(z)
+end
+
+local function normalizeBiomeName(biome: string?): string?
+	if type(biome) ~= "string" then
+		return nil
+	end
+	return WorldTypes.BiomeAliases[biome]
 end
 
 local function hashStringToSeed(value: string): number
@@ -338,7 +359,7 @@ local function getBiomeMaterials(biome: string)
 		return biomeMaterials
 	end
 
-	return WorldTypes.BiomeMaterials.TemperateGrassland
+	return WorldTypes.BiomeMaterials.Plains
 end
 
 local function ensureWorldRoots()
@@ -367,17 +388,64 @@ local function ensureWorldRoots()
 		collision.Parent = root
 	end
 
-	local pathBridges = visuals:FindFirstChild("PathBridgeRoot")
-	if not pathBridges then
-		pathBridges = Instance.new("Folder")
-		pathBridges.Name = "PathBridgeRoot"
-		pathBridges.Parent = visuals
-	end
-
 	WorldRoot = root :: Folder
 	VisualRoot = visuals :: Folder
 	CollisionRoot = collision :: Folder
-	PathBridgeRoot = pathBridges :: Folder
+end
+
+local function getReadyPlayerCount(): number
+	local readyCount = 0
+	for _, isReady in pairs(PlayerReadyStates) do
+		if isReady then
+			readyCount += 1
+		end
+	end
+	return readyCount
+end
+
+local function getTrackedPlayerCount(): number
+	local count = 0
+	for _ in pairs(PlayerReadyStates) do
+		count += 1
+	end
+	return count
+end
+
+local function getPlayerReadyState(player: Player): boolean
+	return PlayerReadyStates[player] == true
+end
+
+local function hasAllPlayersReady(): boolean
+	local playerCount = 0
+	for _, player in ipairs(Players:GetPlayers()) do
+		playerCount += 1
+		if PlayerReadyStates[player] ~= true then
+			return false
+		end
+	end
+
+	return playerCount > 0
+end
+
+local function buildStartStatePayload(player: Player?): { [string]: any }
+	return {
+		MatchStarted = MatchStarted,
+		WorldGenerating = WorldGenerationInProgress,
+		WorldReady = CurrentWorld ~= nil and not WorldGenerationInProgress,
+		ReadyCount = getReadyPlayerCount(),
+		TotalPlayers = getTrackedPlayerCount(),
+		LocalPlayerReady = if player then getPlayerReadyState(player) else false,
+	}
+end
+
+local function fireStartStateToPlayer(player: Player)
+	API:FireClient(player, "SyncStartState", buildStartStatePayload(player))
+end
+
+local function broadcastStartState()
+	for _, player in ipairs(Players:GetPlayers()) do
+		fireStartStateToPlayer(player)
+	end
 end
 
 local function clearCollisionRoot()
@@ -386,16 +454,6 @@ local function clearCollisionRoot()
 	end
 
 	for _, child in ipairs(CollisionRoot:GetChildren()) do
-		child:Destroy()
-	end
-end
-
-local function clearPathBridgeRoot()
-	if not PathBridgeRoot then
-		return
-	end
-
-	for _, child in ipairs(PathBridgeRoot:GetChildren()) do
 		child:Destroy()
 	end
 end
@@ -487,9 +545,10 @@ local function getPreferredSpawnColumn(world: WorldState): TileColumn?
 	local bestScore = -math.huge
 	local config = world.Config
 	local favoredBiomes = {
-		TemperateGrassland = 1.35,
+		Plains = 1.35,
 		Forest = 1.2,
-		HighlandDesert = 1.15,
+		Desert = 1.15,
+		Mountain = 1.1,
 	}
 
 	for _, column in pairs(world.Columns) do
@@ -568,11 +627,10 @@ local function updateSpawnLocation(world: WorldState)
 		spawn.AllowTeamChangeOnTouch = false
 		spawn.CanCollide = false
 		spawn.CanTouch = false
-		spawn.Material = Enum.Material.Neon
-		spawn.Color = Color3.fromRGB(110, 220, 255)
-		spawn.Transparency = 0.15
-		local spawnSize = math.max(10, world.Config.TileSize * 2)
-		spawn.Size = Vector3.new(spawnSize, 1, spawnSize)
+		spawn.CanQuery = false
+		spawn.Material = Enum.Material.SmoothPlastic
+		spawn.Transparency = 1
+		spawn.Size = Vector3.new(2, 1, 2)
 		spawn.Parent = WorldRoot
 		existing = spawn
 	end
@@ -584,12 +642,34 @@ local function updateSpawnLocation(world: WorldState)
 	local spawnZ = if spawnColumn then spawnColumn.Z * tileSize else 0
 	local topY = if spawnColumn then spawnColumn.SurfaceY else world.Config.BaseY
 	local yOffset = spawnLocation.Size.Y * 0.5 + 3
-	spawnLocation.Position = Vector3.new(spawnX, topY + yOffset, spawnZ)
+	local surfacePosition = Vector3.new(spawnX, topY, spawnZ)
+	local spawnPosition = surfacePosition + Vector3.new(0, yOffset, 0)
+	local campLookTarget = surfacePosition + Vector3.new(0, yOffset, -10)
+	spawnLocation.CFrame = CFrame.lookAt(spawnPosition, campLookTarget)
 	spawnLocation:SetAttribute("WorldSeed", world.Seed)
 
+	local existingCampScene = WorldRoot:FindFirstChild(SPAWN_CAMP_MODEL_NAME)
+	if existingCampScene then
+		existingCampScene:Destroy()
+	end
+
+	local spawnCampScene = SpawnCampScene.Build(WorldRoot, {
+		Position = surfacePosition,
+		TileSize = tileSize,
+		SurfaceY = topY,
+		Biome = "Shared",
+		Seed = world.Seed,
+		NameSuffix = "Startpoint",
+	})
+	spawnCampScene.Name = SPAWN_CAMP_MODEL_NAME
+	spawnCampScene:SetAttribute("WorldSeed", world.Seed)
+	spawnCampScene:SetAttribute("StartpointSpawnCamp", true)
+
 	ActiveSpawnLocation = spawnLocation
-	for _, player in ipairs(Players:GetPlayers()) do
-		player.RespawnLocation = spawnLocation
+	if MatchStarted then
+		for _, player in ipairs(Players:GetPlayers()) do
+			player.RespawnLocation = spawnLocation
+		end
 	end
 end
 
@@ -630,6 +710,52 @@ local function spawnManualStructurePreview(world: WorldState)
 	galleryRoot:SetAttribute("GeneratedBy", "PrefabExecutor")
 end
 
+local function ensureTransitionCampStagingFolder(): Folder
+	local existing = Workspace:FindFirstChild(TRANSITION_CAMP_STAGING_FOLDER_NAME)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+
+	if existing then
+		existing:Destroy()
+	end
+
+	local folder = Instance.new("Folder")
+	folder.Name = TRANSITION_CAMP_STAGING_FOLDER_NAME
+	folder.Parent = Workspace
+	return folder
+end
+
+local function spawnTransitionCampPreview(world: WorldState)
+	if not TransitionCampPreviewSettings.Enabled then
+		return
+	end
+
+	if TransitionCampPreviewSettings.StudioOnly and not RunService:IsStudio() then
+		return
+	end
+
+	local stagingFolder = ensureTransitionCampStagingFolder()
+	local existingScene = stagingFolder:FindFirstChild(TRANSITION_CAMP_STAGING_MODEL_NAME)
+	if existingScene then
+		existingScene:Destroy()
+	end
+
+	local position = TransitionCampPreviewSettings.Position
+	local tileSize = math.max(4, TransitionCampPreviewSettings.TileSize)
+	local sceneModel = TransitionCampScene.Build(stagingFolder, {
+		Position = position,
+		TileSize = tileSize,
+		SurfaceY = position.Y,
+		Biome = TransitionCampPreviewSettings.Biome,
+		Seed = world.Seed,
+		NameSuffix = "Staging",
+	})
+	sceneModel.Name = TRANSITION_CAMP_STAGING_MODEL_NAME
+	sceneModel:SetAttribute("PrefabStaging", true)
+	sceneModel:SetAttribute("WorldSeed", world.Seed)
+end
+
 local function teleportPlayerToSpawn(player: Player, attemptsRemaining: number?)
 	if not ActiveSpawnLocation then
 		return
@@ -668,11 +794,15 @@ local function teleportPlayerToSpawn(player: Player, attemptsRemaining: number?)
 end
 
 local function isSupportedBiome(biome: string?): boolean
-	return type(biome) == "string" and WorldTypes.BiomeMaterials[biome] ~= nil
+	local normalized = normalizeBiomeName(biome)
+	return normalized ~= nil and WorldTypes.BiomeMaterials[normalized] ~= nil
 end
 
 local function makeDefaultConfig(seed: number, biomeOverride: string?): WorldConfig
-	local biome = if isSupportedBiome(biomeOverride) then (biomeOverride :: string) else WorldTypes.DefaultConfig.Biome
+	local biome = normalizeBiomeName(biomeOverride)
+	if biome == nil or WorldTypes.BiomeMaterials[biome] == nil then
+		biome = WorldTypes.DefaultConfig.Biome
+	end
 	return {
 		Seed = seed,
 		TileSize = WorldTypes.DefaultConfig.TileSize,
@@ -1050,7 +1180,8 @@ local function applyGradualRouteNodeHeights(columns: { [string]: TileColumn }, r
 			local segmentDistance = math.max(1, cumulativeDistance[nodeIndex] - cumulativeDistance[nodeIndex - 1])
 			local minAllowed = previousHeight - fallPerTile * segmentDistance
 			local maxAllowed = previousHeight + risePerTile * segmentDistance
-			targetHeights[nodeIndex] = clampToRouteBand(route[nodeIndex], math.clamp(currentHeight, minAllowed, maxAllowed))
+			targetHeights[nodeIndex] =
+				clampToRouteBand(route[nodeIndex], math.clamp(currentHeight, minAllowed, maxAllowed))
 		end
 
 		for nodeIndex = nodeCount - 1, 2, -1 do
@@ -1059,7 +1190,8 @@ local function applyGradualRouteNodeHeights(columns: { [string]: TileColumn }, r
 			local segmentDistance = math.max(1, cumulativeDistance[nodeIndex + 1] - cumulativeDistance[nodeIndex])
 			local minAllowed = nextHeight - risePerTile * segmentDistance
 			local maxAllowed = nextHeight + fallPerTile * segmentDistance
-			targetHeights[nodeIndex] = clampToRouteBand(route[nodeIndex], math.clamp(currentHeight, minAllowed, maxAllowed))
+			targetHeights[nodeIndex] =
+				clampToRouteBand(route[nodeIndex], math.clamp(currentHeight, minAllowed, maxAllowed))
 		end
 	end
 
@@ -1094,6 +1226,7 @@ local function generateWindingPathNodes(
 	seed: number
 ): { PathPoint }
 	local rng = Random.new(seed)
+	local occurrenceChance = math.clamp(RuntimePathOccurrenceChance, 0, 1)
 	local structureChance = RuntimeNodeStructureChance
 	local minSpacing = math.max(TerrainTuning.PathNodeSpacing, TerrainTuning.PathNodeMinSpacing)
 	local route = {} :: { PathPoint }
@@ -1102,6 +1235,8 @@ local function generateWindingPathNodes(
 		Z = startColumn.Z,
 		Height = startColumn.SurfaceY,
 		RadiusScale = startRadiusScale,
+		IsOccurrenceNode = false,
+		IsIncidentNode = false,
 		IsStructureNode = false,
 	}
 	table.insert(route, startNode)
@@ -1136,6 +1271,8 @@ local function generateWindingPathNodes(
 		local desiredZ = baseZ + perpZ * wander * TerrainTuning.PathNodeLateralJitter + dirZ * forwardShift
 		local placed = tryPlaceNode(columns, usedNodes, rng, desiredX, desiredZ)
 		if placed then
+			placed.IsOccurrenceNode = rng:NextNumber() < occurrenceChance
+			placed.IsIncidentNode = false
 			placed.IsStructureNode = rng:NextNumber() < structureChance
 			table.insert(route, placed)
 			table.insert(usedNodes, placed)
@@ -1150,9 +1287,13 @@ local function generateWindingPathNodes(
 			Z = endColumn.Z,
 			Height = endColumn.SurfaceY,
 			RadiusScale = randomNodeRadiusScale(rng),
+			IsOccurrenceNode = false,
+			IsIncidentNode = false,
 			IsStructureNode = false,
 		}
 	endNode.IsStructureNode = false
+	endNode.IsOccurrenceNode = false
+	endNode.IsIncidentNode = false
 	if not endNodeCandidate and hasNodeOverlap(usedNodes, endNode.X, endNode.Z, minSpacing, endNode.RadiusScale) then
 		local fallbackColumn =
 			getSolidColumnNear(columns, endColumn.X, endColumn.Z, TerrainTuning.PathNodeSearchRadius + 2)
@@ -1165,6 +1306,8 @@ local function generateWindingPathNodes(
 				Z = fallbackColumn.Z,
 				Height = fallbackColumn.SurfaceY,
 				RadiusScale = randomNodeRadiusScale(rng),
+				IsOccurrenceNode = false,
+				IsIncidentNode = false,
 				IsStructureNode = false,
 			}
 		end
@@ -1187,14 +1330,14 @@ local function runFootprintSieve(columns: { [string]: TileColumn }, config: Worl
 end
 
 local function runHeightSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
-	HeightSieve({
+	local sieve = if config.Biome == "Mountain" then MountainHeightSieve else HeightSieve
+	sieve({
 		smoothstep = smoothstep,
 		snapHeight = snapHeight,
 		angularDistance = angularDistance,
 		TerrainTuning = TerrainTuning,
 	}, columns, config, seed)
 end
-
 
 local function runBiomeSieve(columns: { [string]: TileColumn }, config: WorldConfig, seed: number)
 	BiomeSieve({
@@ -1203,7 +1346,6 @@ local function runBiomeSieve(columns: { [string]: TileColumn }, config: WorldCon
 		TerrainTuning = TerrainTuning,
 	}, columns, config, seed)
 end
-
 
 local function runBiomeEdgeSmoothingSieve(columns: { [string]: TileColumn }, config: WorldConfig)
 	BiomeEdgeSmoothingSieve({
@@ -1292,15 +1434,15 @@ local function runStructureSieve(columns: { [string]: TileColumn }, config: Worl
 end
 
 local function isMountainBiome(biome: string): boolean
-	return biome == "Alpine" or biome == "PineHighlands"
+	return biome == "Mountain"
 end
 
 local function isForestBiome(biome: string): boolean
-	return biome == "Forest" or biome == "PineHighlands"
+	return biome == "Forest"
 end
 
 local function isPlainsBiome(biome: string): boolean
-	return biome == "TemperateGrassland" or biome == "HighlandDesert" or biome == "Marshland"
+	return biome == "Plains" or biome == "Desert"
 end
 
 local function isHabitationStructureName(nameLower: string): boolean
@@ -1356,7 +1498,9 @@ local function runPathSieve(
 	config: WorldConfig,
 	seed: number
 ): (TileColumn?, { TileColumn }, number, { PathRoute })
+	local debugOverrides = WorldSpawnServiceServer.GetDebugOverrides()
 	return PathSieve({
+		GenerationType = debugOverrides.GenerationType or "Standard",
 		getCenterSolidColumn = getCenterSolidColumn,
 		TerrainTuning = TerrainTuning,
 		randomNodeRadiusScale = randomNodeRadiusScale,
@@ -1383,6 +1527,14 @@ local function runPathSieve(
 		PrefabRegistry = PrefabRegistry,
 		getPathNodeBaseRadiusTiles = getPathNodeBaseRadiusTiles,
 	}, columns, config, seed)
+end
+
+local function chooseBossEndpoint(seed: number, endpoints: { TileColumn }): TileColumn?
+	if #endpoints <= 0 then
+		return nil
+	end
+	local rng = Random.new(seed + 57241)
+	return endpoints[rng:NextInteger(1, #endpoints)]
 end
 
 local function runStructureFootprintFlatteningSieve(columns: { [string]: TileColumn }, config: WorldConfig)
@@ -1515,7 +1667,6 @@ local function collectNearestChunks(
 	return nearest
 end
 
-local spawnPathBridgeBoards: (({ [string]: TileColumn }, WorldConfig) -> number)?
 local bakeCollision: (({ ChunkData }, WorldConfig) -> number)?
 
 local function rebuildChunksFromColumns(world: WorldState)
@@ -1531,20 +1682,21 @@ local function pickCollapseTargets(
 	world: WorldState,
 	centerX: number,
 	centerZ: number,
-	radiusTiles: number,
-	count: number,
+	minRadiusTiles: number,
+	maxRadiusTiles: number,
 	rng: Random
 ): { TileColumn }
-	local radiusSq = radiusTiles * radiusTiles
-	local safeRadius = math.max(0, CollapseTuning.SpawnSafeRadiusTiles)
-	local safeRadiusSq = safeRadius * safeRadius
+	local clampedMinRadius = math.max(0, minRadiusTiles)
+	local clampedMaxRadius = math.max(clampedMinRadius, maxRadiusTiles)
+	local minRadiusSq = clampedMinRadius * clampedMinRadius
+	local maxRadiusSq = clampedMaxRadius * clampedMaxRadius
 	local candidates = {} :: { TileColumn }
 	for _, column in pairs(world.Columns) do
 		if column.Solid then
 			local dx = column.X - centerX
 			local dz = column.Z - centerZ
 			local distanceSq = dx * dx + dz * dz
-			if distanceSq <= radiusSq and distanceSq >= safeRadiusSq then
+			if distanceSq <= maxRadiusSq and (clampedMinRadius <= 0 or distanceSq > minRadiusSq) then
 				table.insert(candidates, column)
 			end
 		end
@@ -1555,15 +1707,19 @@ local function pickCollapseTargets(
 		candidates[index], candidates[swapIndex] = candidates[swapIndex], candidates[index]
 	end
 
-	local targets = {} :: { TileColumn }
-	local limit = math.min(count, #candidates)
-	for index = 1, limit do
-		table.insert(targets, candidates[index])
-	end
-	return targets
+	return candidates
 end
 
-local function collapseTiles(world: WorldState, columns: { TileColumn }, rebuildCollision: boolean, rebuildSpawns: boolean)
+local function collapseTiles(
+	world: WorldState,
+	columns: { TileColumn },
+	rebuildCollision: boolean,
+	rebuildSpawns: boolean,
+	centerX: number,
+	centerZ: number,
+	radiusTiles: number,
+	indicatorY: number
+)
 	if #columns <= 0 then
 		return
 	end
@@ -1590,19 +1746,15 @@ local function collapseTiles(world: WorldState, columns: { TileColumn }, rebuild
 	rebuildChunksFromColumns(world)
 	if rebuildCollision then
 		clearCollisionRoot()
-		clearPathBridgeRoot()
 		if bakeCollision then
 			world.CollisionParts = bakeCollision(world.Chunks, world.Config)
 		else
 			world.CollisionParts = 0
 		end
-		if spawnPathBridgeBoards then
-			spawnPathBridgeBoards(world.Columns, world.Config)
-		end
 	end
 
 	if rebuildSpawns then
-		WorldSpawnServiceServer.InitializeWorld(world)
+		WorldSpawnServiceServer.PruneCollapsedColumns(collapsedPayload)
 	end
 	if WorldRoot then
 		if rebuildCollision then
@@ -1641,8 +1793,13 @@ local function collapseTiles(world: WorldState, columns: { TileColumn }, rebuild
 		API:FireClient(player, "CollapseTiles", {
 			Tiles = collapsedPayload,
 			Animate = animate,
+			AnimationRangeStuds = animationRange,
 			FallDistanceStuds = CollapseTuning.FallDistanceStuds,
 			FallDurationSeconds = CollapseTuning.FallDurationSeconds,
+			CenterX = centerX,
+			CenterZ = centerZ,
+			RadiusTiles = radiusTiles,
+			IndicatorY = indicatorY,
 		})
 	end
 end
@@ -1657,12 +1814,17 @@ local function startCollapseLoop(world: WorldState)
 
 	local centerX = origin.X
 	local centerZ = origin.Z
+	local indicatorY = origin.SurfaceY
 	local rng = Random.new(world.Seed + 99173)
-	local radiusTiles = math.max(1, math.max(CollapseTuning.StartRadiusTiles, CollapseTuning.SpawnSafeRadiusTiles + 1))
-	local maxRadius = math.max(radiusTiles, math.min(CollapseTuning.MaxRadiusTiles, world.Config.RadiusTiles + 1))
-	local tilesPerTick = math.max(1, CollapseTuning.TilesPerTick)
+	local radiusStep = math.max(1, CollapseTuning.RadiusStepTiles)
+	local ringOuterRadiusTiles = math.max(1, CollapseTuning.StartRadiusTiles)
+	local ringInnerRadiusTiles = 0
+	local maxRadius =
+		math.max(ringOuterRadiusTiles, math.min(CollapseTuning.MaxRadiusTiles, world.Config.RadiusTiles + 1))
 	local tickSeconds = math.max(0.5, CollapseTuning.TickSeconds)
 	local initialDelaySeconds = math.max(0, CollapseTuning.InitialDelaySeconds)
+	local maxTilesPerTick = math.max(1, CollapseTuning.MaxTilesPerTick)
+	local pendingTargets = nil :: { TileColumn }?
 
 	CollapseTask = task.spawn(function()
 		local collapseBatchCount = 0
@@ -1675,13 +1837,30 @@ local function startCollapseLoop(world: WorldState)
 				break
 			end
 
-			local targets = pickCollapseTargets(world, centerX, centerZ, radiusTiles, tilesPerTick, rng)
-			if #targets <= 0 then
-				if radiusTiles >= maxRadius then
+			if not pendingTargets or #pendingTargets <= 0 then
+				pendingTargets = pickCollapseTargets(world, centerX, centerZ, ringInnerRadiusTiles, ringOuterRadiusTiles, rng)
+			end
+
+			if #pendingTargets <= 0 then
+				if ringOuterRadiusTiles >= maxRadius then
 					break
 				end
-				radiusTiles = math.min(maxRadius, radiusTiles + math.max(1, CollapseTuning.RadiusStepTiles))
+				ringInnerRadiusTiles = ringOuterRadiusTiles
+				ringOuterRadiusTiles = math.min(maxRadius, ringOuterRadiusTiles + radiusStep)
+				pendingTargets = nil
 				continue
+			end
+
+			local targetCount = math.min(#pendingTargets, maxTilesPerTick)
+			local targets = table.create(targetCount) :: { TileColumn }
+			for index = 1, targetCount do
+				targets[index] = pendingTargets[index]
+			end
+			for index = targetCount + 1, #pendingTargets do
+				pendingTargets[index - targetCount] = pendingTargets[index]
+			end
+			for index = #pendingTargets, #pendingTargets - targetCount + 1, -1 do
+				pendingTargets[index] = nil
 			end
 
 			collapseBatchCount += 1
@@ -1689,10 +1868,36 @@ local function startCollapseLoop(world: WorldState)
 			local spawnBatchInterval = math.max(1, CollapseTuning.SpawnRebuildBatchInterval)
 			local shouldRebuildCollision = collapseBatchCount % collisionBatchInterval == 0
 			local shouldRebuildSpawns = collapseBatchCount % spawnBatchInterval == 0
-			collapseTiles(world, targets, shouldRebuildCollision, shouldRebuildSpawns)
-			radiusTiles = math.min(maxRadius, radiusTiles + math.max(1, CollapseTuning.RadiusStepTiles))
+			collapseTiles(
+				world,
+				targets,
+				shouldRebuildCollision,
+				shouldRebuildSpawns,
+				centerX,
+				centerZ,
+				ringOuterRadiusTiles,
+				indicatorY
+			)
+			if #pendingTargets > 0 then
+				continue
+			end
+			if ringOuterRadiusTiles >= maxRadius then
+				break
+			end
+			ringInnerRadiusTiles = ringOuterRadiusTiles
+			ringOuterRadiusTiles = math.min(maxRadius, ringOuterRadiusTiles + radiusStep)
+			pendingTargets = nil
 		end
 	end)
+end
+
+local function syncCollapseLoopForCurrentMatch()
+	CollapseGeneration += 1
+	CollapseTask = nil
+
+	if CollapseTuning.Enabled and MatchStarted and CurrentWorld then
+		startCollapseLoop(CurrentWorld)
+	end
 end
 
 local function createCollisionPart(
@@ -1726,126 +1931,6 @@ local function createCollisionPart(
 	)
 	part.Parent = parent
 	return part
-end
-
-local function createPathBridgeBoard(
-	parent: Instance,
-	name: string,
-	size: Vector3,
-	cframe: CFrame
-): Part
-	local board = Instance.new("Part")
-	board.Name = name
-	board.Anchored = true
-	board.CanCollide = true
-	board.CanTouch = true
-	board.CanQuery = false
-	board.CastShadow = true
-	board.Material = Enum.Material.WoodPlanks
-	board.Color = Color3.fromRGB(118, 88, 60)
-	board.Size = size
-	board.CFrame = cframe
-	board.TopSurface = Enum.SurfaceType.Smooth
-	board.BottomSurface = Enum.SurfaceType.Smooth
-	board.LeftSurface = Enum.SurfaceType.Smooth
-	board.RightSurface = Enum.SurfaceType.Smooth
-	board.FrontSurface = Enum.SurfaceType.Smooth
-	board.BackSurface = Enum.SurfaceType.Smooth
-	board.Parent = parent
-	return board
-end
-
-spawnPathBridgeBoards = function(columns: { [string]: TileColumn }, config: WorldConfig): number
-	if not PathBridgeRoot then
-		return 0
-	end
-
-	local boardCount = 0
-	local tileSize = math.max(2, config.TileSize)
-	local boardThickness = math.max(0.7, tileSize * 0.12)
-	local boardSpan = tileSize * 1.08
-	local boardWidth = math.max(2, tileSize * 0.62)
-	local boardLift = 0.08
-	local minDipHeight = 2
-	local maxNeighborHeightDelta = 2
-
-	for _, column in pairs(columns) do
-		if not column.Solid or not column.IsPath or column.HasWater then
-			continue
-		end
-
-		local x = column.X
-		local z = column.Z
-		local left = columns[makeColumnKey(x - 1, z)]
-		local right = columns[makeColumnKey(x + 1, z)]
-		local back = columns[makeColumnKey(x, z - 1)]
-		local front = columns[makeColumnKey(x, z + 1)]
-
-		local function evaluatePair(a: TileColumn?, b: TileColumn?): (number?, number?)
-			if not a or not b then
-				return nil, nil
-			end
-			if not a.Solid or not b.Solid then
-				return nil, nil
-			end
-			if not a.IsPath or not b.IsPath then
-				return nil, nil
-			end
-			if a.HasWater or b.HasWater then
-				return nil, nil
-			end
-			if math.abs(a.SurfaceY - b.SurfaceY) > maxNeighborHeightDelta then
-				return nil, nil
-			end
-
-			local bridgeTopY = math.min(a.SurfaceY, b.SurfaceY)
-			local dipHeight = bridgeTopY - column.SurfaceY
-			if dipHeight < minDipHeight then
-				return nil, nil
-			end
-			return bridgeTopY, dipHeight
-		end
-
-		local xTopY, xDipHeight = evaluatePair(left, right)
-		local zTopY, zDipHeight = evaluatePair(back, front)
-		local useXAxis = false
-		local bridgeTopY: number? = nil
-		if xTopY ~= nil and zTopY ~= nil then
-			if (xDipHeight or 0) >= (zDipHeight or 0) then
-				useXAxis = true
-				bridgeTopY = xTopY
-			else
-				useXAxis = false
-				bridgeTopY = zTopY
-			end
-		elseif xTopY ~= nil then
-			useXAxis = true
-			bridgeTopY = xTopY
-		elseif zTopY ~= nil then
-			useXAxis = false
-			bridgeTopY = zTopY
-		end
-
-		if bridgeTopY ~= nil then
-			local boardSize = if useXAxis
-				then Vector3.new(boardSpan, boardThickness, boardWidth)
-				else Vector3.new(boardWidth, boardThickness, boardSpan)
-			local boardPosition = Vector3.new(
-				x * tileSize,
-				bridgeTopY + boardThickness * 0.5 + boardLift,
-				z * tileSize
-			)
-			createPathBridgeBoard(
-				PathBridgeRoot,
-				string.format("PathBoard_%d_%d", x, z),
-				boardSize,
-				CFrame.new(boardPosition)
-			)
-			boardCount += 1
-		end
-	end
-
-	return boardCount
 end
 
 bakeCollision = function(chunks: { ChunkData }, config: WorldConfig): number
@@ -1972,6 +2057,7 @@ end
 
 local function generateWorld(seed: number, biomeOverride: string?): WorldState
 	local config = makeDefaultConfig(seed, biomeOverride)
+	local generationType = WorldSpawnServiceServer.GetDebugOverrides().GenerationType or "Standard"
 	local columns = createEmptyColumns(config)
 
 	runFootprintSieve(columns, config, seed)
@@ -1986,6 +2072,7 @@ local function generateWorld(seed: number, biomeOverride: string?): WorldState
 	runStructureSieve(columns, config, seed)
 	runStructureFootprintFlatteningSieve(columns, config)
 	local pathStart, pathEndpoints, pathNodeCount, pathRoutes = runPathSieve(columns, config, seed)
+	local bossEndpoint = if generationType == "Boss" then chooseBossEndpoint(seed, pathEndpoints) else nil
 	runWaterHeightSieve(columns, config)
 	runHeightSnapSieve(columns)
 	syncPathRouteHeightsToColumns(pathRoutes, columns)
@@ -1993,9 +2080,7 @@ local function generateWorld(seed: number, biomeOverride: string?): WorldState
 	local chunks = buildChunkPayloads(columns, config)
 	local chunkLookup = buildChunkLookup(chunks)
 	clearCollisionRoot()
-	clearPathBridgeRoot()
 	local collisionParts = bakeCollision(chunks, config)
-	spawnPathBridgeBoards(columns, config)
 
 	return {
 		Seed = seed,
@@ -2006,13 +2091,84 @@ local function generateWorld(seed: number, biomeOverride: string?): WorldState
 		CollisionParts = collisionParts,
 		PathStart = pathStart,
 		PathEndpoints = pathEndpoints,
+		BossEndpoint = bossEndpoint,
 		PathNodeCount = pathNodeCount,
 		PathRoutes = pathRoutes,
 	}
 end
 
+local function countOccurrenceNodes(world: WorldState): number
+	local count = 0
+	for _, route in ipairs(world.PathRoutes) do
+		for _, node in ipairs(route) do
+			if node.IsOccurrenceNode == true then
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+local function countIncidentNodes(world: WorldState): number
+	local count = 0
+	for _, route in ipairs(world.PathRoutes) do
+		for _, node in ipairs(route) do
+			if node.IsIncidentNode == true then
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+local function countStructureNodes(world: WorldState): number
+	local count = 0
+	for _, route in ipairs(world.PathRoutes) do
+		for _, node in ipairs(route) do
+			if node.IsStructureNode == true then
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+local function formatPathEndpoints(world: WorldState): string
+	if #world.PathEndpoints == 0 then
+		return "none"
+	end
+
+	local formatted = {} :: { string }
+	for index, endpoint in ipairs(world.PathEndpoints) do
+		formatted[index] = string.format("%d-%d", endpoint.X, endpoint.Z)
+	end
+	return table.concat(formatted, ",")
+end
+
+local function printWorldGenerationSummary(world: WorldState)
+	local debugOverrides = WorldSpawnServiceServer.GetDebugOverrides()
+	local levelText = tostring(debugOverrides.EnemyBaseLevel or 1)
+	local genTypeText = tostring(debugOverrides.GenerationType or "Standard")
+
+	print(
+		string.format(
+			"[WorldService] Generated floating island\nseed=%d\nchunks=%d\ncollparts=%d\nnodes=%d\noccurence_nodes=%d\nincident_nodes=%d\nstructure_nodes=%d\nendpoints=%s\nlevel=%s\ngen_type=%s",
+			world.Seed,
+			#world.Chunks,
+			world.CollisionParts,
+			world.PathNodeCount,
+			countOccurrenceNodes(world),
+			countIncidentNodes(world),
+			countStructureNodes(world),
+			formatPathEndpoints(world),
+			levelText,
+			genTypeText
+		)
+	)
+end
+
 local function fireWorldToPlayer(player: Player)
-	if not CurrentWorld then
+	if not MatchStarted or not CurrentWorld then
 		return
 	end
 
@@ -2035,6 +2191,7 @@ local function fireWorldToPlayer(player: Player)
 		SpawnChunkZ = spawnChunkZ,
 		StreamRadius = StreamingTuning.SuggestedStreamRadius,
 		UnloadRadius = StreamingTuning.SuggestedUnloadRadius,
+		ClaimedHarvests = WorldSpawnServiceServer.GetClaimedHarvests(),
 		PathRoutes = CurrentWorld.PathRoutes,
 	})
 
@@ -2053,8 +2210,34 @@ local function broadcastWorld()
 	end
 end
 
+local function startMatch()
+	if MatchStarted then
+		return
+	end
+
+	MatchStarted = true
+
+	if ActiveSpawnLocation then
+		for _, player in ipairs(Players:GetPlayers()) do
+			player.RespawnLocation = ActiveSpawnLocation
+		end
+	end
+
+	broadcastStartState()
+	broadcastWorld()
+	syncCollapseLoopForCurrentMatch()
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.defer(function()
+			if player.Parent then
+				teleportPlayerToSpawn(player)
+			end
+		end)
+	end
+end
+
 local function sendRequestedChunksToPlayer(player: Player, payload: { [string]: any }?)
-	if not CurrentWorld or not payload then
+	if not MatchStarted or not CurrentWorld or not payload then
 		return
 	end
 
@@ -2108,7 +2291,17 @@ function WorldServiceServer.GetTile(x: number, z: number): TileColumn?
 	return CurrentWorld.Columns[makeColumnKey(math.floor(x), math.floor(z))]
 end
 
+function WorldServiceServer.IsMatchStarted(): boolean
+	return MatchStarted
+end
+
+function WorldServiceServer.IsPlayerWardrobeLocked(player: Player): boolean
+	return not MatchStarted and getPlayerReadyState(player)
+end
+
 function WorldServiceServer.Regenerate(seedOverride: number?, options: RegenerationOptions?): number
+	ensureWorldRoots()
+
 	local seed = if type(seedOverride) == "number" then math.max(1, math.floor(seedOverride)) else deriveServerSeed()
 	local biomeOverride = nil :: string?
 	local spawnDebugOverrides = nil :: SpawnDebugOverrides?
@@ -2122,6 +2315,9 @@ function WorldServiceServer.Regenerate(seedOverride: number?, options: Regenerat
 	end
 
 	WorldSpawnServiceServer.SetDebugOverrides(spawnDebugOverrides)
+	WorldGenerationInProgress = true
+	print(string.format("[WorldService] Regenerate called seed=%d biome=%s", seed, tostring(biomeOverride)))
+	broadcastStartState()
 
 	CollapseGeneration += 1
 	CollapseTask = nil
@@ -2134,6 +2330,7 @@ function WorldServiceServer.Regenerate(seedOverride: number?, options: Regenerat
 
 	CurrentSeed = seed
 	CurrentWorld = generateWorld(seed, biomeOverride)
+	WorldGenerationInProgress = false
 
 	if WorldRoot then
 		WorldRoot:SetAttribute("WorldSeed", seed)
@@ -2146,62 +2343,87 @@ function WorldServiceServer.Regenerate(seedOverride: number?, options: Regenerat
 	updateDebugHarness(CurrentWorld)
 	updateSpawnLocation(CurrentWorld)
 	spawnManualStructurePreview(CurrentWorld)
+	spawnTransitionCampPreview(CurrentWorld)
 	WorldSpawnServiceServer.InitializeWorld(CurrentWorld)
 	if WorldRoot then
 		WorldRoot:SetAttribute("WorldSpawnPointCount", WorldSpawnServiceServer.GetSpawnPointCount())
 	end
 
-	print(
-		string.format(
-			"[WorldService] Generated floating island seed=%d chunks=%d collisionParts=%d pathEndpoints=%d pathNodes=%d",
-			seed,
-			if CurrentWorld then #CurrentWorld.Chunks else 0,
-			if CurrentWorld then CurrentWorld.CollisionParts else 0,
-			if CurrentWorld then #CurrentWorld.PathEndpoints else 0,
-			if CurrentWorld then CurrentWorld.PathNodeCount else 0
-		)
-	)
-
-	broadcastWorld()
-	if CollapseTuning.Enabled and CurrentWorld then
-		startCollapseLoop(CurrentWorld)
+	if CurrentWorld then
+		printWorldGenerationSummary(CurrentWorld)
 	end
+
+	broadcastStartState()
+	if MatchStarted then
+		broadcastWorld()
+	end
+	syncCollapseLoopForCurrentMatch()
 	return seed
 end
 
 function WorldServiceServer.init()
 	ensureWorldRoots()
 	local initialSeed = deriveServerSeed()
-	WorldServiceServer.Regenerate(initialSeed)
+	print(string.format("[WorldService] init started, scheduling world generation seed=%d", initialSeed))
+	task.spawn(function()
+		WorldServiceServer.Regenerate(initialSeed)
+	end)
 end
 
 Players.PlayerAdded:Connect(function(player)
+	PlayerReadyStates[player] = false
 	WorldSpawnServiceServer.ClearPlayerChunks(player)
 
-	if ActiveSpawnLocation then
+	if MatchStarted and ActiveSpawnLocation then
 		player.RespawnLocation = ActiveSpawnLocation
 	end
 
 	player.CharacterAdded:Connect(function(character)
 		task.defer(function()
 			-- Ensure spawnpoint wins even if other systems touch spawn flow.
-			if character.Parent and player.Parent then
+			if MatchStarted and character.Parent and player.Parent then
 				teleportPlayerToSpawn(player)
 			end
 		end)
 	end)
 
-	if CurrentWorld then
+	fireStartStateToPlayer(player)
+
+	if MatchStarted and CurrentWorld then
 		fireWorldToPlayer(player)
 	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	PlayerReadyStates[player] = nil
 	WorldSpawnServiceServer.ClearPlayerChunks(player)
+	if not MatchStarted then
+		broadcastStartState()
+		if hasAllPlayersReady() then
+			startMatch()
+		end
+	end
 end)
 
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
-	if action == "RequestWorld" then
+	if action == "RequestStartState" then
+		fireStartStateToPlayer(player)
+		if MatchStarted then
+			fireWorldToPlayer(player)
+		end
+	elseif action == "SetWardrobeReady" then
+		if MatchStarted then
+			fireStartStateToPlayer(player)
+			return
+		end
+
+		local isReady = payload and payload.IsReady == true
+		PlayerReadyStates[player] = isReady
+		broadcastStartState()
+		if hasAllPlayersReady() then
+			startMatch()
+		end
+	elseif action == "RequestWorld" then
 		fireWorldToPlayer(player)
 	elseif action == "RequestChunks" then
 		sendRequestedChunksToPlayer(player, payload)

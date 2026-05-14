@@ -12,13 +12,11 @@ local LoadoutData: { [string]: any } = {
 	EquippedIndex = nil,
 	Slots = {
 		{ Slot = 1, IsEquipped = false },
-		{ Slot = 2, IsEquipped = false },
-		{ Slot = 3, IsEquipped = false },
-		{ Slot = 4, IsEquipped = false },
 	},
 }
 local EquippedWeaponChanged = Signal.new()
 local LoadoutChanged = Signal.new()
+local HasReceivedInitialLoadout = false
 
 API.OnClientEvent:Connect(function(action: string, payload: { [string]: any }?)
 	if action == "SyncEquippedWeapon" then
@@ -26,6 +24,7 @@ API.OnClientEvent:Connect(function(action: string, payload: { [string]: any }?)
 		EquippedWeaponChanged:Fire(payload)
 	elseif action == "SyncLoadout" then
 		LoadoutData = payload or LoadoutData
+		HasReceivedInitialLoadout = true
 		LoadoutChanged:Fire(LoadoutData)
 	end
 end)
@@ -76,6 +75,10 @@ function WeaponServiceClient.GetEquippedWeaponChangedSignal()
 	return EquippedWeaponChanged
 end
 
+function WeaponServiceClient.RequestEquippedWeapon(): ()
+	API:FireServer("RequestEquippedWeapon", {})
+end
+
 function WeaponServiceClient.RequestLoadout(): ()
 	API:FireServer("RequestLoadout", {})
 end
@@ -86,6 +89,10 @@ end
 
 function WeaponServiceClient.GetLoadoutChangedSignal()
 	return LoadoutChanged
+end
+
+function WeaponServiceClient.HasReceivedInitialLoadout(): boolean
+	return HasReceivedInitialLoadout
 end
 
 return table.freeze(WeaponServiceClient)

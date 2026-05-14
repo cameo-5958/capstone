@@ -16,6 +16,7 @@ type Entity = EntityTypes.Entity
 type Stat = EntityTypes.Stat
 
 export type AbilityCallback = WeaponTypes.AbilityCallback
+export type WeaponAbilityInput = WeaponTypes.WeaponAbilityInput
 export type AnimationId = WeaponTypes.AnimationId
 export type AttackProfile = WeaponTypes.AttackProfile
 export type ComboAttack = WeaponTypes.ComboAttack
@@ -66,9 +67,7 @@ local function MergeAttackProfile(profile: AttackProfile?): AttackProfile
 end
 
 local function isAttackModifierApplier(value: any): boolean
-	return type(value) == "table"
-		and type(value.Id) == "string"
-		and type(value.Apply) == "function"
+	return type(value) == "table" and type(value.Id) == "string" and type(value.Apply) == "function"
 end
 
 local function clonePassiveMetadata(source: { [string]: any }, fallbackId: string?): PassiveMetadata
@@ -144,24 +143,40 @@ local function resolveWeaponPassive(
 	return applier, metadata
 end
 
+local function resolveWeaponAbility(input: any): (AbilityCallback?, number?)
+	if type(input) == "function" then
+		return input, nil
+	end
+
+	if type(input) == "table" and type(input.Execute) == "function" then
+		local cooldown = if type(input.Cooldown) == "number" then input.Cooldown else nil
+		return input.Execute, cooldown
+	end
+
+	return nil, nil
+end
+
 function Weapon.new(
 	name: string,
 	baseDamage: number,
 	grantedStats: { [Stat]: number }?,
 	weight: number?,
-	weaponAbility: AbilityCallback?,
-	rightClickAbility: AbilityCallback?,
+	weaponAbility: WeaponAbilityInput?,
+	rightClickAbility: WeaponAbilityInput?,
 	weaponId: string?,
 	attackProfile: AttackProfile?,
-	toolTemplate: Tool?,
+	visualTemplate: Instance?,
+	gripCFrame: CFrame?,
 	weaponClass: string?,
 	attackContext: { [string]: any }?,
 	weaponPassive: WeaponPassiveInput?,
 	rarity: string?,
-	passiveDetails: { PassiveMetadata }?
+	passiveDetails: { PassiveMetadata }?,
+	cooldown: number?
 ): Weapon
 	local self = setmetatable({}, Weapon)
 	local resolvedPassive, resolvedPassiveDetails = resolveWeaponPassive(weaponPassive, passiveDetails)
+	local resolvedAbility, abilityCooldown = resolveWeaponAbility(weaponAbility or rightClickAbility)
 
 	self.UUID = HttpService:GenerateGUID(false)
 	self.Name = name
@@ -178,10 +193,14 @@ function Weapon.new(
 	self.Owner = nil
 	self.WeaponPassive = resolvedPassive
 	self.PassiveDetails = resolvedPassiveDetails
-	self.WeaponAbility = weaponAbility or rightClickAbility
+	self.WeaponAbility = resolvedAbility
 	self.RightClickAbility = self.WeaponAbility
-	self.ToolTemplate = toolTemplate
-	self.ToolInstance = nil
+	self.AbilityCooldown = abilityCooldown
+	self.VisualTemplate = visualTemplate
+	self.VisualInstance = nil
+	self.GripCFrame = gripCFrame or CFrame.new()
+	self.Cooldown = abilityCooldown or cooldown or 0
+	self.LastUsed = 0
 
 	return (self :: any) :: Weapon
 end
@@ -191,19 +210,9 @@ function Weapon.SetOwner(self: Weapon, entity: Entity?): Weapon
 	return self
 end
 
-function Weapon.SetToolInstance(self: Weapon, tool: Tool?): Tool?
-	self.ToolInstance = tool
-	return tool
-end
-
-function Weapon.CloneTool(self: Weapon): Tool?
-	if not self.ToolTemplate then
-		return nil
-	end
-
-	local clone = self.ToolTemplate:Clone()
-	clone.Name = self.Name
-	return clone
+function Weapon.SetVisualInstance(self: Weapon, model: Model?): Model?
+	self.VisualInstance = model
+	return model
 end
 
 function Weapon.GetDamage(self: Weapon, owner: Entity?): number
@@ -220,7 +229,9 @@ function Weapon.CreateAttackContext(
 	local wielder = owner or self.Owner
 	assert(wielder ~= nil, "Weapon.CreateAttackContext requires an owner")
 
-	local attackContextData = if attackFlags and attackFlags.AttackContext then attackFlags.AttackContext else self:GetAttackContext()
+	local attackContextData = if attackFlags and attackFlags.AttackContext
+		then attackFlags.AttackContext
+		else self:GetAttackContext()
 	local context = self.Damage.Build(wielder, target, self.BaseDamage * (comboBaseDamage or 1))
 	context.WeaponType = self.Type :: any
 	context.WeaponWeight = self.Weight
@@ -294,6 +305,14 @@ function Weapon.UseRightClick(self: Weapon, owner: Entity?, context: { [string]:
 	local wielder = owner or self.Owner
 	if not wielder or not self.RightClickAbility then
 		return false
+	end
+
+	if self.Cooldown and self.Cooldown > 0 then
+		local currentTime = time()
+		if currentTime - (self.LastUsed or 0) < self.Cooldown then
+			return false
+		end
+		self.LastUsed = currentTime
 	end
 
 	self.RightClickAbility(self, wielder, context or {})

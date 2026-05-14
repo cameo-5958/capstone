@@ -10,12 +10,12 @@ local Workspace = game:GetService("Workspace")
 
 local Damage = require(ReplicatedStorage.Classes.Attack.Damage)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
-local Modifier = require(ReplicatedStorage.Classes.Modifier.Modifier)
 local ItemTypes = require(ReplicatedStorage.Classes.Item.ItemTypes)
 local ItemRegistry = require(ReplicatedStorage.Database.Items.Registry)
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
 local InventoryServiceServer = require(ReplicatedStorage.Services.Inventory.InventoryServiceServer)
 local PlayerServiceServer = require(ReplicatedStorage.Services.Player.PlayerServiceServer)
+local SpellServiceServer = require(ReplicatedStorage.Services.Spell.SpellServiceServer)
 local WorldServiceServer = require(ReplicatedStorage.Services.World.WorldServiceServer)
 
 type Entity = EntityTypes.Entity
@@ -24,6 +24,14 @@ type ItemDefinition = ItemTypes.ItemDefinition
 type ItemEffect = ItemTypes.ItemEffect
 type ItemModifier = ItemTypes.ItemModifier
 type SerializedItemData = ItemTypes.SerializedItemData
+
+local function isConsumableKind(itemKind: string): boolean
+	return itemKind == "Consumable" or itemKind == "Item"
+end
+
+local function isInventoryItemEntry(entry: InventoryEntry): boolean
+	return entry.ItemKind == "InventoryItem"
+end
 
 type TimedEffect = {
 	Id: string,
@@ -362,7 +370,8 @@ local function resolveFlagPlacement(origin: Vector3): (Vector3?, number?, number
 		return nil, nil, nil, nil
 	end
 
-	return Vector3.new(tile.X * tileSize, tile.SurfaceY, tile.Z * tileSize), tileX, tileZ, WorldServiceServer.GetSeed()
+	-- Keep the cast X/Z so flags are placeable anywhere instead of snapping to tile center.
+	return Vector3.new(origin.X, tile.SurfaceY, origin.Z), tileX, tileZ, WorldServiceServer.GetSeed()
 end
 
 local function isFlagAnchorValid(zone: FlagBoostZone): boolean
@@ -388,7 +397,7 @@ end
 local function serializeItem(item: ItemDefinition): SerializedItemData
 	local stackKey = item.StackKey or ("Item:" .. item.Id)
 	return {
-		Kind = "Item",
+		Kind = "Consumable",
 		ItemId = item.Id,
 		Name = item.Name,
 		Desc = item.Desc,
@@ -417,17 +426,7 @@ local function addTimedEffect(duration: number, tickRate: number, onTick: () -> 
 end
 
 local function applyTemporaryModifiers(target: Entity, source: string, modifiers: { ItemModifier })
-	for index, modifier in ipairs(modifiers) do
-		local statName = modifier.Stat
-		local modifierValue = modifier.Value
-		local modifierType = modifier.ModifierType
-		target:AddModifier(statName, Modifier.new(
-			string.format("%s:%s:%d", source, statName, index),
-			modifierType,
-			modifierValue,
-			source
-		))
-	end
+	SpellServiceServer.ApplyTemporaryModifiers(target, source, modifiers)
 end
 
 local function createContactZone(
@@ -516,7 +515,7 @@ local function createFlagBoostZone(caster: Entity, itemId: string, effectIndex: 
 end
 
 local function resolveSerializedItem(entry: InventoryEntry): SerializedItemData?
-	if entry.ItemKind ~= "Item" then
+	if not isConsumableKind(entry.ItemKind) then
 		return nil
 	end
 
@@ -525,7 +524,7 @@ local function resolveSerializedItem(entry: InventoryEntry): SerializedItemData?
 		return nil
 	end
 
-	if data.Kind == "Item" and type(data.ItemId) == "string" and data.ItemId ~= "" then
+	if (data.Kind == "Consumable" or data.Kind == "Item") and type(data.ItemId) == "string" and data.ItemId ~= "" then
 		if type(data.Effects) == "table" and #data.Effects > 0 then
 			return data :: SerializedItemData
 		end
@@ -616,7 +615,31 @@ local function applyEffect(player: Player, caster: Entity, itemData: SerializedI
 		return createFlagBoostZone(caster, itemData.ItemId, effectIndex, effect)
 	end
 
-	if effect.Kind == "Tornado" or effect.Kind == "ApplyModifierOnContact" or hasFlag(effect, "OnContact") then
+	if effect.Kind == "Tornado" then
+		local range = getEffectNumber(effect, "Range", 0)
+		local offsetVector = if typeof(effect.Offset) == "Vector3" then effect.Offset else Vector3.zero
+		local center = caster.RootPart.Position + caster.RootPart.CFrame.LookVector * range + offsetVector
+		return SpellServiceServer.CreateTornado(caster, {
+			Center = center,
+			Radius = getEffectNumber(effect, "Radius", 8),
+			Duration = getEffectNumber(effect, "Duration", 4),
+			TickRate = getEffectNumber(effect, "TickRate", 0.5),
+			DamagePerTick = getEffectNumber(effect, "DamagePerTick", 0),
+			Modifiers = getEffectModifiers(effect),
+			ContactModifierDuration = getEffectNumber(effect, "ContactModifierDuration", 0.6),
+			PullSpeed = getEffectNumber(effect, "PullSpeed", 24),
+			MinPullSpeed = getEffectNumber(effect, "MinPullSpeed", 8),
+			MaxResultantSpeed = getEffectNumber(effect, "MaxResultantSpeed", 42),
+			LiftVelocity = getEffectNumber(effect, "LiftVelocity", 0),
+			DeadzoneRadius = getEffectNumber(effect, "DeadzoneRadius", 1.75),
+			PullHeight = getEffectNumber(effect, "PullHeight", 9),
+			TargetGroup = if (effect :: any).TargetGroup == "Players" then "Players" else "Enemies",
+			IncludeCaster = (effect :: any).IncludeCaster == true,
+			Source = effectSource,
+		})
+	end
+
+	if effect.Kind == "ApplyModifierOnContact" or hasFlag(effect, "OnContact") then
 		local range = getEffectNumber(effect, "Range", 0)
 		local offsetVector = if typeof(effect.Offset) == "Vector3" then effect.Offset else Vector3.zero
 		local center = caster.RootPart.Position + caster.RootPart.CFrame.LookVector * range + offsetVector
@@ -637,8 +660,21 @@ local function useInventoryEntry(player: Player, entryId: string): (boolean, str
 	end
 
 	local entry = InventoryServiceServer.GetEntry(player, entryId)
-	if not entry or entry.ItemKind ~= "Item" then
-		return false, "NotItem"
+	if not entry then
+		return false, "MissingEntry"
+	end
+
+	if isInventoryItemEntry(entry) then
+		local canUse = type(entry.Data) == "table" and entry.Data.CanUse == true
+		if not canUse then
+			return false, "CannotUseItem"
+		end
+
+		return true, "Used"
+	end
+
+	if not isConsumableKind(entry.ItemKind) then
+		return false, "NotConsumable"
 	end
 
 	local itemData = resolveSerializedItem(entry)
@@ -678,7 +714,7 @@ local function seedSpawnItems(player: Player)
 		local serialized = serializeItem(item)
 		InventoryServiceServer.AddStackableItem(
 			player,
-			"Item",
+			"Consumable",
 			serialized.StackKey,
 			serialized :: any,
 			serialized.SpawnWith,
@@ -872,12 +908,16 @@ function ItemServiceServer.AddItemToInventory(player: Player, itemId: string, qu
 	local serialized = serializeItem(definition)
 	return InventoryServiceServer.AddStackableItem(
 		player,
-		"Item",
+		"Consumable",
 		serialized.StackKey,
 		serialized :: any,
 		math.max(0, math.floor(quantity)),
 		serialized.MaxStack
 	)
+end
+
+function ItemServiceServer.AddConsumableToInventory(player: Player, itemId: string, quantity: number): { string }
+	return ItemServiceServer.AddItemToInventory(player, itemId, quantity)
 end
 
 function ItemServiceServer.UseInventoryEntry(player: Player, entryId: string): boolean

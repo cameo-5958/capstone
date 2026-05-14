@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local React = require(ReplicatedStorage.Packages.react)
 local ReactRoblox = require(ReplicatedStorage.Packages["react-roblox"])
+local BroadcastServiceClient = require(script.Parent.BroadcastServiceClient)
 local PlayerHUD = require(script.Parent.Components.PlayerHUD)
 
 local PlayerUIServiceClient = {}
@@ -26,6 +27,7 @@ function PlayerUIServiceClient.init(): ()
 	screenGui.Parent = playerGui
 
 	local root = ReactRoblox.createRoot(screenGui)
+	BroadcastServiceClient.init()
 	root:render(React.createElement(PlayerHUD))
 
 	mountedGui = screenGui

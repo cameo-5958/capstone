@@ -7,6 +7,36 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EquipmentServiceServer = require(ReplicatedStorage.Services.Equipment.EquipmentServiceServer)
 local WeaponTypes = require(ReplicatedStorage.Classes.Weapon.WeaponTypes)
 
+local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
+
+local function resolveWeaponFolder(weaponPath: string): Instance?
+	local current: Instance = WeaponsDatabase
+	for _, part in ipairs(weaponPath:split(".")) do
+		current = current:FindFirstChild(part)
+		if not current then
+			return nil
+		end
+	end
+	return current
+end
+
+local function getWeaponDatabaseData(weaponPath: string): { [string]: any }?
+	local folder = resolveWeaponFolder(weaponPath)
+	if not folder then
+		return nil
+	end
+
+	local data = folder:FindFirstChild("Data")
+	if data and data:IsA("ModuleScript") then
+		local ok, result = pcall(require, data)
+		if ok and type(result) == "table" then
+			return result
+		end
+	end
+
+	return nil
+end
+
 type Weapon = WeaponTypes.Weapon
 
 export type SerializedWeaponData = {
@@ -29,6 +59,7 @@ export type SerializedWeaponData = {
 export type InventoryEntry = {
 	EntryId: string,
 	ItemKind: string,
+	StorageSection: string,
 	StackKey: string,
 	Quantity: number,
 	MaxStack: number,
@@ -51,6 +82,9 @@ local InventoryServiceServer = {}
 
 local DEFAULT_MAX_STACK = 1000
 local WEAPON_MAX_STACK = 1
+local DEFAULT_STORAGE_SECTION = "General"
+local COIN_ITEM_KIND = "Currency"
+local COIN_STACK_KEY = "Gold"
 
 --[[
 	Inventory save model:
@@ -111,6 +145,7 @@ local function cloneInventoryEntry(entry: InventoryEntry): InventoryEntry
 	return {
 		EntryId = entry.EntryId,
 		ItemKind = entry.ItemKind,
+		StorageSection = entry.StorageSection or DEFAULT_STORAGE_SECTION,
 		StackKey = entry.StackKey,
 		Quantity = entry.Quantity,
 		MaxStack = entry.MaxStack,
@@ -136,10 +171,18 @@ local function getInventory(player: Player): InventorySnapshot
 	return inventory
 end
 
-local function createEntry(itemKind: string, stackKey: string, quantity: number, maxStack: number, data: { [string]: any }): InventoryEntry
+local function createEntry(
+	itemKind: string,
+	storageSection: string,
+	stackKey: string,
+	quantity: number,
+	maxStack: number,
+	data: { [string]: any }
+): InventoryEntry
 	return {
 		EntryId = HttpService:GenerateGUID(false),
 		ItemKind = itemKind,
+		StorageSection = storageSection,
 		StackKey = stackKey,
 		Quantity = quantity,
 		MaxStack = maxStack,
@@ -147,7 +190,44 @@ local function createEntry(itemKind: string, stackKey: string, quantity: number,
 	}
 end
 
+local function getMatchingEntries(
+	player: Player,
+	itemKind: string,
+	stackKey: string,
+	storageSection: string?
+): { InventoryEntry }
+	local inventory = getInventory(player)
+	local matches = {}
+	local resolvedStorageSection = if type(storageSection) == "string" and storageSection ~= ""
+		then storageSection
+		else nil
+	local normalizedItemKind = if itemKind == "Item" then "Consumable" else itemKind
+
+	for _, entry in pairs(inventory.Entries) do
+		if entry.ItemKind == normalizedItemKind and entry.StackKey == stackKey then
+			if resolvedStorageSection == nil or entry.StorageSection == resolvedStorageSection then
+				table.insert(matches, entry)
+			end
+		end
+	end
+
+	table.sort(matches, function(left, right)
+		return left.Quantity < right.Quantity
+	end)
+
+	return matches
+end
+
 local function serializeWeapon(weapon: Weapon): SerializedWeaponData
+	local icon: string? = nil
+	local databaseData = getWeaponDatabaseData(weapon.WeaponId)
+	if type(databaseData) == "table" then
+		local databaseIcon = databaseData.Icon or databaseData.IconImage or databaseData.Image
+		if type(databaseIcon) == "string" and databaseIcon ~= "" then
+			icon = databaseIcon
+		end
+	end
+
 	return {
 		Kind = "Weapon",
 		InstanceId = weapon.UUID,
@@ -163,6 +243,7 @@ local function serializeWeapon(weapon: Weapon): SerializedWeaponData
 		HasPassive = weapon.WeaponPassive ~= nil or #weapon.PassiveDetails > 0,
 		HasAbility = weapon.WeaponAbility ~= nil,
 		PassiveDetails = cloneSerializable(weapon.PassiveDetails) or {},
+		Icon = icon,
 	}
 end
 
@@ -220,10 +301,15 @@ function InventoryServiceServer.AddStackableItem(
 	stackKey: string,
 	serializedData: { [string]: any },
 	quantity: number,
-	maxStack: number?
+	maxStack: number?,
+	storageSection: string?
 ): { string }
 	local remaining = math.max(0, math.floor(quantity))
 	local resolvedMaxStack = clampMaxStack(maxStack)
+	local resolvedStorageSection = if type(storageSection) == "string" and storageSection ~= ""
+		then storageSection
+		else DEFAULT_STORAGE_SECTION
+	local normalizedItemKind = if itemKind == "Item" then "Consumable" else itemKind
 	local inventory = getInventory(player)
 	local changedEntryIds = {}
 
@@ -236,7 +322,10 @@ function InventoryServiceServer.AddStackableItem(
 			break
 		end
 
-		if entry.ItemKind == itemKind and entry.StackKey == stackKey and entry.Quantity < entry.MaxStack then
+		if entry.ItemKind == normalizedItemKind
+			and entry.StorageSection == resolvedStorageSection
+			and entry.StackKey == stackKey
+			and entry.Quantity < entry.MaxStack then
 			local amountToAdd = math.min(remaining, entry.MaxStack - entry.Quantity)
 			entry.Quantity += amountToAdd
 			remaining -= amountToAdd
@@ -246,7 +335,7 @@ function InventoryServiceServer.AddStackableItem(
 
 	while remaining > 0 do
 		local amountToAdd = math.min(remaining, resolvedMaxStack)
-		local entry = createEntry(itemKind, stackKey, amountToAdd, resolvedMaxStack, serializedData)
+		local entry = createEntry(normalizedItemKind, resolvedStorageSection, stackKey, amountToAdd, resolvedMaxStack, serializedData)
 		inventory.Entries[entry.EntryId] = entry
 		remaining -= amountToAdd
 		table.insert(changedEntryIds, entry.EntryId)
@@ -256,17 +345,31 @@ function InventoryServiceServer.AddStackableItem(
 	return changedEntryIds
 end
 
-function InventoryServiceServer.AddSerializedWeapon(player: Player, serializedWeapon: SerializedWeaponData): string
+function InventoryServiceServer.AddSerializedWeapon(
+	player: Player,
+	serializedWeapon: SerializedWeaponData,
+	storageSection: string?
+): string
 	local inventory = getInventory(player)
-	local entry = createEntry("Weapon", "Weapon:" .. serializedWeapon.InstanceId, 1, WEAPON_MAX_STACK, serializedWeapon :: any)
+	local resolvedStorageSection = if type(storageSection) == "string" and storageSection ~= ""
+		then storageSection
+		else DEFAULT_STORAGE_SECTION
+	local entry = createEntry(
+		"Weapon",
+		resolvedStorageSection,
+		"Weapon:" .. serializedWeapon.InstanceId,
+		1,
+		WEAPON_MAX_STACK,
+		serializedWeapon :: any
+	)
 	inventory.Entries[entry.EntryId] = entry
 	syncInventory(player)
 	return entry.EntryId
 end
 
-function InventoryServiceServer.AddWeaponFromPath(player: Player, weaponPath: string): string
+function InventoryServiceServer.AddWeaponFromPath(player: Player, weaponPath: string, storageSection: string?): string
 	local weapon = EquipmentServiceServer.CreateWeaponFromDatabase(weaponPath)
-	return InventoryServiceServer.AddSerializedWeapon(player, serializeWeapon(weapon))
+	return InventoryServiceServer.AddSerializedWeapon(player, serializeWeapon(weapon), storageSection)
 end
 
 function InventoryServiceServer.RemoveEntry(player: Player, entryId: string, quantity: number?): boolean
@@ -285,6 +388,81 @@ function InventoryServiceServer.RemoveEntry(player: Player, entryId: string, qua
 
 	syncInventory(player)
 	return true
+end
+
+function InventoryServiceServer.GetStackQuantity(
+	player: Player,
+	itemKind: string,
+	stackKey: string,
+	storageSection: string?
+): number
+	local total = 0
+	for _, entry in ipairs(getMatchingEntries(player, itemKind, stackKey, storageSection)) do
+		total += entry.Quantity
+	end
+	return total
+end
+
+function InventoryServiceServer.HasStackQuantity(
+	player: Player,
+	itemKind: string,
+	stackKey: string,
+	quantity: number,
+	storageSection: string?
+): boolean
+	local requiredQuantity = math.max(0, math.floor(quantity))
+	if requiredQuantity <= 0 then
+		return true
+	end
+
+	return InventoryServiceServer.GetStackQuantity(player, itemKind, stackKey, storageSection) >= requiredQuantity
+end
+
+function InventoryServiceServer.ConsumeStackQuantity(
+	player: Player,
+	itemKind: string,
+	stackKey: string,
+	quantity: number,
+	storageSection: string?
+): boolean
+	local requiredQuantity = math.max(0, math.floor(quantity))
+	if requiredQuantity <= 0 then
+		return true
+	end
+	if not InventoryServiceServer.HasStackQuantity(player, itemKind, stackKey, requiredQuantity, storageSection) then
+		return false
+	end
+
+	local inventory = getInventory(player)
+	local remaining = requiredQuantity
+	for _, entry in ipairs(getMatchingEntries(player, itemKind, stackKey, storageSection)) do
+		if remaining <= 0 then
+			break
+		end
+
+		local amountToRemove = math.min(remaining, entry.Quantity)
+		if amountToRemove >= entry.Quantity then
+			inventory.Entries[entry.EntryId] = nil
+		else
+			entry.Quantity -= amountToRemove
+		end
+		remaining -= amountToRemove
+	end
+
+	syncInventory(player)
+	return true
+end
+
+function InventoryServiceServer.GetCoins(player: Player): number
+	return InventoryServiceServer.GetStackQuantity(player, COIN_ITEM_KIND, COIN_STACK_KEY)
+end
+
+function InventoryServiceServer.HasCoins(player: Player, quantity: number): boolean
+	return InventoryServiceServer.HasStackQuantity(player, COIN_ITEM_KIND, COIN_STACK_KEY, quantity)
+end
+
+function InventoryServiceServer.ConsumeCoins(player: Player, quantity: number): boolean
+	return InventoryServiceServer.ConsumeStackQuantity(player, COIN_ITEM_KIND, COIN_STACK_KEY, quantity)
 end
 
 API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)

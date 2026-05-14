@@ -9,6 +9,7 @@ local Behavior = {}
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 raycastParams.FilterDescendantsInstances = { workspace:WaitForChild("EntitiesFolder") }
+raycastParams.RespectCanCollide = true
 function Behavior.Raycast(
 	origin: Vector3,
 	direction: Vector3,

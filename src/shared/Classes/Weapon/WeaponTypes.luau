@@ -14,6 +14,21 @@ type AttackContext = AttackContextModule.AttackContext
 type Damage = DamageModule.Damage
 
 export type AbilityCallback = (self: any, owner: Entity, context: { [string]: any }?) -> ()
+export type AbilityMetadata = {
+	Id: string?,
+	Kind: string?,
+	Tag: string?,
+	Name: string?,
+	Title: string?,
+	Desc: string?,
+	Description: string?,
+	Values: { [string]: any }?,
+}
+export type WeaponAbilityDefinition = {
+	Execute: AbilityCallback,
+	Cooldown: number?,
+	Metadata: AbilityMetadata | { AbilityMetadata }?,
+}
 export type PassiveMetadata = {
 	Id: string?,
 	Kind: string?,
@@ -29,6 +44,7 @@ export type WeaponPassiveDefinition = {
 	Metadata: PassiveMetadata | { PassiveMetadata },
 }
 export type WeaponPassiveInput = AttackModifierApplier | WeaponPassiveDefinition
+export type WeaponAbilityInput = AbilityCallback | WeaponAbilityDefinition
 export type AnimationId = string | { string }
 export type AttackProfile = {
 	AnimationId: AnimationId,
@@ -107,28 +123,33 @@ export type Weapon = {
 	PassiveDetails: { PassiveMetadata },
 	WeaponAbility: AbilityCallback?,
 	RightClickAbility: AbilityCallback?,
-	ToolTemplate: Tool?,
-	ToolInstance: Tool?,
+	AbilityCooldown: number?,
+	VisualTemplate: Instance?,
+	VisualInstance: Model?,
+	GripCFrame: CFrame,
+	Cooldown: number?,
+	LastUsed: number?,
 
 	new: (
 		name: string,
 		baseDamage: number,
 		grantedStats: { [Stat]: number }?,
 		weight: number?,
-		weaponAbility: AbilityCallback?,
-		rightClickAbility: AbilityCallback?,
+		weaponAbility: WeaponAbilityInput?,
+		rightClickAbility: WeaponAbilityInput?,
 		weaponId: string?,
 		attackProfile: AttackProfile?,
-		toolTemplate: Tool?,
+		visualTemplate: Instance?,
+		gripCFrame: CFrame?,
 		weaponClass: string?,
 		attackContext: { [string]: any }?,
 		weaponPassive: WeaponPassiveInput?,
 		rarity: string?,
-		passiveDetails: { PassiveMetadata }?
+		passiveDetails: { PassiveMetadata }?,
+		cooldown: number?
 	) -> Weapon,
 	SetOwner: (self: Weapon, entity: Entity?) -> Weapon,
-	SetToolInstance: (self: Weapon, tool: Tool?) -> Tool?,
-	CloneTool: (self: Weapon) -> Tool?,
+	SetVisualInstance: (self: Weapon, model: Model?) -> Model?,
 	GetDamage: (self: Weapon, owner: Entity?) -> number,
 	CreateAttackContext: (
 		self: Weapon,
@@ -150,5 +171,4 @@ export type Weapon = {
 }
 
 return table.freeze({})
-
 

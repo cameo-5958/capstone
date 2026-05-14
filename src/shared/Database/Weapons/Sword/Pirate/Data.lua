@@ -1,3 +1,8 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local WeaponPassive = require(ReplicatedStorage.Classes.Weapon.WeaponPassive)
+
 return {
 	["Name"] = "Plundering Cutlass",
 	["Type"] = "Sword",
@@ -10,8 +15,29 @@ return {
 		["CritDamage"] = 15,
 	},
 	["Weight"] = 11,
-	["WeaponPassive"] = nil,
-	-- TODO: Add a passive that drops +1 coin gain versus enemies
+	["WeaponPassive"] = WeaponPassive.new("weapon:sword:pirate:plunder", {
+		["OnDefeatEnemy"] = function(_, attackContext)
+			local attacker = attackContext.From
+			if not attacker or not attacker.Character then
+				return
+			end
+
+			local player = Players:GetPlayerFromCharacter(attacker.Character)
+			if not player then
+				return
+			end
+
+			local inventoryServiceServer = require(ReplicatedStorage.Services.Inventory.InventoryServiceServer)
+			inventoryServiceServer.AddStackableItem(player, "Currency", "Gold", {
+				DisplayName = "Gold",
+			}, 1)
+		end,
+	}, {
+		["Name"] = "Plunder",
+		["Tag"] = "Passive",
+		["Desc"] = "Defeating an enemy grants 1 extra coin.",
+		["Values"] = {},
+	}),
 
 	["WeaponAbility"] = nil,
 	["RightClickAbility"] = nil,

@@ -65,13 +65,13 @@ WorldTypes.DefaultConfig = {
 	ChunkSize = 8,
 	RadiusTiles = 138,
 	BaseY = 120,
-	Biome = "TemperateGrassland",
+	Biome = "Plains",
 	SeaLevel = 2,
 	OceanMode = "None",
 } :: WorldConfig
 
 WorldTypes.Profile = {
-	Biome = "TemperateGrassland",
+	Biome = "Plains",
 	SeaLevel = 2,
 	OceanMode = "None",
 	StructureSet = { "Tree", "Rock" },
@@ -80,14 +80,23 @@ WorldTypes.Profile = {
 	TileSizeRange = { Min = 5, Max = 5 },
 } :: WorldProfile
 
+WorldTypes.CanonicalBiomes = { "Desert", "Forest", "Mountain", "Plains", "Tundra" }
+
+WorldTypes.BiomeAliases = {
+	Desert = "Desert",
+	Forest = "Forest",
+	Mountain = "Mountain",
+	Plains = "Plains",
+	Tundra = "Tundra",
+	TemperateGrassland = "Plains",
+	PineHighlands = "Mountain",
+	Alpine = "Tundra",
+	HighlandDesert = "Desert",
+	Marshland = "Forest",
+} :: { [string]: string }
+
 WorldTypes.BiomeMaterials = {
-	TemperateGrassland = {
-		Surface = Enum.Material.Grass,
-		Mid = Enum.Material.Rock,
-		Deep = Enum.Material.Rock,
-		Water = Enum.Material.Water,
-	},
-	PineHighlands = {
+	Plains = {
 		Surface = Enum.Material.Grass,
 		Mid = Enum.Material.Rock,
 		Deep = Enum.Material.Rock,
@@ -99,20 +108,20 @@ WorldTypes.BiomeMaterials = {
 		Deep = Enum.Material.Rock,
 		Water = Enum.Material.Water,
 	},
-	Alpine = {
+	Tundra = {
 		Surface = Enum.Material.Snow,
 		Mid = Enum.Material.Rock,
 		Deep = Enum.Material.Rock,
 		Water = Enum.Material.Water,
 	},
-	HighlandDesert = {
+	Desert = {
 		Surface = Enum.Material.Sand,
 		Mid = Enum.Material.Rock,
 		Deep = Enum.Material.Rock,
 		Water = Enum.Material.Water,
 	},
-	Marshland = {
-		Surface = Enum.Material.Ground,
+	Mountain = {
+		Surface = Enum.Material.Rock,
 		Mid = Enum.Material.Rock,
 		Deep = Enum.Material.Rock,
 		Water = Enum.Material.Water,

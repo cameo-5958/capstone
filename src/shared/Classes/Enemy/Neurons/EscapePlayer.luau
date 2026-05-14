@@ -15,6 +15,7 @@ local RUN_START_WARN_WINDOW_SECONDS = 0.75
 local RAYCAST_PARAMS = RaycastParams.new()
 RAYCAST_PARAMS.FilterType = Enum.RaycastFilterType.Exclude
 RAYCAST_PARAMS.FilterDescendantsInstances = { workspace:FindFirstChild("EntitiesFolder") or workspace }
+RAYCAST_PARAMS.RespectCanCollide = true
 
 local function GetEscapeTarget(self: Neuron): Model?
 	if workspace:GetServerTimeNow() > self.Brain.EscapeUntil then

@@ -35,7 +35,7 @@ local function OnEnter(self: Neuron): ()
 		movementEngine:Play("Stumble")
 	end
 
-	movementEngine.Humanoid:MoveTo(rootPosition)
+	movementEngine:MoveTo(rootPosition)
 	movementEngine:CancelLinearVelocity()
 	movementEngine:DisableMovement()
 	movementEngine:ClearLookAt()

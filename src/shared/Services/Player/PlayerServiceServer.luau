@@ -10,8 +10,11 @@ local RunService = game:GetService("RunService")
 local Entity = require(ReplicatedStorage.Classes.Entity.Entity)
 local EntityTypes = require(ReplicatedStorage.Classes.Entity.EntityTypes)
 local CollisionServiceServer = require(ReplicatedStorage.Services.Collision.CollisionServiceServer)
+local InventoryServiceServer = require(ReplicatedStorage.Services.Inventory.InventoryServiceServer)
 local WeaponServiceServer = require(ReplicatedStorage.Services.Weapon.WeaponServiceServer)
+local InventoryItemRegistry = require(ReplicatedStorage.Database.InventoryItems.Registry)
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
+local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
 
 local PlayerServiceServer = {}
 
@@ -83,6 +86,138 @@ local STAMINA_RAMP_DURATION = 0.4
 local RUN_SPEED_MULTIPLIER = 1.8
 local RUNNING_SPEED_MODIFIER_ID = "system:running:speed"
 local PlayerNextDashIframeAt: { [string]: number } = {}
+local DebugWeaponPaths: { string }? = nil
+local DebugSpawnableItems: { {
+	ItemId: string,
+	Name: string,
+	Desc: string,
+	Icon: string,
+	MaxStack: number,
+	SpawnWith: number,
+	CanEquip: boolean,
+	CanUse: boolean,
+	EquipSlotType: string?,
+	ModelAssetName: string?,
+	InventoryData: { [string]: any }?,
+	UseEffects: { [string]: any }?,
+} }? = nil
+
+local function cloneData(data: { [string]: any }?): { [string]: any }?
+	if not data then
+		return nil
+	end
+
+	local clone = {}
+	for key, value in pairs(data) do
+		clone[key] = value
+	end
+	return clone
+end
+
+local function collectWeaponPaths(root: Instance, currentPath: string?, paths: { string }): ()
+	if root:FindFirstChild("Data") then
+		if currentPath and currentPath ~= "" then
+			table.insert(paths, currentPath)
+		end
+		return
+	end
+
+	for _, child in ipairs(root:GetChildren()) do
+		if child:IsA("Folder") then
+			local nextPath = if currentPath and currentPath ~= "" then currentPath .. "." .. child.Name else child.Name
+			collectWeaponPaths(child, nextPath, paths)
+		end
+	end
+end
+
+local function getDebugWeaponPaths(): { string }
+	if DebugWeaponPaths then
+		return DebugWeaponPaths
+	end
+
+	local paths = {}
+	collectWeaponPaths(WeaponsDatabase, nil, paths)
+	table.sort(paths)
+	DebugWeaponPaths = paths
+	return paths
+end
+
+local function getDebugSpawnableItems(): { {
+	ItemId: string,
+	Name: string,
+	Desc: string,
+	Icon: string,
+	MaxStack: number,
+	SpawnWith: number,
+	CanEquip: boolean,
+	CanUse: boolean,
+	EquipSlotType: string?,
+	ModelAssetName: string?,
+	InventoryData: { [string]: any }?,
+	UseEffects: { [string]: any }?,
+} }
+	if DebugSpawnableItems then
+		return DebugSpawnableItems
+	end
+
+	local items = {}
+	for _, item in pairs(InventoryItemRegistry.GetAll()) do
+		table.insert(items, {
+			ItemId = item.Id,
+			Name = item.Name,
+			Desc = item.Desc,
+			Icon = item.Icon,
+			MaxStack = item.MaxStack,
+			SpawnWith = item.SpawnWith,
+			CanEquip = item.CanEquip,
+			CanUse = item.CanUse,
+			EquipSlotType = item.EquipSlotType,
+			ModelAssetName = item.ModelAssetName,
+			InventoryData = cloneData(item.InventoryData),
+			UseEffects = cloneData(item.UseEffects),
+		})
+	end
+
+	table.sort(items, function(left, right)
+		return left.ItemId < right.ItemId
+	end)
+
+	DebugSpawnableItems = items
+	return items
+end
+
+local function debugGrantAllWeapons(player: Player)
+	for _, weaponPath in ipairs(getDebugWeaponPaths()) do
+		InventoryServiceServer.AddWeaponFromPath(player, weaponPath)
+	end
+end
+
+local function debugGrantAllNonConsumableItems(player: Player)
+	for _, item in ipairs(getDebugSpawnableItems()) do
+		InventoryServiceServer.AddStackableItem(
+			player,
+			"InventoryItem",
+			"InventoryItem:" .. item.ItemId,
+			{
+				Kind = "Item",
+				ItemId = item.ItemId,
+				Name = item.Name,
+				Desc = item.Desc,
+				Icon = item.Icon,
+				MaxStack = item.MaxStack,
+				SpawnWith = item.SpawnWith,
+				CanEquip = item.CanEquip,
+				CanUse = item.CanUse,
+				EquipSlotType = item.EquipSlotType,
+				ModelAssetName = item.ModelAssetName,
+				InventoryData = item.InventoryData or {},
+				UseEffects = item.UseEffects,
+			},
+			1,
+			item.MaxStack
+		)
+	end
+end
 local function HideHumanoidOverhead(character: Model)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -400,7 +535,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 	end
 end)
 
-API.OnServerEvent:Connect(function(player: Player, action: string)
+API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [string]: any }?)
 	local entity = PlayerCharacters[player.Name]
 	if action == "RequestSnapshot" then
 		if entity then
@@ -453,6 +588,25 @@ API.OnServerEvent:Connect(function(player: Player, action: string)
 		if wasRunning then
 			BeginStaminaRamp(state, workspace:GetServerTimeNow())
 		end
+	elseif action == "DebugTakeDamage" then
+		if not RunService:IsStudio() or not entity or not entity:IsAlive() then
+			return
+		end
+
+		local amount = if payload and type(payload.Amount) == "number" then payload.Amount else 10
+		entity:ModifyStat("Health", -math.max(0, amount))
+	elseif action == "DebugGrantAllNonConsumableItems" then
+		if not RunService:IsStudio() then
+			return
+		end
+
+		debugGrantAllNonConsumableItems(player)
+	elseif action == "DebugGrantAllWeapons" then
+		if not RunService:IsStudio() then
+			return
+		end
+
+		debugGrantAllWeapons(player)
 	end
 end)
 

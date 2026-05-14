@@ -50,6 +50,14 @@ export type ManualStructurePreviewSettings = {
 	HeightOffsetStuds: number,
 }
 
+export type TransitionCampPreviewSettings = {
+	Enabled: boolean,
+	StudioOnly: boolean,
+	Position: Vector3,
+	TileSize: number,
+	Biome: string,
+}
+
 export type WorldStructureSettings = {
 	ActiveProfile: string,
 	RuntimeNatureChanceByBiome: { [string]: number },
@@ -67,6 +75,7 @@ export type WorldStructureSettings = {
 	RuntimeNodeAssemblySharedPool: { string },
 	RuntimeNodeAssemblySharedWeights: { number },
 	ManualStructurePreview: ManualStructurePreviewSettings,
+	TransitionCampPreview: TransitionCampPreviewSettings,
 	StructureFlattening: StructureFlatteningSettings,
 }
 
@@ -74,43 +83,33 @@ local Settings = {
 	ActiveProfile = "BalancedSceneryV1",
 
 	RuntimeNatureChanceByBiome = {
-		TemperateGrassland = 0.035,
-		PineHighlands = 0.075,
+		Plains = 0.035,
 		Forest = 0.095,
-		Alpine = 0.06,
-		HighlandDesert = 0.055,
-		Marshland = 0.08,
+		Tundra = 0.06,
+		Desert = 0.055,
+		Mountain = 0.075,
 	},
 
 	RuntimeNatureWeightsByBiome = {
-		TemperateGrassland = { 10, 8, 38, 30, 8, 6 },
-		PineHighlands = { 44, 32, 9, 6, 5, 4 },
-		Forest = { 38, 34, 11, 8, 5, 4 },
-		Alpine = { 43, 31, 10, 7, 5, 4 },
-		HighlandDesert = { 40, 32, 11, 7, 6, 4 },
-		Marshland = { 44, 31, 10, 7, 5, 3 },
+		Plains = { 10, 8, 38, 30, 8, 6 },
+		Forest = { 30, 24, 17, 10, 7, 5, 4, 3 },
+		Tundra = { 43, 31, 10, 7, 5, 4 },
+		Desert = { 40, 32, 11, 7, 6, 4 },
+		Mountain = { 44, 32, 9, 6, 5, 4 },
 	},
 
 	RuntimeNodeStructuresEnabled = false,
 	RuntimeNodeStructureChance = 0.1,
 	RuntimeNodePoolByBiome = {
-		TemperateGrassland = {
+		Plains = {
 			"Shared::NodeFenceCamp",
 			"Shared::LanternPostWood",
 			"Shared::LanternPostIron",
 			"Shared::ProduceCartStand",
 			"Shared::StoneWellPlaza",
 			"Shared::TravelerCampfireRing",
-			"Shared::TreasureChestCache",
-			"Shared::NodeTentOutpost",
-			"Shared::NodeLampSquare",
-		},
-		PineHighlands = {
-			"Shared::NodeFenceCamp",
-			"Shared::LanternPostWood",
-			"Shared::StoneWellPlaza",
-			"PineHighlands::WoodStoreLeanTo",
-			"Shared::TravelerCampfireRing",
+			"Shared::TreasureChestFieldCache",
+			"Shared::TreasureChestCampStock",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
 			"Shared::NodeLampSquare",
@@ -120,45 +119,53 @@ local Settings = {
 			"Shared::LanternPostIron",
 			"Forest::OvergrownStoneGate",
 			"Shared::TravelerCampfireRing",
+			"Shared::TreasureChestFieldCache",
+			"Shared::TreasureChestCampStock",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
 			"Shared::StoneWellPlaza",
 		},
-		Alpine = {
+		Tundra = {
 			"Shared::LanternPostIron",
 			"Shared::NodeFenceCamp",
 			"Shared::TravelerCampfireRing",
 			"Shared::StoneWellPlaza",
+			"Shared::TreasureChestFieldCache",
+			"Shared::TreasureChestCampStock",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
 			"Shared::NodeLampSquare",
 		},
-		HighlandDesert = {
+		Desert = {
 			"Shared::NodeFenceCamp",
 			"Shared::LanternPostWood",
 			"HighlandDesert::OasisFireCamp",
 			"Shared::TravelerCampfireRing",
+			"Shared::TreasureChestFieldCache",
+			"Shared::TreasureChestCampStock",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
 			"Shared::StoneWellPlaza",
 		},
-		Marshland = {
-			"Marshland::TotemPlatform",
+		Mountain = {
 			"Shared::NodeFenceCamp",
 			"Shared::LanternPostWood",
+			"Shared::StoneWellPlaza",
+			"PineHighlands::WoodStoreLeanTo",
 			"Shared::TravelerCampfireRing",
+			"Shared::TreasureChestFieldCache",
+			"Shared::TreasureChestCampStock",
 			"Shared::TreasureChestCache",
 			"Shared::NodeTentOutpost",
-			"Shared::StoneWellPlaza",
+			"Shared::NodeLampSquare",
 		},
 	},
 	RuntimeNodeWeightsByBiome = {
-		TemperateGrassland = { 19, 14, 12, 13, 12, 12, 10, 8, 10 },
-		PineHighlands = { 18, 12, 12, 11, 16, 10, 9, 12 },
-		Forest = { 18, 12, 10, 16, 12, 10, 9 },
-		Alpine = { 16, 12, 14, 14, 10, 10, 8 },
-		HighlandDesert = { 16, 11, 18, 15, 10, 10, 10 },
-		Marshland = { 14, 14, 12, 16, 12, 12, 10 },
+		Plains = { 19, 14, 12, 13, 12, 12, 6, 5, 4, 8, 10 },
+		Forest = { 18, 12, 10, 16, 5, 4, 4, 10, 9 },
+		Tundra = { 16, 12, 14, 14, 5, 4, 4, 10, 8 },
+		Desert = { 16, 11, 18, 15, 4, 5, 4, 10, 10 },
+		Mountain = { 18, 12, 12, 11, 16, 5, 5, 4, 9, 12 },
 	},
 	RuntimeNodeSharedPool = {
 		"Shared::NodeFenceCamp",
@@ -167,11 +174,13 @@ local Settings = {
 		"Shared::TravelerCampfireRing",
 		"Shared::ProduceCartStand",
 		"Shared::StoneWellPlaza",
+		"Shared::TreasureChestFieldCache",
+		"Shared::TreasureChestCampStock",
 		"Shared::TreasureChestCache",
 		"Shared::NodeTentOutpost",
 		"Shared::NodeLampSquare",
 	},
-	RuntimeNodeSharedWeights = { 16, 14, 12, 16, 12, 14, 10, 10, 10 },
+	RuntimeNodeSharedWeights = { 16, 14, 12, 16, 12, 14, 6, 5, 4, 10, 10 },
 
 	RuntimeNodeAssemblyPlacement = {
 		Enabled = true,
@@ -188,7 +197,7 @@ local Settings = {
 				{ DX = 0, DZ = 0, PrefabId = "Shared::NodeTentOutpost", Required = true },
 				{ DX = 10, DZ = 0, PrefabId = "Shared::TravelerCampfireRing", Required = true },
 				{ DX = -11, DZ = 1, PrefabId = "Shared::NodeFenceCamp", Required = true },
-				{ DX = -8, DZ = -8, PrefabId = "Shared::TreasureChestCache", Required = false },
+				{ DX = -8, DZ = -8, PrefabId = "Shared::TreasureChestCampStock", Required = false },
 				{ DX = 8, DZ = -8, PrefabId = "Shared::NodeLampSquare", Required = false },
 				{ DX = -10, DZ = -9, PrefabId = "Shared::LanternPostWood", Required = false },
 			},
@@ -211,7 +220,7 @@ local Settings = {
 				{ DX = -10, DZ = 0, PrefabId = "Shared::ProduceCartStand", Required = true },
 				{ DX = 0, DZ = 10, PrefabId = "Shared::LanternPostIron", Required = false },
 				{ DX = 0, DZ = -10, PrefabId = "Shared::TravelerCampfireRing", Required = false },
-				{ DX = -10, DZ = -10, PrefabId = "Shared::TreasureChestCache", Required = false },
+				{ DX = -10, DZ = -10, PrefabId = "Shared::TreasureChestFieldCache", Required = false },
 			},
 		},
 		["Shared::TownCluster"] = {
@@ -242,7 +251,7 @@ local Settings = {
 				{ DX = 0, DZ = 0, PrefabId = "PineHighlands::PrayerCairnShelter", Required = true },
 				{ DX = 10, DZ = 0, PrefabId = "PineHighlands::WoodStoreLeanTo", Required = true },
 				{ DX = -10, DZ = 2, PrefabId = "Shared::TravelerCampfireRing", Required = true },
-				{ DX = 0, DZ = -10, PrefabId = "Shared::TreasureChestCache", Required = false },
+				{ DX = 0, DZ = -10, PrefabId = "Shared::TreasureChestCampStock", Required = false },
 				{ DX = 10, DZ = -10, PrefabId = "Shared::NodeFenceCamp", Required = false },
 			},
 		},
@@ -253,7 +262,7 @@ local Settings = {
 				{ DX = 11, DZ = 2, PrefabId = "Forest::ForagerSupplyCamp", Required = true },
 				{ DX = -11, DZ = -2, PrefabId = "Forest::CampfireShelter", Required = true },
 				{ DX = 0, DZ = -10, PrefabId = "Shared::TravelerCampfireRing", Required = true },
-				{ DX = 10, DZ = 10, PrefabId = "Shared::TreasureChestCache", Required = false },
+				{ DX = 10, DZ = 10, PrefabId = "Shared::TreasureChestFieldCache", Required = false },
 			},
 		},
 		["Forest::HideoutCluster"] = {
@@ -292,33 +301,31 @@ local Settings = {
 				{ DX = 12, DZ = 2, PrefabId = "Marshland::StiltHut", Required = true },
 				{ DX = -12, DZ = -2, PrefabId = "Marshland::TotemPlatform", Required = true },
 				{ DX = 0, DZ = -10, PrefabId = "Shared::TravelerCampfireRing", Required = true },
-				{ DX = 10, DZ = 10, PrefabId = "Shared::TreasureChestCache", Required = false },
+				{ DX = 10, DZ = 10, PrefabId = "Shared::TreasureChestFieldCache", Required = false },
 			},
 		},
 	},
 
 	RuntimeNodeAssemblyPoolByBiome = {
-		TemperateGrassland = {
+		Plains = {
 			"Shared::UtilitySquare",
 			"Shared::VillageCrossing",
 			"Shared::CampHub",
 			"TemperateGrassland::FarmsteadCluster",
 			"Shared::TownCluster",
 		},
-		PineHighlands = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "PineHighlands::LookoutCamp" },
 		Forest = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Forest::HideoutCluster" },
-		Alpine = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Alpine::SummitOutpost" },
-		HighlandDesert = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "HighlandDesert::OasisCluster" },
-		Marshland = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Marshland::StiltCamp" },
+		Tundra = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Alpine::SummitOutpost" },
+		Desert = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "HighlandDesert::OasisCluster" },
+		Mountain = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "PineHighlands::LookoutCamp" },
 	},
 
 	RuntimeNodeAssemblyWeightsByBiome = {
-		TemperateGrassland = { 36, 26, 18, 12, 8 },
-		PineHighlands = { 36, 24, 18, 10 },
+		Plains = { 36, 26, 18, 12, 8 },
 		Forest = { 36, 24, 18, 10 },
-		Alpine = { 36, 24, 18, 10 },
-		HighlandDesert = { 36, 24, 18, 10 },
-		Marshland = { 36, 24, 18, 10 },
+		Tundra = { 36, 24, 18, 10 },
+		Desert = { 36, 24, 18, 10 },
+		Mountain = { 36, 24, 18, 10 },
 	},
 
 	RuntimeNodeAssemblySharedPool = { "Shared::CampHub", "Shared::UtilitySquare", "Shared::VillageCrossing", "Shared::TownCluster" },
@@ -335,6 +342,14 @@ local Settings = {
 		SpacingStuds = 32,
 		GridOffsetStuds = 84,
 		HeightOffsetStuds = 8,
+	},
+
+	TransitionCampPreview = {
+		Enabled = false,
+		StudioOnly = true,
+		Position = Vector3.new(0, 260, 0),
+		TileSize = 6,
+		Biome = "Mountain",
 	},
 
 	StructureFlattening = {

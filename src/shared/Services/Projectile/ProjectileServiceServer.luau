@@ -22,12 +22,15 @@ type Weapon = WeaponTypes.Weapon
 type ProjectileDefinition = {
 	Position: Vector3,
 	Velocity: Vector3,
+	Speed: number?,
 	MaxDistance: number,
 	GravityScale: number,
 	Radius: number,
 	DamageScale: number,
 	Owner: Entity,
 	Weapon: Weapon,
+	Target: Entity?,
+	HomingStrength: number?,
 }
 
 type ActiveProjectile = ProjectileDefinition & {
@@ -42,18 +45,42 @@ local NextProjectileId = 0
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function GetArrowSourcePart(weapon: Weapon): BasePart?
-	local tool = weapon.ToolInstance or weapon.ToolTemplate
-	if not tool then
+local function GetProjectileSourceInstance(weapon: Weapon): Instance?
+	local sourceInstance = weapon.VisualInstance or weapon.VisualTemplate
+	if not sourceInstance then
 		return nil
 	end
 
-	local arrow = tool:FindFirstChild("Arrow", true)
-	if arrow and arrow:IsA("BasePart") then
+	local arrowPosition = sourceInstance:FindFirstChild("ArrowPosition", true)
+	if arrowPosition then
+		return arrowPosition
+	end
+
+	local arrow = sourceInstance:FindFirstChild("Arrow", true)
+	if arrow then
 		return arrow
 	end
 
 	return nil
+end
+
+local function ResolveProjectileSpawnPosition(
+	defaultPosition: Vector3,
+	sourceInstance: Instance?
+): Vector3
+	if not sourceInstance then
+		return defaultPosition
+	end
+
+	if sourceInstance:IsA("Attachment") then
+		return sourceInstance.WorldPosition
+	end
+
+	if sourceInstance:IsA("BasePart") then
+		return sourceInstance.Position
+	end
+
+	return defaultPosition
 end
 
 local function RemoveProjectile(projectileId: number)
@@ -86,11 +113,37 @@ local function ResolveTargetFromHit(owner: Entity, instance: Instance): Entity?
 	return target
 end
 
+local function ResolveTargetAimPosition(projectile: ActiveProjectile): Vector3?
+	local target = projectile.Target
+	if not target or not target:IsAlive() then
+		return nil
+	end
+
+	return target.RootPart.Position + Vector3.new(0, 1.5, 0)
+end
+
 local function StepProjectile(projectileId: number, projectile: ActiveProjectile, dt: number)
-	local gravity = Vector3.new(0, -workspace.Gravity * projectile.GravityScale, 0)
+	local speed = projectile.Speed or projectile.Velocity.Magnitude
+	local targetAimPosition = ResolveTargetAimPosition(projectile)
+	local nextVelocity = projectile.Velocity
+	if targetAimPosition then
+		local desiredDirection = targetAimPosition - projectile.Position
+		if desiredDirection.Magnitude > 0.001 and speed > 0.001 then
+			local desiredVelocity = desiredDirection.Unit * speed
+			local homingStrength = math.max(0, projectile.HomingStrength or 0)
+			local blendAlpha = math.clamp(homingStrength * dt, 0, 1)
+			nextVelocity = projectile.Velocity:Lerp(desiredVelocity, blendAlpha)
+			if nextVelocity.Magnitude > 0.001 then
+				nextVelocity = nextVelocity.Unit * speed
+			end
+		end
+	end
+
+	local gravityScale = if targetAimPosition then 0 else projectile.GravityScale
+	local gravity = Vector3.new(0, -workspace.Gravity * gravityScale, 0)
 	local startPosition = projectile.Position
-	local nextVelocity = projectile.Velocity + gravity * dt
-	local nextPosition = projectile.Position + projectile.Velocity * dt + (gravity * (0.5 * dt * dt))
+	nextVelocity += gravity * dt
+	local nextPosition = projectile.Position + nextVelocity * dt
 	local segment = nextPosition - startPosition
 	local segmentLength = segment.Magnitude
 
@@ -118,22 +171,22 @@ local function StepProjectile(projectileId: number, projectile: ActiveProjectile
 end
 
 function ProjectileServiceServer.FireArrow(definition: ProjectileDefinition): number
-	local spawnPosition = definition.Position
-	local sourceArrow = GetArrowSourcePart(definition.Weapon)
-	if sourceArrow then
-		spawnPosition = sourceArrow.Position
-	end
+	local sourceInstance = GetProjectileSourceInstance(definition.Weapon)
+	local spawnPosition = ResolveProjectileSpawnPosition(definition.Position, sourceInstance)
 
 	NextProjectileId += 1
 	ActiveProjectiles[NextProjectileId] = {
 		Position = spawnPosition,
 		Velocity = definition.Velocity,
+		Speed = definition.Speed or definition.Velocity.Magnitude,
 		MaxDistance = definition.MaxDistance,
 		GravityScale = definition.GravityScale,
 		Radius = definition.Radius,
 		DamageScale = definition.DamageScale,
 		Owner = definition.Owner,
 		Weapon = definition.Weapon,
+		Target = definition.Target,
+		HomingStrength = definition.HomingStrength,
 		DistanceTravelled = 0,
 		ProjectileId = NextProjectileId,
 	}
@@ -142,9 +195,11 @@ function ProjectileServiceServer.FireArrow(definition: ProjectileDefinition): nu
 		ProjectileId = NextProjectileId,
 		Position = spawnPosition,
 		Velocity = definition.Velocity,
+		Speed = definition.Speed or definition.Velocity.Magnitude,
 		GravityScale = definition.GravityScale,
+		HomingStrength = definition.HomingStrength,
 		MaxDistance = definition.MaxDistance,
-		SourceArrow = sourceArrow,
+		TargetRootPart = definition.Target and definition.Target.RootPart or nil,
 	})
 
 	return NextProjectileId

@@ -179,6 +179,7 @@ end
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 raycastParams.FilterDescendantsInstances = { workspace:WaitForChild("EntitiesFolder") }
+raycastParams.RespectCanCollide = true
 -- Any utility methods used by neurons
 function Brain.HitPlayer(self: Brain, player: Model, range: number): boolean
 	-- Grab player position

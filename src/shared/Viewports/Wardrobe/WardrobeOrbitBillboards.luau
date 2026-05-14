@@ -1,16 +1,16 @@
 --!strict
-
-local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local React = require(ReplicatedStorage.Packages.react)
+local ItemLoadoutServiceClient = require(ReplicatedStorage.Services.ItemLoadout.ItemLoadoutServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WardrobePreviewLoader = require(ReplicatedStorage.Viewports.Wardrobe.WardrobePreviewLoader)
 
 local ORBIT_RADIUS = 4
-local ORBIT_HEIGHT = 0.85
+local ORBIT_HEIGHT = 1.6
 local ORBIT_SPEED = 0.2
-local BILLBOARD_SIZE_PIXELS = 170
+local BILLBOARD_SIZE_PIXELS = 280
 local SLOT_OFFSET = Vector3.new(-0.65, -0.45, 0)
 local SLOT_NUMBER_BASE_TEXT_SIZE = 9
 local NAME_BASE_TEXT_SIZE = 12
@@ -27,8 +27,8 @@ local FOREST_SHADOW = Color3.fromRGB(14, 8, 4)
 local ORBIT_SLOT_LABELS = {
 	"Weapon",
 	"Armor",
-	"Item",
-	"Item",
+	"Quick Item",
+	"Quick Item",
 }
 
 local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
@@ -48,27 +48,19 @@ type LoadoutSnapshot = {
 	Slots: { LoadoutSlot },
 }
 
-local function preloadVisualAssets(instance: Instance, context: string): boolean
-	local loadedCleanly = true
-	local ok, err = pcall(function()
-		ContentProvider:PreloadAsync({ instance }, function(_contentId: string, status: Enum.AssetFetchStatus)
-			if status ~= Enum.AssetFetchStatus.Success then
-				loadedCleanly = false
-			end
-		end)
-	end)
+type ItemLoadoutSlot = {
+	Slot: number,
+	EntryId: string?,
+	ItemId: string?,
+	Name: string?,
+	Icon: string?,
+	Quantity: number?,
+	MaxStack: number?,
+}
 
-	if not ok then
-		warn(("[WardrobeOrbit] Failed to preload %s preview assets: %s"):format(context, tostring(err)))
-		return false
-	end
-
-	if not loadedCleanly then
-		warn(("[WardrobeOrbit] %s preview had assets that did not preload cleanly."):format(context))
-	end
-
-	return loadedCleanly
-end
+type ItemLoadoutSnapshot = {
+	Slots: { ItemLoadoutSlot },
+}
 
 local function getTargetPosition(target: Model): Vector3
 	local rootPart = target:FindFirstChild("HumanoidRootPart") or target.PrimaryPart
@@ -105,7 +97,10 @@ local function resolveWeaponModelTemplate(slot: LoadoutSlot?): Instance?
 	end
 
 	for _, child in ipairs(current:GetChildren()) do
-		if child.Name ~= "Data" and (child:IsA("Tool") or child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) then
+		if
+			child.Name ~= "Data"
+			and (child:IsA("Tool") or child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder"))
+		then
 			return child
 		end
 	end
@@ -221,7 +216,6 @@ local function WorldWeaponPreview(props: { Slot: LoadoutSlot?, Position: Vector3
 	local slot = props.Slot
 	local slotIndex = if slot then slot.Slot else 0
 	local weaponId = if slot and type(slot.WeaponId) == "string" then slot.WeaponId else ""
-	local previewLabel = if slot and type(slot.Name) == "string" then slot.Name elseif weaponId ~= "" then weaponId else "empty slot"
 
 	React.useEffect(function()
 		local folder = folderRef.current
@@ -240,7 +234,7 @@ local function WorldWeaponPreview(props: { Slot: LoadoutSlot?, Position: Vector3
 			weaponModel.Name = "WeaponWorldPreview"
 			scaleModelToLargestAxis(weaponModel, WORLD_PREVIEW_SIZE_STUDS)
 			task.spawn(function()
-				preloadVisualAssets(weaponModel, previewLabel)
+				WardrobePreviewLoader.PreloadInstanceAssets(weaponModel)
 
 				if disposed or folderRef.current ~= folder then
 					weaponModel:Destroy()
@@ -308,7 +302,7 @@ local function WeaponSlotViewport(props: { Slot: LoadoutSlot? })
 		local weaponModel = cloneWeaponVisual(slot)
 		if weaponModel then
 			task.spawn(function()
-				preloadVisualAssets(weaponModel, weaponId)
+				WardrobePreviewLoader.PreloadInstanceAssets(weaponModel)
 
 				if disposed or viewportRef.current ~= viewport then
 					weaponModel:Destroy()
@@ -345,10 +339,7 @@ local function WeaponSlotViewport(props: { Slot: LoadoutSlot? })
 	})
 end
 
-local function weaponSlot(
-	slot: LoadoutSlot?,
-	index: number
-)
+local function weaponSlot(slot: LoadoutSlot?, index: number)
 	local hasWeapon = slot ~= nil and type(slot.WeaponId) == "string" and slot.WeaponId ~= ""
 	local labelText = if slot and type(slot.Name) == "string" then slot.Name else "Empty"
 	local slotLabel = ORBIT_SLOT_LABELS[index] or tostring(index)
@@ -416,10 +407,83 @@ local function weaponSlot(
 	})
 end
 
+local function orbitSlot(slot: LoadoutSlot?, itemSlot: ItemLoadoutSlot?, index: number)
+	if index <= 2 then
+		return weaponSlot(slot, index)
+	end
+
+	local hasItem = itemSlot ~= nil and type(itemSlot.EntryId) == "string" and itemSlot.EntryId ~= ""
+	local labelText = if itemSlot and type(itemSlot.Name) == "string" then itemSlot.Name else "Empty"
+	local quantityText = if itemSlot
+			and type(itemSlot.Quantity) == "number"
+			and itemSlot.Quantity > 1
+		then (" x%d"):format(itemSlot.Quantity)
+		else ""
+	local slotLabel = ORBIT_SLOT_LABELS[index] or tostring(index)
+
+	return React.createElement("Frame", {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClipsDescendants = false,
+		Size = UDim2.fromScale(1, 1),
+	}, {
+		TextBar = React.createElement("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = TEXT_BACKGROUND_COLOR,
+			BackgroundTransparency = TEXT_BACKGROUND_TRANSPARENCY,
+			BorderSizePixel = 0,
+			ClipsDescendants = false,
+			Position = UDim2.new(0.5, 0, 1, -8),
+			Size = UDim2.new(TEXT_BAR_WIDTH_SCALE, 0, 0, 22),
+			ZIndex = 3,
+		}, {
+			Layout = React.createElement("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				HorizontalAlignment = Enum.HorizontalAlignment.Left,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+			}),
+			SlotNumber = React.createElement("TextLabel", {
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBlack,
+				LayoutOrder = 1,
+				Size = UDim2.new(0, 56, 1, 0),
+				Text = slotLabel,
+				TextColor3 = FOREST_ACCENT,
+				TextSize = SLOT_NUMBER_BASE_TEXT_SIZE,
+				TextStrokeColor3 = FOREST_SHADOW,
+				TextStrokeTransparency = 0.2,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				ZIndex = 4,
+			}),
+			Name = React.createElement("TextLabel", {
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = 2,
+				Size = UDim2.new(1, -64, 1, 0),
+				Text = labelText .. quantityText,
+				TextColor3 = if hasItem then FOREST_TEXT else FOREST_MUTED_TEXT,
+				TextSize = NAME_BASE_TEXT_SIZE,
+				TextStrokeColor3 = FOREST_SHADOW,
+				TextStrokeTransparency = 0.25,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				ZIndex = 4,
+			}),
+		}),
+	})
+end
+
 local function WardrobeOrbitBillboards(props: { Target: Model })
 	local angle, setAngle = React.useState(0)
 	local loadout, setLoadout = React.useState(function()
 		return WeaponServiceClient.GetLoadoutData() :: LoadoutSnapshot
+	end)
+	local itemLoadout, setItemLoadout = React.useState(function()
+		return ItemLoadoutServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot
 	end)
 
 	React.useEffect(function()
@@ -446,6 +510,20 @@ local function WardrobeOrbitBillboards(props: { Target: Model })
 		end
 	end, {})
 
+	React.useEffect(function()
+		local connection = ItemLoadoutServiceClient.GetLoadoutChangedSignal()
+			:Connect(function(nextLoadout: ItemLoadoutSnapshot)
+				setItemLoadout(nextLoadout)
+			end)
+
+		ItemLoadoutServiceClient.RequestLoadout()
+		setItemLoadout(ItemLoadoutServiceClient.GetLoadoutData() :: ItemLoadoutSnapshot)
+
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
+
 	local center = getTargetPosition(props.Target)
 	local children = {}
 
@@ -454,6 +532,7 @@ local function WardrobeOrbitBillboards(props: { Target: Model })
 		local position = center
 			+ Vector3.new(math.cos(theta) * ORBIT_RADIUS, ORBIT_HEIGHT, math.sin(theta) * ORBIT_RADIUS)
 		local slot = loadout.Slots[index]
+		local itemSlot = if index >= 3 then itemLoadout.Slots[index - 2] else nil
 
 		children["OrbitAnchor" .. index] = React.createElement("Part", {
 			Name = "WardrobeOrbitAnchor" .. index,
@@ -476,7 +555,7 @@ local function WardrobeOrbitBillboards(props: { Target: Model })
 				Size = UDim2.fromOffset(BILLBOARD_SIZE_PIXELS, BILLBOARD_SIZE_PIXELS),
 				StudsOffsetWorldSpace = SLOT_OFFSET,
 			}, {
-				Slot = weaponSlot(slot, index),
+				Slot = orbitSlot(slot, itemSlot, index),
 			}),
 		})
 	end

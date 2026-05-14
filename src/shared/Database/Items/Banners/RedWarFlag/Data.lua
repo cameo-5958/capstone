@@ -4,7 +4,7 @@ return {
 	Desc = "Places a red banner that heals nearby allies for 1% every 0.5 seconds.",
 	Icon = "rbxassetid://134706181541710",
 	MaxStack = 8,
-	SpawnWith = 2,
+	SpawnWith = 0,
 	InventoryData = {
 		Category = "Banner",
 		Type = "Support",

@@ -4,7 +4,7 @@ return {
 	Desc = "Places a black banner that grants healing, offense, defense, and speed.",
 	Icon = "rbxassetid://103162751130088",
 	MaxStack = 8,
-	SpawnWith = 2,
+	SpawnWith = 0,
 	InventoryData = {
 		Category = "Banner",
 		Type = "Support",

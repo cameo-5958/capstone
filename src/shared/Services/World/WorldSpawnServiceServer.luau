@@ -6,14 +6,19 @@ local Workspace = game:GetService("Workspace")
 
 local PrefabTypes = require(script.Parent.Prefabs.PrefabTypes)
 local PrefabRegistry = require(script.Parent.Prefabs.PrefabRegistry)
+local PrefabRenderer = require(script.Parent.Prefabs.PrefabRenderer)
 local WorldSpawnSettings = require(script.Parent.WorldSpawnSettings)
 
 local EnemyServiceServer = require(ReplicatedStorage.Services.Enemy.EnemyServiceServer)
+local InventoryItemRegistry = require(ReplicatedStorage.Database.InventoryItems.Registry)
 local InventoryServiceServer = require(ReplicatedStorage.Services.Inventory.InventoryServiceServer)
+local ItemDropServiceServer = require(ReplicatedStorage.Services.ItemDrop.ItemDropServiceServer)
+local PrefabModels = ReplicatedStorage:WaitForChild("Database"):WaitForChild("PrefabModels")
 
 type PrefabSpawnMarker = PrefabTypes.PrefabSpawnMarker
 type EnemyMarkerConfig = PrefabTypes.EnemySpawnMarkerConfig
 type TreasureMarkerConfig = PrefabTypes.TreasureSpawnMarkerConfig
+type HarvestMarkerConfig = PrefabTypes.HarvestSpawnMarkerConfig
 type WorldSpawnSettingsType = WorldSpawnSettings.WorldSpawnSettings
 type EnemyPool = WorldSpawnSettings.EnemyPool
 type BiomeLevelRange = WorldSpawnSettings.BiomeLevelRange
@@ -50,6 +55,9 @@ type WorldState = {
 	Seed: number,
 	Config: WorldConfig,
 	Columns: { [string]: TileColumn },
+	PathRoutes: { { { X: number, Z: number, Height: number, IsIncidentNode: boolean?, IsStructureNode: boolean? } } }?,
+	PathEndpoints: { TileColumn }?,
+	BossEndpoint: TileColumn?,
 }
 
 type EnemyGeneratedData = {
@@ -73,6 +81,14 @@ type TreasureGeneratedData = {
 	WeaponGrants: { string },
 }
 
+type HarvestGeneratedData = {
+	ItemId: string,
+	Quantity: number,
+	StackKey: string,
+	MaxStack: number,
+	SerializedData: { [string]: any },
+}
+
 type SpawnGenerationType = "Boss" | "Standard" | "Treasure" | "NoPath"
 
 type SpawnDebugOverrides = {
@@ -82,7 +98,7 @@ type SpawnDebugOverrides = {
 
 type SpawnPointState = {
 	Id: string,
-	Type: "Enemy" | "Treasure",
+	Type: "Enemy" | "Treasure" | "Harvest",
 	Biome: string,
 	ChunkX: number,
 	ChunkZ: number,
@@ -95,12 +111,17 @@ type SpawnPointState = {
 	Status: "Dormant" | "Active" | "Dead" | "Claimed",
 	EnemyData: EnemyGeneratedData?,
 	TreasureData: TreasureGeneratedData?,
+	HarvestData: HarvestGeneratedData?,
 	PromptActionText: string?,
 	PromptObjectText: string?,
 	ActiveEnemyUUID: string?,
 	ActiveTreasureModel: Model?,
+	ActiveHarvestModel: Model?,
 	PromptConnection: RBXScriptConnection?,
 	GenerationToken: number,
+	RequiredItemKind: string?,
+	RequiredStackKey: string?,
+	RequiredQuantity: number?,
 }
 
 local Settings = WorldSpawnSettings :: WorldSpawnSettingsType
@@ -120,9 +141,11 @@ local PlayerLoadedChunks = {} :: { [Player]: { [string]: boolean } }
 
 local SpawnRoot: Folder? = nil
 local TreasureRoot: Folder? = nil
+local HarvestRoot: Folder? = nil
 local DebugRoot: Folder? = nil
 local ActiveGenerationToken = 0
 local TREASURE_CLAIM_DISTANCE_TOLERANCE = 2
+local HARVEST_CLAIM_DISTANCE_TOLERANCE = 2
 local GENERATION_TYPE_BOSS: SpawnGenerationType = "Boss"
 local GENERATION_TYPE_STANDARD: SpawnGenerationType = "Standard"
 local GENERATION_TYPE_TREASURE: SpawnGenerationType = "Treasure"
@@ -132,9 +155,14 @@ local RuntimeDebugOverrides = {
 	EnemyBaseLevel = nil,
 	GenerationType = GENERATION_TYPE_STANDARD,
 } :: SpawnDebugOverrides
+local DROP_SCATTER_RADIUS = 3.2
 
 local function chunkKey(chunkX: number, chunkZ: number): string
 	return tostring(chunkX) .. ":" .. tostring(chunkZ)
+end
+
+local function columnKey(columnX: number, columnZ: number): string
+	return tostring(columnX) .. ":" .. tostring(columnZ)
 end
 
 local function foldHash(hash: number, value: number): number
@@ -446,6 +474,16 @@ local function shouldEnableTreasureMarker(markerConfig: TreasureMarkerConfig?): 
 	return true
 end
 
+local function shouldEnableHarvestMarker(markerConfig: HarvestMarkerConfig?): boolean
+	if not Settings.Enabled or not Settings.Harvest.Enabled then
+		return false
+	end
+	if markerConfig and markerConfig.Enabled == false then
+		return false
+	end
+	return true
+end
+
 local function makeSpawnPointId(
 	seed: number,
 	columnX: number,
@@ -464,7 +502,14 @@ local function logVerbose(message: string)
 end
 
 local function ensureSpawnRoot()
-	if SpawnRoot and SpawnRoot.Parent and TreasureRoot and TreasureRoot.Parent then
+	if
+		SpawnRoot
+		and SpawnRoot.Parent
+		and TreasureRoot
+		and TreasureRoot.Parent
+		and HarvestRoot
+		and HarvestRoot.Parent
+	then
 		return
 	end
 
@@ -498,6 +543,17 @@ local function ensureSpawnRoot()
 		treasures.Parent = runtimeRoot
 	end
 
+	local harvests = runtimeRoot:FindFirstChild("Harvest")
+	if harvests and not harvests:IsA("Folder") then
+		harvests:Destroy()
+		harvests = nil
+	end
+	if not harvests then
+		harvests = Instance.new("Folder")
+		harvests.Name = "Harvest"
+		harvests.Parent = runtimeRoot
+	end
+
 	local debugFolder = runtimeRoot:FindFirstChild("Debug")
 	if debugFolder and not debugFolder:IsA("Folder") then
 		debugFolder:Destroy()
@@ -511,6 +567,7 @@ local function ensureSpawnRoot()
 
 	SpawnRoot = runtimeRoot :: Folder
 	TreasureRoot = treasures :: Folder
+	HarvestRoot = harvests :: Folder
 	DebugRoot = debugFolder :: Folder
 end
 
@@ -538,12 +595,21 @@ local function destroyTreasureModel(state: SpawnPointState)
 	end
 end
 
+local function destroyHarvestModel(state: SpawnPointState)
+	disconnectPrompt(state)
+	if state.ActiveHarvestModel then
+		state.ActiveHarvestModel:Destroy()
+		state.ActiveHarvestModel = nil
+	end
+end
+
 local function releaseSpawnPoint(state: SpawnPointState)
 	if state.ActiveEnemyUUID then
 		EnemyServiceServer.Despawn(state.ActiveEnemyUUID)
 		state.ActiveEnemyUUID = nil
 	end
 	destroyTreasureModel(state)
+	destroyHarvestModel(state)
 	if state.Status == "Active" then
 		state.Status = "Dormant"
 	end
@@ -555,17 +621,42 @@ local function clearAllRuntimeEntities()
 	end
 end
 
-local function grantTreasureLoot(player: Player, treasureData: TreasureGeneratedData)
+local function grantTreasureLoot(player: Player, treasureData: TreasureGeneratedData, originPosition: Vector3?)
+	local character = player.Character
+	local rootPart = nil :: BasePart?
+	if character then
+		local candidate = character:FindFirstChild("HumanoidRootPart")
+		if candidate and candidate:IsA("BasePart") then
+			rootPart = candidate
+		end
+	end
+	local dropCenter = originPosition or if rootPart then rootPart.Position else nil
+	local dropIndex = 0
 	for _, grant in ipairs(treasureData.StackGrants) do
 		if grant.Quantity > 0 then
-			InventoryServiceServer.AddStackableItem(
-				player,
-				grant.ItemKind,
-				grant.StackKey,
-				grant.Data or {},
-				grant.Quantity,
-				grant.MaxStack
-			)
+			local normalizedItemKind = if grant.ItemKind == "Item" then "Consumable" else grant.ItemKind
+			local shouldDropIntoWorld = normalizedItemKind == "Consumable"
+			if shouldDropIntoWorld and dropCenter ~= nil then
+				dropIndex += 1
+				local angle = (dropIndex / math.max(1, #treasureData.StackGrants)) * math.pi * 2
+				local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * DROP_SCATTER_RADIUS
+				ItemDropServiceServer.DropStackGrant(dropCenter + offset, {
+					ItemKind = normalizedItemKind,
+					StackKey = grant.StackKey,
+					Quantity = grant.Quantity,
+					MaxStack = grant.MaxStack,
+					Data = grant.Data,
+				})
+			else
+				InventoryServiceServer.AddStackableItem(
+					player,
+					normalizedItemKind,
+					grant.StackKey,
+					grant.Data or {},
+					grant.Quantity,
+					grant.MaxStack
+				)
+			end
 		end
 	end
 
@@ -650,17 +741,6 @@ local function isTreasureClaimInRange(state: SpawnPointState, player: Player): b
 	return distance <= allowedDistance
 end
 
-local function broadcastTreasureClaimVisual(state: SpawnPointState)
-	WorldEndpoint:FireAllClients("TreasureClaimed", {
-		SpawnId = state.Id,
-		PrefabId = state.PrefabId,
-		ColumnX = state.ColumnX,
-		ColumnZ = state.ColumnZ,
-		MarkerId = state.MarkerId,
-		Position = state.Position,
-	})
-end
-
 local function claimTreasure(spawnId: string, player: Player): boolean
 	local state = SpawnPointsById[spawnId]
 	if not state or state.Type ~= "Treasure" then
@@ -682,11 +762,45 @@ local function claimTreasure(spawnId: string, player: Player): boolean
 		logVerbose(string.format("Rejected treasure claim out of range: %s by %s", spawnId, player.Name))
 		return false
 	end
+	if state.RequiredItemKind and state.RequiredStackKey then
+		local requiredQuantity = math.max(1, state.RequiredQuantity or 1)
+		if
+			not InventoryServiceServer.HasStackQuantity(
+				player,
+				state.RequiredItemKind,
+				state.RequiredStackKey,
+				requiredQuantity
+			)
+		then
+			logVerbose(string.format("Rejected treasure claim missing key item: %s by %s", spawnId, player.Name))
+			return false
+		end
+		if
+			not InventoryServiceServer.ConsumeStackQuantity(
+				player,
+				state.RequiredItemKind,
+				state.RequiredStackKey,
+				requiredQuantity
+			)
+		then
+			return false
+		end
+	end
 
 	disconnectPrompt(state)
-	grantTreasureLoot(player, state.TreasureData)
+	grantTreasureLoot(player, state.TreasureData, state.Position)
 	state.Status = "Claimed"
-	broadcastTreasureClaimVisual(state)
+	WorldEndpoint:FireAllClients("TreasureClaimed", {
+		SpawnId = state.Id,
+		PrefabId = state.PrefabId,
+		ColumnX = state.ColumnX,
+		ColumnZ = state.ColumnZ,
+		MarkerId = state.MarkerId,
+		Position = state.Position,
+		ActionText = state.PromptActionText,
+		ObjectText = state.PromptObjectText,
+		ClaimedByUserId = player.UserId,
+	})
 	destroyTreasureModel(state)
 	logVerbose(string.format("Treasure claimed: %s by %s", spawnId, player.Name))
 	return true
@@ -705,6 +819,19 @@ local function spawnTreasure(state: SpawnPointState)
 	model:SetAttribute("SpawnId", state.Id)
 	model:SetAttribute("PrefabId", state.PrefabId)
 	model.Parent = TreasureRoot
+
+	if PrefabRegistry.GetById(state.PrefabId) then
+		PrefabRenderer.Render(state.PrefabId, model, {
+			Position = state.Position,
+			TileSize = 1,
+			SurfaceY = state.Position.Y,
+			Biome = state.Biome,
+			ColumnX = state.ColumnX,
+			ColumnZ = state.ColumnZ,
+			Seed = ActiveGenerationToken,
+			NameSuffix = state.Id,
+		})
+	end
 
 	local anchor = Instance.new("Part")
 	anchor.Name = "TreasureAnchor"
@@ -749,13 +876,194 @@ local function spawnTreasure(state: SpawnPointState)
 	state.Status = "Active"
 end
 
+local function getActiveHarvestAnchor(state: SpawnPointState): BasePart?
+	local model = state.ActiveHarvestModel
+	if not model or not model.Parent then
+		return nil
+	end
+
+	local anchor = model:FindFirstChild("HarvestAnchor")
+	if anchor and anchor:IsA("BasePart") then
+		return anchor
+	end
+
+	if model.PrimaryPart then
+		return model.PrimaryPart
+	end
+	return nil
+end
+
+local function isHarvestClaimInRange(state: SpawnPointState, player: Player): boolean
+	local rootPart = getPlayerRootPart(player)
+	if not rootPart then
+		return false
+	end
+
+	local anchor = getActiveHarvestAnchor(state)
+	if not anchor then
+		return false
+	end
+
+	local maxActivationDistance = Settings.Harvest.DefaultPrompt.MaxActivationDistance
+	local prompt = anchor:FindFirstChild("HarvestPrompt")
+	if prompt and prompt:IsA("ProximityPrompt") then
+		maxActivationDistance = prompt.MaxActivationDistance
+	end
+
+	local allowedDistance = math.max(1, maxActivationDistance) + HARVEST_CLAIM_DISTANCE_TOLERANCE
+	return (rootPart.Position - anchor.Position).Magnitude <= allowedDistance
+end
+
+local function claimHarvest(spawnId: string, player: Player): boolean
+	local state = SpawnPointsById[spawnId]
+	if not state or state.Type ~= "Harvest" then
+		return false
+	end
+	if state.GenerationToken ~= ActiveGenerationToken then
+		return false
+	end
+	if state.Status == "Claimed" or state.Status ~= "Active" then
+		return false
+	end
+	if not state.HarvestData then
+		return false
+	end
+	if not isHarvestClaimInRange(state, player) then
+		logVerbose(string.format("Rejected harvest claim out of range: %s by %s", spawnId, player.Name))
+		return false
+	end
+
+	disconnectPrompt(state)
+	InventoryServiceServer.AddStackableItem(
+		player,
+		"InventoryItem",
+		state.HarvestData.StackKey,
+		state.HarvestData.SerializedData,
+		state.HarvestData.Quantity,
+		state.HarvestData.MaxStack
+	)
+	state.Status = "Claimed"
+	WorldEndpoint:FireAllClients("HarvestClaimed", {
+		SpawnId = state.Id,
+		PrefabId = state.PrefabId,
+		ColumnX = state.ColumnX,
+		ColumnZ = state.ColumnZ,
+		MarkerId = state.MarkerId,
+		Position = state.Position,
+		ItemId = state.HarvestData.ItemId,
+		Quantity = state.HarvestData.Quantity,
+	})
+	destroyHarvestModel(state)
+	logVerbose(string.format("Harvest claimed: %s by %s", spawnId, player.Name))
+	return true
+end
+
+local function spawnHarvest(state: SpawnPointState)
+	if not HarvestRoot then
+		return
+	end
+	if state.ActiveHarvestModel or state.Status == "Claimed" or state.Status == "Dead" then
+		return
+	end
+
+	local model = Instance.new("Model")
+	model.Name = string.format("Harvest_%s", state.Id)
+	model:SetAttribute("SpawnId", state.Id)
+	model:SetAttribute("PrefabId", state.PrefabId)
+	model.Parent = HarvestRoot
+
+	local markerSeed = hashString(state.Id, foldHash(ActiveGenerationToken, state.ColumnX + state.ColumnZ + 16384))
+	local visualRng = Random.new(math.max(1, markerSeed))
+	local usedDirectModel = tryCloneIncidentPrefabModel(state.PrefabId, model, state.CFrame, visualRng) ~= nil
+
+	if not usedDirectModel and PrefabRegistry.GetById(state.PrefabId) then
+		PrefabRenderer.Render(state.PrefabId, model, {
+			Position = state.Position,
+			TileSize = 1,
+			SurfaceY = state.Position.Y,
+			Biome = state.Biome,
+			ColumnX = state.ColumnX,
+			ColumnZ = state.ColumnZ,
+			Seed = ActiveGenerationToken,
+			NameSuffix = state.Id,
+		})
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "HarvestAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(2, 2, 2)
+	anchor.CFrame = state.CFrame * CFrame.new(0, 1.2, 0)
+	anchor.Parent = model
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "HarvestPrompt"
+	prompt.ActionText = state.PromptActionText or Settings.Harvest.DefaultPrompt.ActionText
+	prompt.ObjectText = state.PromptObjectText or Settings.Harvest.DefaultPrompt.ObjectText
+	prompt.HoldDuration = Settings.Harvest.DefaultPrompt.HoldDuration
+	prompt.MaxActivationDistance = Settings.Harvest.DefaultPrompt.MaxActivationDistance
+	prompt.RequiresLineOfSight = Settings.Harvest.DefaultPrompt.RequiresLineOfSight
+	prompt.Parent = anchor
+
+	local connection = prompt.Triggered:Connect(function(player)
+		claimHarvest(state.Id, player)
+	end)
+
+	model.PrimaryPart = anchor
+	state.ActiveHarvestModel = model
+	state.PromptConnection = connection
+	state.Status = "Active"
+end
+
 local FALLBACK_PATH_PREFAB_ID = "PathFallback"
 local FALLBACK_PATH_MARKER_ID = "Enemy"
 local FALLBACK_PATH_MARKER_INDEX = 1
+local BOSS_ENDPOINT_PREFAB_ID = "BossEndpoint"
+local BOSS_ENDPOINT_MARKER_ID = "BossArena"
+local BOSS_ENDPOINT_MARKER_INDEX = 1
+local INCIDENT_ANIMAL_PREFAB_ID = "IncidentAnimal"
+local INCIDENT_HOSTILE_PREFAB_ID = "IncidentHostile"
+local INCIDENT_HARVEST_MARKER_ID = "IncidentHarvest"
+local INCIDENT_TREASURE_MARKER_ID = "IncidentTreasure"
 local FALLBACK_PATH_MIN_TILE_GAP = 14
 local FALLBACK_PATH_SPAWN_ODDS = 0.08
 local FALLBACK_PATH_MAX_ENEMIES_PER_CHUNK = 2
 local DISTANCE_HEALTH_BONUS_MAX = 5
+local INCIDENT_ANIMAL_COUNT = 2
+local INCIDENT_ANIMAL_RADIUS_STUDS = 10
+local INCIDENT_HOSTILE_RADIUS_STUDS = 12
+local INCIDENT_MODEL_ASSETS_BY_PREFAB_ID = {
+	["Shared::IncidentBlueberryPatch"] = { "Blueberry" },
+	["Shared::IncidentStrawberryPatch"] = { "Strawberry" },
+	["Shared::IncidentCactusFruit"] = { "Cactus" },
+	["Shared::IncidentWheatPatch"] = { "Farm" },
+	["Forest::WildMushroomPatch"] = { "Mushroom1", "Mushroom2", "Mushroom3" },
+}
+
+type IncidentHarvestSpec = {
+	PrefabId: string,
+	ItemId: string,
+	QuantityMin: number,
+	QuantityMax: number,
+	ActionText: string,
+	ObjectText: string,
+}
+
+type IncidentChestSpec = {
+	PrefabId: string,
+	LootTableId: string,
+	ActionText: string,
+	ObjectText: string,
+	RequiredItemKind: string?,
+	RequiredStackKey: string?,
+	RequiredQuantity: number?,
+}
+
+local tryCloneIncidentPrefabModel: ((string, Instance, CFrame, Random) -> Model?)? = nil
 local function computeDistanceHealthBonus(columnX: number, columnZ: number, radiusTiles: number): number
 	local safeRadius = math.max(1, radiusTiles)
 	local distance = math.sqrt(columnX * columnX + columnZ * columnZ)
@@ -770,11 +1078,12 @@ local function buildEnemyGeneratedData(
 	columnZ: number,
 	worldRadiusTiles: number,
 	markerConfig: EnemyMarkerConfig?,
-	rng: Random
+	rng: Random,
+	forceBoss: boolean?
 ): EnemyGeneratedData?
 	local generationType = getGenerationTypeOverride()
 	local enemyPath: string? = nil
-	if generationType == GENERATION_TYPE_BOSS then
+	if forceBoss == true then
 		local bossPool = Settings.Enemy.Pools[DEFAULT_BOSS_POOL_ID]
 		if bossPool then
 			enemyPath = chooseWeightedEnemyPath(bossPool, rng)
@@ -789,15 +1098,7 @@ local function buildEnemyGeneratedData(
 		return nil
 	end
 
-	local levelRange = resolveEnemyRange(biome, markerConfig)
-	local level = rollLevel(levelRange, rng)
-	local baseLevelOverride = getEnemyBaseLevelOverride()
-	if baseLevelOverride then
-		level = math.max(level, baseLevelOverride)
-	end
-	if generationType == GENERATION_TYPE_BOSS then
-		level = math.max(level, levelRange.Max)
-	end
+	local level = 1
 	local lootTableId = if markerConfig
 			and type(markerConfig.LootTableId) == "string"
 			and markerConfig.LootTableId ~= ""
@@ -819,6 +1120,239 @@ local function buildTreasureGeneratedData(markerConfig: TreasureMarkerConfig?, r
 	end
 
 	return rollTreasureLoot(lootTableId, rng)
+end
+
+local function buildTreasureGeneratedDataForLootTableId(lootTableId: string, rng: Random): TreasureGeneratedData?
+	if type(lootTableId) ~= "string" or lootTableId == "" then
+		return nil
+	end
+	return rollTreasureLoot(lootTableId, rng)
+end
+
+local function buildHarvestSerializedData(itemId: string): { any }?
+	local definition = InventoryItemRegistry.Get(itemId)
+	if not definition then
+		return nil
+	end
+
+	return {
+		Kind = "Item",
+		ItemId = definition.Id,
+		Name = definition.Name,
+		Desc = definition.Desc,
+		Icon = definition.Icon,
+		MaxStack = definition.MaxStack,
+		SpawnWith = definition.SpawnWith,
+		StackKey = "InventoryItem:" .. definition.Id,
+		CanEquip = definition.CanEquip,
+		CanUse = definition.CanUse,
+		EquipSlotType = definition.EquipSlotType,
+		ModelAssetName = definition.ModelAssetName,
+		InventoryData = cloneData(definition.InventoryData) or {},
+		UseEffects = cloneData(definition.UseEffects) or {},
+	},
+		definition.MaxStack,
+		"InventoryItem:" .. definition.Id
+end
+
+local function buildHarvestGeneratedData(markerConfig: HarvestMarkerConfig?, rng: Random): HarvestGeneratedData?
+	if not markerConfig or type(markerConfig.ItemId) ~= "string" or markerConfig.ItemId == "" then
+		return nil
+	end
+
+	local serializedData, maxStack, stackKey = buildHarvestSerializedData(markerConfig.ItemId)
+	if not serializedData then
+		return nil
+	end
+
+	local quantityMin = if type(markerConfig.QuantityMin) == "number" then markerConfig.QuantityMin else 1
+	local quantityMax = if type(markerConfig.QuantityMax) == "number" then markerConfig.QuantityMax else quantityMin
+	local quantity = rollQuantity(quantityMin, quantityMax, rng)
+	if quantity <= 0 then
+		return nil
+	end
+
+	return {
+		ItemId = markerConfig.ItemId,
+		Quantity = quantity,
+		StackKey = stackKey,
+		MaxStack = maxStack,
+		SerializedData = serializedData,
+	}
+end
+
+local function buildHarvestGeneratedDataForItem(
+	itemId: string,
+	quantityMin: number,
+	quantityMax: number,
+	rng: Random
+): HarvestGeneratedData?
+	return buildHarvestGeneratedData({
+		ItemId = itemId,
+		QuantityMin = quantityMin,
+		QuantityMax = quantityMax,
+	}, rng)
+end
+
+local function chooseIncidentAnimalEnemyPath(biome: string): string?
+	if biome == "Plains" then
+		return "Animals.Cow"
+	elseif biome == "Forest" then
+		return "Animals.Chicken"
+	elseif biome == "Tundra" or biome == "Mountain" then
+		return "Animals.Sheep"
+	end
+	return nil
+end
+
+local function chooseIncidentHarvestSpec(biome: string, rng: Random): IncidentHarvestSpec?
+	if biome == "Plains" then
+		return {
+			PrefabId = "Shared::IncidentWheatPatch",
+			ItemId = "Wheat",
+			QuantityMin = 2,
+			QuantityMax = 4,
+			ActionText = "Harvest",
+			ObjectText = "Wild Wheat",
+		}
+	elseif biome == "Forest" then
+		return {
+			PrefabId = "Forest::WildMushroomPatch",
+			ItemId = "Mushroom",
+			QuantityMin = 1,
+			QuantityMax = 3,
+			ActionText = "Gather",
+			ObjectText = "Foraged Mushrooms",
+		}
+	elseif biome == "Desert" then
+		return {
+			PrefabId = "Shared::IncidentCactusFruit",
+			ItemId = "CactusFruit",
+			QuantityMin = 1,
+			QuantityMax = 3,
+			ActionText = "Pick",
+			ObjectText = "Cactus Fruit",
+		}
+	elseif biome == "Tundra" then
+		if rng:NextNumber() < 0.5 then
+			return {
+				PrefabId = "Shared::IncidentBlueberryPatch",
+				ItemId = "Blueberry",
+				QuantityMin = 2,
+				QuantityMax = 4,
+				ActionText = "Pick",
+				ObjectText = "Blueberries",
+			}
+		end
+		return {
+			PrefabId = "Shared::IncidentStrawberryPatch",
+			ItemId = "Strawberry",
+			QuantityMin = 2,
+			QuantityMax = 4,
+			ActionText = "Pick",
+			ObjectText = "Wild Strawberries",
+		}
+	end
+	return nil
+end
+
+local function chooseIncidentHostilePack(rng: Random): { string }
+	local roll = rng:NextNumber()
+	if roll < 0.4 then
+		return { "ROBLOX.Noob", "ROBLOX.Noob", "ROBLOX.Noob" }
+	elseif roll < 0.6 then
+		return { "ROBLOX.Noob", "ROBLOX.Noob", "ROBLOX.Noob", "ROBLOX.Noob", "ROBLOX.Noob" }
+	elseif roll < 0.75 then
+		return { "ROBLOX.Guest", "ROBLOX.Guest", "ROBLOX.Guest", "ROBLOX.Guest" }
+	elseif roll < 0.9 then
+		return { "ROBLOX.Guest", "ROBLOX.Guest", "ROBLOX.Noob", "ROBLOX.Noob", "ROBLOX.Noob" }
+	elseif roll < 0.96 then
+		return { "ROBLOX.Builder" }
+	end
+	return { "ROBLOX.Bacon", "ROBLOX.Bacon", "ROBLOX.Bacon", "ROBLOX.Bacon" }
+end
+
+local function chooseIncidentChestSpec(rng: Random): IncidentChestSpec
+	if rng:NextNumber() < 0.75 then
+		return {
+			PrefabId = "Shared::TreasureChestFieldCache",
+			LootTableId = "FieldCache",
+			ActionText = "Open Cache",
+			ObjectText = "Weathered Cache",
+			RequiredItemKind = nil,
+			RequiredStackKey = nil,
+			RequiredQuantity = nil,
+		}
+	end
+	return {
+		PrefabId = "Shared::TreasureChestCache",
+		LootTableId = "RelicCache",
+		ActionText = "Unlock",
+		ObjectText = "Sealed Reliquary",
+		RequiredItemKind = "InventoryItem",
+		RequiredStackKey = "InventoryItem:ChestKey",
+		RequiredQuantity = 1,
+	}
+end
+
+local function getIncidentOffset(positionIndex: number, total: number, radiusStuds: number): Vector3
+	if total <= 1 then
+		return Vector3.zero
+	end
+	local angle = ((positionIndex - 1) / total) * math.pi * 2
+	return Vector3.new(math.cos(angle) * radiusStuds, 0, math.sin(angle) * radiusStuds)
+end
+
+local function markModelAsHarvestVisual(model: Model, destroyMode: string)
+	model:SetAttribute("HarvestVisualMode", destroyMode)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant:SetAttribute("HarvestVisual", true)
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+end
+
+function tryCloneIncidentPrefabModel(prefabId: string, parent: Instance, cframe: CFrame, rng: Random): Model?
+	local assetNames = INCIDENT_MODEL_ASSETS_BY_PREFAB_ID[prefabId]
+	if not assetNames or #assetNames <= 0 then
+		return nil
+	end
+
+	local assetName = assetNames[math.clamp(rng:NextInteger(1, #assetNames), 1, #assetNames)]
+	local template = PrefabModels:FindFirstChild(assetName)
+	if not template then
+		return nil
+	end
+
+	local clone = template:Clone()
+	local model: Model
+	if clone:IsA("Model") then
+		model = clone
+	else
+		model = Instance.new("Model")
+		model.Name = assetName
+		clone.Parent = model
+	end
+
+	if string.find(assetName, "Mushroom", 1, true) then
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant ~= model and descendant.Name == "Mushroom" then
+				descendant:Destroy()
+			end
+		end
+	end
+
+	model.Name = string.format("%s_%s", assetName, tostring(rng:NextInteger(1000, 9999)))
+	model.Parent = parent
+	pcall(function()
+		model:PivotTo(cframe)
+	end)
+	markModelAsHarvestVisual(model, "DestroyPrefab")
+	return model
 end
 
 local function shouldCreateFallbackPathSpawn(seed: number, column: TileColumn): boolean
@@ -890,6 +1424,8 @@ local function activateSpawnPoint(state: SpawnPointState)
 		spawnEnemy(state)
 	elseif state.Type == "Treasure" then
 		spawnTreasure(state)
+	elseif state.Type == "Harvest" then
+		spawnHarvest(state)
 	end
 end
 
@@ -912,6 +1448,13 @@ local function deactivateSpawnPoint(state: SpawnPointState)
 		end
 		if state.ActiveTreasureModel then
 			destroyTreasureModel(state)
+			if state.Status ~= "Dead" and state.Status ~= "Claimed" then
+				state.Status = "Dormant"
+			end
+		end
+	elseif state.Type == "Harvest" then
+		if state.ActiveHarvestModel then
+			destroyHarvestModel(state)
 			if state.Status ~= "Dead" and state.Status ~= "Claimed" then
 				state.Status = "Dormant"
 			end
@@ -944,6 +1487,45 @@ local function deactivateChunk(chunkId: string)
 		if state and state.GenerationToken == ActiveGenerationToken then
 			deactivateSpawnPoint(state)
 		end
+	end
+end
+
+local function registerSpawnState(state: SpawnPointState)
+	SpawnPointsById[state.Id] = state
+	local cKey = chunkKey(state.ChunkX, state.ChunkZ)
+	local spawnList = SpawnPointIdsByChunk[cKey]
+	if not spawnList then
+		spawnList = {}
+		SpawnPointIdsByChunk[cKey] = spawnList
+	end
+	table.insert(spawnList, state.Id)
+	createDebugAnchor(state)
+end
+
+local function unregisterSpawnState(state: SpawnPointState)
+	local cKey = chunkKey(state.ChunkX, state.ChunkZ)
+	local spawnList = SpawnPointIdsByChunk[cKey]
+	if spawnList then
+		local nextSpawnList = {} :: { string }
+		for _, spawnId in ipairs(spawnList) do
+			if spawnId ~= state.Id then
+				table.insert(nextSpawnList, spawnId)
+			end
+		end
+		if #nextSpawnList > 0 then
+			SpawnPointIdsByChunk[cKey] = nextSpawnList
+		else
+			SpawnPointIdsByChunk[cKey] = nil
+		end
+	end
+
+	SpawnPointsById[state.Id] = nil
+end
+
+local function rebuildDebugAnchors()
+	clearDebugRoot()
+	for _, state in pairs(SpawnPointsById) do
+		createDebugAnchor(state)
 	end
 end
 
@@ -1032,7 +1614,7 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 			if type(marker.Id) ~= "string" or marker.Id == "" then
 				continue
 			end
-			if marker.Type ~= "Enemy" and marker.Type ~= "Treasure" then
+			if marker.Type ~= "Enemy" and marker.Type ~= "Treasure" and marker.Type ~= "Harvest" then
 				continue
 			end
 
@@ -1047,12 +1629,16 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 			local rng = Random.new(math.max(1, markerSeed))
 			local markerConfigEnemy = marker.Enemy
 			local markerConfigTreasure = marker.Treasure
+			local markerConfigHarvest = marker.Harvest
 			local spawnType = marker.Type
 
 			if spawnType == "Enemy" and not shouldEnableEnemyMarker(markerConfigEnemy) then
 				continue
 			end
 			if spawnType == "Treasure" and not shouldEnableTreasureMarker(markerConfigTreasure) then
+				continue
+			end
+			if spawnType == "Harvest" and not shouldEnableHarvestMarker(markerConfigHarvest) then
 				continue
 			end
 
@@ -1074,10 +1660,12 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 				Status = "Dormant",
 				EnemyData = nil,
 				TreasureData = nil,
+				HarvestData = nil,
 				PromptActionText = if markerConfigTreasure then markerConfigTreasure.PromptActionText else nil,
 				PromptObjectText = if markerConfigTreasure then markerConfigTreasure.PromptObjectText else nil,
 				ActiveEnemyUUID = nil,
 				ActiveTreasureModel = nil,
+				ActiveHarvestModel = nil,
 				PromptConnection = nil,
 				GenerationToken = ActiveGenerationToken,
 			}
@@ -1089,28 +1677,252 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 					column.Z,
 					world.Config.RadiusTiles,
 					markerConfigEnemy,
-					rng
+					rng,
+					false
 				)
 				if not state.EnemyData then
 					continue
 				end
-			else
+			elseif spawnType == "Treasure" then
 				state.TreasureData = buildTreasureGeneratedData(markerConfigTreasure, rng)
 				if not state.TreasureData then
 					continue
 				end
+			else
+				state.HarvestData = buildHarvestGeneratedData(markerConfigHarvest, rng)
+				state.PromptActionText = if markerConfigHarvest then markerConfigHarvest.PromptActionText else nil
+				state.PromptObjectText = if markerConfigHarvest then markerConfigHarvest.PromptObjectText else nil
+				if not state.HarvestData then
+					continue
+				end
 			end
 
-			SpawnPointsById[spawnId] = state
-			local cKey = chunkKey(spawnChunkX, spawnChunkZ)
-			local spawnList = SpawnPointIdsByChunk[cKey]
-			if not spawnList then
-				spawnList = {}
-				SpawnPointIdsByChunk[cKey] = spawnList
-			end
-			table.insert(spawnList, spawnId)
-			createDebugAnchor(state)
+			registerSpawnState(state)
 			spawnCount += 1
+		end
+	end
+
+	if world.PathRoutes then
+		local incidentNodeIndex = 0
+		for _, route in ipairs(world.PathRoutes) do
+			if #route ~= 1 then
+				continue
+			end
+			local node = route[1]
+			if node.IsIncidentNode ~= true or node.IsStructureNode == true then
+				continue
+			end
+
+			local column = world.Columns[string.format("%d:%d", node.X, node.Z)]
+			if not column or not column.Solid then
+				continue
+			end
+
+			incidentNodeIndex += 1
+			local markerSeed = hashString(
+				string.format("Incident:%d:%d:%d", incidentNodeIndex, node.X, node.Z),
+				foldHash(seed, foldHash(seed, node.X + 8192) + node.Z + 8192)
+			)
+			local rng = Random.new(math.max(1, markerSeed))
+			local incidentRoll = rng:NextNumber()
+			local centerPosition = Vector3.new(column.X * tileSize, column.SurfaceY, column.Z * tileSize)
+			local spawnChunkX = math.floor(column.X / chunkSize)
+			local spawnChunkZ = math.floor(column.Z / chunkSize)
+
+			if incidentRoll < 0.6 then
+				local harvestSpec = chooseIncidentHarvestSpec(column.Biome, rng)
+				if harvestSpec then
+					local harvestData = buildHarvestGeneratedDataForItem(
+						harvestSpec.ItemId,
+						harvestSpec.QuantityMin,
+						harvestSpec.QuantityMax,
+						rng
+					)
+					if harvestData then
+						registerSpawnState({
+							Id = makeSpawnPointId(
+								seed,
+								column.X,
+								column.Z,
+								harvestSpec.PrefabId,
+								INCIDENT_HARVEST_MARKER_ID,
+								incidentNodeIndex
+							),
+							Type = "Harvest",
+							Biome = column.Biome,
+							ChunkX = spawnChunkX,
+							ChunkZ = spawnChunkZ,
+							ColumnX = column.X,
+							ColumnZ = column.Z,
+							PrefabId = harvestSpec.PrefabId,
+							MarkerId = INCIDENT_HARVEST_MARKER_ID,
+							Position = centerPosition,
+							CFrame = CFrame.new(centerPosition),
+							Status = "Dormant",
+							EnemyData = nil,
+							TreasureData = nil,
+							HarvestData = harvestData,
+							PromptActionText = harvestSpec.ActionText,
+							PromptObjectText = harvestSpec.ObjectText,
+							ActiveEnemyUUID = nil,
+							ActiveTreasureModel = nil,
+							ActiveHarvestModel = nil,
+							PromptConnection = nil,
+							GenerationToken = ActiveGenerationToken,
+							RequiredItemKind = nil,
+							RequiredStackKey = nil,
+							RequiredQuantity = nil,
+						})
+						spawnCount += 1
+					end
+				end
+
+				local animalEnemyPath = chooseIncidentAnimalEnemyPath(column.Biome)
+				if animalEnemyPath then
+					for animalIndex = 1, INCIDENT_ANIMAL_COUNT do
+						local enemyData = buildEnemyGeneratedData(
+							column.Biome,
+							column.X,
+							column.Z,
+							world.Config.RadiusTiles,
+							{ EnemyPath = animalEnemyPath },
+							rng,
+							false
+						)
+						if enemyData then
+							local offset = getIncidentOffset(animalIndex, INCIDENT_ANIMAL_COUNT, INCIDENT_ANIMAL_RADIUS_STUDS)
+							local spawnPosition = centerPosition + offset
+							registerSpawnState({
+								Id = makeSpawnPointId(
+									seed,
+									column.X,
+									column.Z,
+									INCIDENT_ANIMAL_PREFAB_ID,
+									animalEnemyPath,
+									incidentNodeIndex * 10 + animalIndex
+								),
+								Type = "Enemy",
+								Biome = column.Biome,
+								ChunkX = spawnChunkX,
+								ChunkZ = spawnChunkZ,
+								ColumnX = column.X,
+								ColumnZ = column.Z,
+								PrefabId = INCIDENT_ANIMAL_PREFAB_ID,
+								MarkerId = animalEnemyPath,
+								Position = spawnPosition,
+								CFrame = CFrame.new(spawnPosition),
+								Status = "Dormant",
+								EnemyData = enemyData,
+								TreasureData = nil,
+								HarvestData = nil,
+								PromptActionText = nil,
+								PromptObjectText = nil,
+								ActiveEnemyUUID = nil,
+								ActiveTreasureModel = nil,
+								ActiveHarvestModel = nil,
+								PromptConnection = nil,
+								GenerationToken = ActiveGenerationToken,
+								RequiredItemKind = nil,
+								RequiredStackKey = nil,
+								RequiredQuantity = nil,
+							})
+							spawnCount += 1
+						end
+					end
+				end
+			elseif incidentRoll < 0.9 then
+				local enemyPack = chooseIncidentHostilePack(rng)
+				for enemyIndex, enemyPath in ipairs(enemyPack) do
+					local enemyData = buildEnemyGeneratedData(
+						column.Biome,
+						column.X,
+						column.Z,
+						world.Config.RadiusTiles,
+						{ EnemyPath = enemyPath },
+						rng,
+						false
+					)
+					if enemyData then
+						local offset = getIncidentOffset(enemyIndex, #enemyPack, INCIDENT_HOSTILE_RADIUS_STUDS)
+						local spawnPosition = centerPosition + offset
+						registerSpawnState({
+							Id = makeSpawnPointId(
+								seed,
+								column.X,
+								column.Z,
+								INCIDENT_HOSTILE_PREFAB_ID,
+								enemyPath,
+								incidentNodeIndex * 20 + enemyIndex
+							),
+							Type = "Enemy",
+							Biome = column.Biome,
+							ChunkX = spawnChunkX,
+							ChunkZ = spawnChunkZ,
+							ColumnX = column.X,
+							ColumnZ = column.Z,
+							PrefabId = INCIDENT_HOSTILE_PREFAB_ID,
+							MarkerId = enemyPath,
+							Position = spawnPosition,
+							CFrame = CFrame.new(spawnPosition),
+							Status = "Dormant",
+							EnemyData = enemyData,
+							TreasureData = nil,
+							HarvestData = nil,
+							PromptActionText = nil,
+							PromptObjectText = nil,
+							ActiveEnemyUUID = nil,
+							ActiveTreasureModel = nil,
+							ActiveHarvestModel = nil,
+							PromptConnection = nil,
+							GenerationToken = ActiveGenerationToken,
+							RequiredItemKind = nil,
+							RequiredStackKey = nil,
+							RequiredQuantity = nil,
+						})
+						spawnCount += 1
+					end
+				end
+			else
+				local chestSpec = chooseIncidentChestSpec(rng)
+				local treasureData = buildTreasureGeneratedDataForLootTableId(chestSpec.LootTableId, rng)
+				if treasureData then
+					registerSpawnState({
+						Id = makeSpawnPointId(
+							seed,
+							column.X,
+							column.Z,
+							chestSpec.PrefabId,
+							INCIDENT_TREASURE_MARKER_ID,
+							incidentNodeIndex
+						),
+						Type = "Treasure",
+						Biome = column.Biome,
+						ChunkX = spawnChunkX,
+						ChunkZ = spawnChunkZ,
+						ColumnX = column.X,
+						ColumnZ = column.Z,
+						PrefabId = chestSpec.PrefabId,
+						MarkerId = INCIDENT_TREASURE_MARKER_ID,
+						Position = centerPosition,
+						CFrame = CFrame.new(centerPosition),
+						Status = "Dormant",
+						EnemyData = nil,
+						TreasureData = treasureData,
+						HarvestData = nil,
+						PromptActionText = chestSpec.ActionText,
+						PromptObjectText = chestSpec.ObjectText,
+						ActiveEnemyUUID = nil,
+						ActiveTreasureModel = nil,
+						ActiveHarvestModel = nil,
+						PromptConnection = nil,
+						GenerationToken = ActiveGenerationToken,
+						RequiredItemKind = chestSpec.RequiredItemKind,
+						RequiredStackKey = chestSpec.RequiredStackKey,
+						RequiredQuantity = chestSpec.RequiredQuantity,
+					})
+					spawnCount += 1
+				end
+			end
 		end
 	end
 
@@ -1134,7 +1946,7 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 			)
 			local rng = Random.new(math.max(1, markerSeed))
 			local enemyData =
-				buildEnemyGeneratedData(column.Biome, column.X, column.Z, world.Config.RadiusTiles, nil, rng)
+				buildEnemyGeneratedData(column.Biome, column.X, column.Z, world.Config.RadiusTiles, nil, rng, false)
 			if not enemyData then
 				continue
 			end
@@ -1163,23 +1975,75 @@ function WorldSpawnServiceServer.InitializeWorld(world: WorldState)
 				Status = "Dormant",
 				EnemyData = enemyData,
 				TreasureData = nil,
+				HarvestData = nil,
 				PromptActionText = nil,
 				PromptObjectText = nil,
 				ActiveEnemyUUID = nil,
 				ActiveTreasureModel = nil,
+				ActiveHarvestModel = nil,
 				PromptConnection = nil,
 				GenerationToken = ActiveGenerationToken,
+				RequiredItemKind = nil,
+				RequiredStackKey = nil,
+				RequiredQuantity = nil,
 			}
 
-			SpawnPointsById[spawnId] = state
-			local spawnList = SpawnPointIdsByChunk[cKey]
-			if not spawnList then
-				spawnList = {}
-				SpawnPointIdsByChunk[cKey] = spawnList
-			end
-			table.insert(spawnList, spawnId)
+			registerSpawnState(state)
 			fallbackEnemyCountByChunk[cKey] = existingCount + 1
-			createDebugAnchor(state)
+			spawnCount += 1
+		end
+	end
+
+	if getGenerationTypeOverride() == GENERATION_TYPE_BOSS and world.BossEndpoint then
+		local column = world.BossEndpoint
+		local spawnChunkX = math.floor(column.X / chunkSize)
+		local spawnChunkZ = math.floor(column.Z / chunkSize)
+		local markerSeed = hashString(
+			string.format("%s:%s:%d", BOSS_ENDPOINT_PREFAB_ID, BOSS_ENDPOINT_MARKER_ID, BOSS_ENDPOINT_MARKER_INDEX),
+			foldHash(seed, foldHash(seed, column.X + 8192) + column.Z + 8192)
+		)
+		local rng = Random.new(math.max(1, markerSeed))
+		local enemyData =
+			buildEnemyGeneratedData(column.Biome, column.X, column.Z, world.Config.RadiusTiles, nil, rng, true)
+		if enemyData then
+			local spawnPosition = Vector3.new(column.X * tileSize, column.SurfaceY, column.Z * tileSize)
+			local spawnId = makeSpawnPointId(
+				seed,
+				column.X,
+				column.Z,
+				BOSS_ENDPOINT_PREFAB_ID,
+				BOSS_ENDPOINT_MARKER_ID,
+				BOSS_ENDPOINT_MARKER_INDEX
+			)
+			local cKey = chunkKey(spawnChunkX, spawnChunkZ)
+			local state: SpawnPointState = {
+				Id = spawnId,
+				Type = "Enemy",
+				Biome = column.Biome,
+				ChunkX = spawnChunkX,
+				ChunkZ = spawnChunkZ,
+				ColumnX = column.X,
+				ColumnZ = column.Z,
+				PrefabId = BOSS_ENDPOINT_PREFAB_ID,
+				MarkerId = BOSS_ENDPOINT_MARKER_ID,
+				Position = spawnPosition,
+				CFrame = CFrame.new(spawnPosition),
+				Status = "Dormant",
+				EnemyData = enemyData,
+				TreasureData = nil,
+				HarvestData = nil,
+				PromptActionText = nil,
+				PromptObjectText = nil,
+				ActiveEnemyUUID = nil,
+				ActiveTreasureModel = nil,
+				ActiveHarvestModel = nil,
+				PromptConnection = nil,
+				GenerationToken = ActiveGenerationToken,
+				RequiredItemKind = nil,
+				RequiredStackKey = nil,
+				RequiredQuantity = nil,
+			}
+			registerSpawnState(state)
 			spawnCount += 1
 		end
 	end
@@ -1217,6 +2081,62 @@ end
 
 function WorldSpawnServiceServer.ClaimTreasure(spawnId: string, player: Player): boolean
 	return claimTreasure(spawnId, player)
+end
+
+function WorldSpawnServiceServer.GetClaimedHarvests(): { [number]: { [string]: any } }
+	local claimed = {}
+	for _, state in pairs(SpawnPointsById) do
+		if state.Type == "Harvest" and state.Status == "Claimed" then
+			table.insert(claimed, {
+				SpawnId = state.Id,
+				PrefabId = state.PrefabId,
+				ColumnX = state.ColumnX,
+				ColumnZ = state.ColumnZ,
+				MarkerId = state.MarkerId,
+			})
+		end
+	end
+	return claimed
+end
+
+function WorldSpawnServiceServer.PruneCollapsedColumns(columns: { [number]: { [string]: any } }): number
+	local collapsedColumns = {} :: { [string]: boolean }
+	for _, column in ipairs(columns) do
+		if type(column) == "table" and type(column.X) == "number" and type(column.Z) == "number" then
+			collapsedColumns[columnKey(math.floor(column.X), math.floor(column.Z))] = true
+		end
+	end
+
+	if next(collapsedColumns) == nil then
+		return 0
+	end
+
+	local removedCount = 0
+	local statesToRemove = {} :: { SpawnPointState }
+	for _, state in pairs(SpawnPointsById) do
+		if collapsedColumns[columnKey(state.ColumnX, state.ColumnZ)] then
+			table.insert(statesToRemove, state)
+		end
+	end
+
+	for _, state in ipairs(statesToRemove) do
+		if SpawnPointsById[state.Id] then
+			if state.Type == "Treasure" then
+				destroyTreasureModel(state)
+			elseif state.Type == "Harvest" then
+				destroyHarvestModel(state)
+			end
+
+			unregisterSpawnState(state)
+			removedCount += 1
+		end
+	end
+
+	if removedCount > 0 then
+		rebuildDebugAnchors()
+	end
+
+	return removedCount
 end
 
 function WorldSpawnServiceServer.GetSpawnPointCount(): number

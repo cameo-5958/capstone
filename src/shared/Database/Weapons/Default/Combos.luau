@@ -9,7 +9,7 @@ return {
 					-- [1] 0.3s to 0.55s, 80% damage
 					{
 						["AnimationId"] = "rbxassetid://109172127259985",
-						["PowerScale"] = 0.80,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
@@ -29,7 +29,7 @@ return {
 					-- [2] 0.25s to 0.45s, 60% damage
 					{
 						["AnimationId"] = "rbxassetid://130560580139040",
-						["PowerScale"] = 0.60,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(3.2, 4.2, 4.7),
@@ -50,7 +50,7 @@ return {
 					{
 						["AnimationId"] = "rbxassetid://91014619744040",
 						["IsHeavy"] = true,
-						["PowerScale"] = 1.20,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.7,
 						["DoesKnockback"] = true,
 						["AttackProfile"] = {
@@ -81,7 +81,7 @@ return {
 				["Attacks"] = {
 					{
 						["AnimationId"] = "rbxassetid://133775699616081",
-						["PowerScale"] = 0.85,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["Cooldown"] = 0.8,
@@ -118,7 +118,7 @@ return {
 					},
 					{
 						["AnimationId"] = "rbxassetid://133918469702254",
-						["PowerScale"] = 1.15,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,
@@ -138,7 +138,7 @@ return {
 					},
 					{
 						["AnimationId"] = "rbxassetid://112592869773047",
-						["PowerScale"] = 1.55,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.7,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,
@@ -170,7 +170,7 @@ return {
 					-- [1] Slim, far thrust — 0.3s to 0.5s, 60% damage
 					{
 						["AnimationId"] = "rbxassetid://139475664738055",
-						["PowerScale"] = 0.60,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(0.7, 3.2, 11.5),
@@ -193,7 +193,7 @@ return {
 					-- Note: PowerScale is per-attack; 0.18 averages the two intended values
 					{
 						["AnimationId"] = "rbxassetid://120272323117203",
-						["PowerScale"] = 0.18,
+						["PowerScale"] = 0.5,
 						["MovementLockedUntil"] = 1.7,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
@@ -230,7 +230,7 @@ return {
 					-- [3] 360° sweep — 0.35s to 0.5s, 35% damage
 					{
 						["AnimationId"] = "rbxassetid://77631012695666",
-						["PowerScale"] = 0.35,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
@@ -252,7 +252,7 @@ return {
 					-- [4] Full 360° sweep — 0.3s to 0.65s, 15% damage
 					{
 						["AnimationId"] = "rbxassetid://109822730522380",
-						["PowerScale"] = 0.15,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(10.0, 4.5, 10.0),
@@ -274,7 +274,7 @@ return {
 					-- [5] Standard — 0.3s to 0.55s, 35% damage
 					{
 						["AnimationId"] = "rbxassetid://132830532945806",
-						["PowerScale"] = 0.35,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.2,
 						["AttackProfile"] = {
 							["HitboxSize"] = Vector3.new(1.2, 4.1, 9.75),
@@ -296,7 +296,7 @@ return {
 					-- [6] Slim, far-reaching finisher — 0.25s to 0.5s, 90% damage
 					{
 						["AnimationId"] = "rbxassetid://103039946478115",
-						["PowerScale"] = 0.90,
+						["PowerScale"] = 1.0,
 						["MovementLockedUntil"] = 1.7,
 						["IsHeavy"] = true,
 						["DoesKnockback"] = true,

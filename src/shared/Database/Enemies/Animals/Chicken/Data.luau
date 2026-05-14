@@ -3,13 +3,27 @@ return {
 	["Family"] = "Animals",
 	["__BrainProfile"] = "PassivePrey",
 	["__Stats"] = {
-		["Health"] = 70,
-		["MaxHealth"] = 70,
+		["Health"] = 8,
+		["MaxHealth"] = 8,
 		["PhysicalAttack"] = 0,
-		["Speed"] = 6,
+		["Speed"] = 8,
 	},
 	["__Animations"] = {
 		["Walk"] = "rbxassetid://110151614180287",
 		["Run"] = "rbxassetid://115993230462172",
+	},
+	["__Drops"] = {
+		{
+			ItemKind = "InventoryItem",
+			ItemId = "Meat",
+			Quantity = 1,
+			Chance = 1,
+		},
+		{
+			ItemKind = "InventoryItem",
+			ItemId = "Feather",
+			Quantity = 1,
+			Chance = 0.2,
+		},
 	},
 }

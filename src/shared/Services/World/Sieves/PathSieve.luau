@@ -8,6 +8,7 @@ type BiomeChunkInfo = any
 type DepthAnchor = any
 
 return function(ctx, columns, config, seed)
+	local generationType = ctx.GenerationType or "Standard"
 	local getCenterSolidColumn = ctx.getCenterSolidColumn
 	local TerrainTuning = ctx.TerrainTuning
 	local randomNodeRadiusScale = ctx.randomNodeRadiusScale
@@ -39,7 +40,8 @@ return function(ctx, columns, config, seed)
 		return nil, {}, 0, {}
 	end
 
-	local endpointCount = math.max(2, TerrainTuning.PathEndpointCount)
+	local isNoPathGeneration = generationType == "NoPath"
+	local endpointCount = if isNoPathGeneration then 3 else math.max(2, TerrainTuning.PathEndpointCount)
 	local nodeMinSpacing = math.max(TerrainTuning.PathNodeSpacing, TerrainTuning.PathNodeMinSpacing)
 	local endpointRng = Random.new(seed + 13127)
 	local endpoints = {} :: { TileColumn }
@@ -72,6 +74,98 @@ return function(ctx, columns, config, seed)
 			end
 		end
 		return true
+	end
+
+	local function tryAddEndpoint(endpoint: TileColumn): boolean
+		if
+			not endpoint
+			or not ((endpoint.X * endpoint.X + endpoint.Z * endpoint.Z) >= sideMinDistanceSq)
+			or hasNodeOverlap(
+				usedNodes,
+				endpoint.X,
+				endpoint.Z,
+				nodeMinSpacing,
+				TerrainTuning.PathNodeRadiusScaleMax
+			)
+		then
+			return false
+		end
+
+		local resolvedEndpointAngle = math.atan2(endpoint.Z, endpoint.X)
+		if not canAcceptEndpointAngle(resolvedEndpointAngle) then
+			return false
+		end
+
+		table.insert(endpoints, endpoint)
+		table.insert(acceptedEndpointAngles, resolvedEndpointAngle)
+		table.insert(usedNodes, {
+			X = endpoint.X,
+			Z = endpoint.Z,
+			Height = endpoint.SurfaceY,
+			RadiusScale = TerrainTuning.PathNodeRadiusScaleMax,
+		})
+		return true
+	end
+
+	if isNoPathGeneration then
+		for endpointIndex = 1, endpointCount do
+			local angleStep = (math.pi * 2) / endpointCount
+			local jitter = endpointRng:NextNumber(-angleStep * 0.2, angleStep * 0.2)
+			local endpointAngle = baseAngle + angleStep * (endpointIndex - 1) + jitter
+			if not canAcceptEndpointAngle(endpointAngle) then
+				continue
+			end
+			local endpointRadius = radius
+				* endpointRng:NextNumber(TerrainTuning.PathEndpointRadiusMin, TerrainTuning.PathEndpointRadiusMax)
+			local targetX = math.cos(endpointAngle) * endpointRadius
+			local targetZ = math.sin(endpointAngle) * endpointRadius
+			local endpoint = getNearestSolidColumnToTarget(columns, targetX, targetZ, radius * radius * 0.22, startColumn)
+			if endpoint then
+				tryAddEndpoint(endpoint)
+			end
+		end
+
+		if #endpoints < endpointCount then
+			local fallbackCandidates = {} :: { TileColumn }
+			for _, column in pairs(columns) do
+				if column.Solid and not column.HasWater then
+					local radialSq = column.X * column.X + column.Z * column.Z
+					if radialSq >= sideMinDistanceSq then
+						local angle = math.atan2(column.Z, column.X)
+						if angularDistance(angle, startAngle) >= minEndpointAngleFromStart then
+							table.insert(fallbackCandidates, column)
+						end
+					end
+				end
+			end
+			table.sort(fallbackCandidates, function(a: TileColumn, b: TileColumn): boolean
+				local adx = a.X - startColumn.X
+				local adz = a.Z - startColumn.Z
+				local bdx = b.X - startColumn.X
+				local bdz = b.Z - startColumn.Z
+				return (adx * adx + adz * adz) > (bdx * bdx + bdz * bdz)
+			end)
+
+			for _, candidate in ipairs(fallbackCandidates) do
+				if #endpoints >= endpointCount then
+					break
+				end
+				tryAddEndpoint(candidate)
+			end
+		end
+
+		if #endpoints < endpointCount then
+			for _, candidate in pairs(columns) do
+				if #endpoints >= endpointCount then
+					break
+				end
+				if candidate.Solid and not candidate.HasWater then
+					tryAddEndpoint(candidate)
+				end
+			end
+		end
+
+		return startColumn, endpoints, 0, {}
 	end
 
 	for endpointIndex = 1, endpointCount do
@@ -242,11 +336,23 @@ return function(ctx, columns, config, seed)
 	end
 
 	local cityNodeCount = math.max(0, TerrainTuning.CityNodeCount)
-	if cityNodeCount > 0 then
+	local incidentNodeCount = math.max(cityNodeCount, TerrainTuning.IncidentNodeCount or 0)
+	if incidentNodeCount > 0 then
 		local cityRng = Random.new(seed + 90301)
 		local cityRadiusMin = math.clamp(TerrainTuning.CityRadiusMin, 0.05, 1)
 		local cityRadiusMax = math.clamp(TerrainTuning.CityRadiusMax, cityRadiusMin, 1.2)
 		local cityPlacementAttempts = math.max(1, TerrainTuning.CityPlacementAttempts)
+		local incidentStructureChance = math.clamp(TerrainTuning.IncidentNodeStructureChance or 0, 0, 1)
+		local incidentStructureBudget = 0
+		local incidentStructureRoll = cityRng:NextNumber()
+		if incidentStructureRoll < 0.6 then
+			incidentStructureBudget = 0
+		elseif incidentStructureRoll < 0.87 then
+			incidentStructureBudget = 1
+		else
+			incidentStructureBudget = 2
+		end
+		local incidentStructureCount = 0
 		local cityNodeSpacing = math.max(
 			nodeMinSpacing,
 			math.max(2, TerrainTuning.PathNodeSpacing * math.max(0.5, TerrainTuning.CityNodeSpacingMultiplier))
@@ -257,7 +363,7 @@ return function(ctx, columns, config, seed)
 			cityRadiusScaleMin, cityRadiusScaleMax = cityRadiusScaleMax, cityRadiusScaleMin
 		end
 
-		for _ = 1, cityNodeCount do
+		for _ = 1, incidentNodeCount do
 			local placedNode: PathPoint? = nil
 			for _ = 1, cityPlacementAttempts do
 				local angle = cityRng:NextNumber(0, math.pi * 2)
@@ -285,7 +391,17 @@ return function(ctx, columns, config, seed)
 							Z = candidate.Z,
 							Height = flattenedHeight,
 							RadiusScale = candidateRadiusScale,
+							IsOccurrenceNode = false,
+							IsIncidentNode = true,
+							IsStructureNode = false,
 						}
+						if
+							incidentStructureCount < incidentStructureBudget
+							and cityRng:NextNumber() < incidentStructureChance
+						then
+							placedNode.IsStructureNode = true
+							incidentStructureCount += 1
+						end
 						break
 					end
 				end
@@ -566,6 +682,10 @@ return function(ctx, columns, config, seed)
 	end
 
 	for _, route in ipairs(allRoutes) do
+		local isStandaloneIncidentRoute = (#route == 1) and (route[1].IsIncidentNode == true)
+		if isStandaloneIncidentRoute then
+			continue
+		end
 		for nodeIndex, node in ipairs(route) do
 			local isDirectionChangeNode = (#route > 2)
 				and (nodeIndex > 1)
@@ -587,11 +707,20 @@ return function(ctx, columns, config, seed)
 			node.FlattenRadiusTiles = carveRadiusTiles
 
 			local heights = collectCircleHeights(node.X, node.Z, carveRadiusTiles)
-			node.CarveHeight = snapHeight(getPercentile(heights, 0.2) or node.Height)
+			local carvePercentile = if isMountainBiome(config.Biome) then 0.1 else 0.2
+			local carveHeight = getPercentile(heights, carvePercentile) or node.Height
+			if isMountainBiome(config.Biome) then
+				carveHeight -= math.max(8, math.floor(carveRadiusTiles * 1.35))
+			end
+			node.CarveHeight = snapHeight(carveHeight)
 		end
 	end
 
 	for _, route in ipairs(allRoutes) do
+		local isStandaloneIncidentRoute = (#route == 1) and (route[1].IsIncidentNode == true)
+		if isStandaloneIncidentRoute then
+			continue
+		end
 		for _, node in ipairs(route) do
 			local carveHeight = node.CarveHeight or node.Height
 			local flatRadius = math.max(pathHalfWidth, node.FlattenRadiusTiles or pathHalfWidth)
@@ -620,6 +749,10 @@ return function(ctx, columns, config, seed)
 	end
 
 	for _, route in ipairs(allRoutes) do
+		local isStandaloneIncidentRoute = (#route == 1) and (route[1].IsIncidentNode == true)
+		if isStandaloneIncidentRoute then
+			continue
+		end
 		for pointIndex = 1, #route - 1 do
 			local a = route[pointIndex]
 			local b = route[pointIndex + 1]
@@ -735,9 +868,9 @@ return function(ctx, columns, config, seed)
 		local assemblyAvoidWaterCells = RuntimeNodeAssemblyPlacement.AvoidWaterCells == true
 		local assemblyMaxHeightDelta = 8
 		local tileSize = math.max(1, config.TileSize)
-		local habitationFootprintPaddingTiles = 2
-		local environmentFootprintPaddingTiles = 1
-		local defaultFootprintPaddingTiles = 1
+		local habitationFootprintPaddingTiles = 1
+		local environmentFootprintPaddingTiles = 0
+		local defaultFootprintPaddingTiles = 0
 
 		local function canReplaceColumnStructure(column: TileColumn): boolean
 			if column.StructureTag == nil then
@@ -770,8 +903,8 @@ return function(ctx, columns, config, seed)
 			end
 
 			local structureScale = getRuntimeStructureScale(definition)
-			local halfX = math.max(1, math.ceil((definition.FootprintStuds.X * structureScale * 0.5) / tileSize))
-			local halfZ = math.max(1, math.ceil((definition.FootprintStuds.Y * structureScale * 0.5) / tileSize))
+			local halfX = math.max(1, math.floor(((definition.FootprintStuds.X * structureScale * 0.5) / tileSize) + 0.2))
+			local halfZ = math.max(1, math.floor(((definition.FootprintStuds.Y * structureScale * 0.5) / tileSize) + 0.2))
 			local lowerName = string.lower(definition.Name)
 			local padding = defaultFootprintPaddingTiles
 			if isHabitationStructureName(lowerName) then
@@ -1101,9 +1234,9 @@ return function(ctx, columns, config, seed)
 
 		for _, route in ipairs(allRoutes) do
 			for nodeIndex, node in ipairs(route) do
-				local shouldBeStructureNode = (#route == 1)
-					or (nodeIndex == 1)
+				local shouldBeStructureNode = (nodeIndex == 1)
 					or (nodeIndex > 1 and nodeIndex < #route and node.IsStructureNode == true)
+					or (#route == 1 and node.IsStructureNode == true)
 				if not shouldBeStructureNode then
 					continue
 				end

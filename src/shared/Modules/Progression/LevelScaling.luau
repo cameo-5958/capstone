@@ -40,6 +40,8 @@ function LevelScaling.ApplyScaling(entity: any)
 	entity.__ScaledLevel = level
 
 	if level <= 1 then
+		-- Always start spawned entities at full health, even when no level multiplier applies.
+		entity:SetStat("Health", entity:GetStat("MaxHealth"))
 		return
 	end
 

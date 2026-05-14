@@ -72,8 +72,8 @@ export type Entity = {
 	__Alive: boolean,
 	__InvincibleUntil: number,
 
-	new: (Model, string) -> Entity,
-	Inflate: (ent: Entity) -> Entity,
+	new: (Model, string, number?) -> Entity,
+	Inflate: (ent: Entity) -> Entity?,
 
 	GetStat: (self: Entity, stat: Stat) -> number,
 	GetBaseStat: (self: Entity, stat: Stat) -> number,

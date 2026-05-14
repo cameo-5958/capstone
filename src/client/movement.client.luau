@@ -2,13 +2,16 @@
 -- Attach movement module to player
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local AttackServiceClient = require(ReplicatedStorage.Services.Attack.AttackServiceClient)
 local AnimationServiceClient = require(ReplicatedStorage.Services.Animation.AnimationServiceClient)
 local PlayerServiceClient = require(ReplicatedStorage.Services.Player.PlayerServiceClient)
 local WardrobeViewport = require(ReplicatedStorage.Viewports.WardrobeViewport)
+local ItemLoadoutServiceClient = require(ReplicatedStorage.Services.ItemLoadout.ItemLoadoutServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WorldServiceClient = require(ReplicatedStorage.Services.World.WorldServiceClient)
 local CameraController = require(script.Parent.CameraController)
 local Movement = require(ReplicatedStorage.Classes.Entity.PlayerMovement)
 local ClassCombos = require(ReplicatedStorage.Database.Weapons.Default.Combos)
@@ -16,13 +19,11 @@ local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
 
 -- Create a new MovementEngine
 local engine = Movement.lnew()
-local IsChargingBow = false
-local IsBowAiming = false
-local BowHoldToken = 0
-local BOW_AIM_HOLD_DELAY = 0.2
 local PreloadedWeaponAnimationClasses: { [string]: boolean } = {}
 local IsWardrobeOpen = false
 local DebugMouseUnlocked = false
+local IsWardrobeForcedOpen = false
+local WasCinematicModeActive = false
 
 local function CollectComboAnimationIds(weaponClass: string?): { string }
 	if not weaponClass then
@@ -63,6 +64,12 @@ local function PreloadLocalPlayerAnimations()
 	for _, animationId in pairs(PlayerConfig.__Animations or {}) do
 		if type(animationId) == "string" and animationId ~= "" then
 			table.insert(playerAnimationIds, animationId)
+		elseif type(animationId) == "table" then
+			for _, anim in ipairs(animationId) do
+				if type(anim) == "string" and anim ~= "" then
+					table.insert(playerAnimationIds, anim)
+				end
+			end
 		end
 	end
 
@@ -86,19 +93,6 @@ end
 local function IsBowEquipped(): boolean
 	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
 	return equippedWeapon ~= nil and equippedWeapon.Class == "Bow"
-end
-
-local function SetBowCameraEnabled(enabled: boolean)
-	local controller = CameraController.GetSharedController()
-	if not controller then
-		return
-	end
-
-	if enabled then
-		controller:SetMode("Aiming")
-	elseif controller:GetMode() == "Aiming" then
-		controller:SetMode("Default")
-	end
 end
 
 local function SetMouseLockSuppressed(suppressed: boolean)
@@ -125,9 +119,33 @@ local function ApplyMouseLockState()
 	SetMouseLockSuppressed(IsWardrobeOpen or DebugMouseUnlocked)
 end
 
+local function IsCinematicModeActive(): boolean
+	local controller = CameraController.GetSharedController()
+	return controller ~= nil and controller:IsCinematicModeActive()
+end
+
+local function SyncCinematicMovementState()
+	local isActive = IsCinematicModeActive()
+	if isActive == WasCinematicModeActive then
+		return
+	end
+
+	WasCinematicModeActive = isActive
+	if isActive then
+		engine:DisableAllMovement()
+	else
+		if not IsWardrobeOpen then
+			engine:EnableAllMovement()
+		end
+	end
+end
+
 local function RecreateMovementEngine()
 	engine = Movement.lnew()
 	if IsWardrobeOpen then
+		engine:DisableAllMovement()
+	end
+	if WasCinematicModeActive then
 		engine:DisableAllMovement()
 	end
 end
@@ -158,18 +176,40 @@ local function GetBowReleasePayload(): { [string]: any }
 	}
 end
 
-local function CancelBowCharge()
-	if not IsChargingBow then
-		return
+local function FireBowShot()
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	local attackContext = equippedWeapon and equippedWeapon.AttackContext or nil
+	local target = engine:GetTarget(
+		engine.RootPart.Position,
+		if attackContext and typeof(attackContext.AcquireRange) == "number" then attackContext.AcquireRange else nil
+	)
+	if target then
+		local targetPosition = target.RootPart.Position
+		local flatTargetPosition = Vector3.new(targetPosition.X, engine.RootPart.Position.Y, targetPosition.Z)
+		local delta = flatTargetPosition - engine.RootPart.Position
+		if delta.Magnitude > 0.001 then
+			engine.RootPart.CFrame = CFrame.lookAt(engine.RootPart.Position, flatTargetPosition)
+		end
 	end
 
-	IsChargingBow = false
-	BowHoldToken += 1
-	if IsBowAiming then
-		IsBowAiming = false
-		SetBowCameraEnabled(false)
-	end
 	AttackServiceClient.ReleaseBowCharge(GetBowReleasePayload())
+
+	-- Play bow shot animation
+	local bowShotAnim = engine.__Animations["BowShot"]
+	if bowShotAnim then
+		AnimationServiceClient.Animate(bowShotAnim)
+	end
+
+	-- Play bow reload animation after a short delay
+	local bowReloadAnim = engine.__Animations["BowReload"]
+	if bowReloadAnim then
+		task.delay(0.3, function()
+			if bowShotAnim then
+				AnimationServiceClient.StopAnimation(bowShotAnim)
+			end
+			AnimationServiceClient.Animate(bowReloadAnim)
+		end)
+	end
 end
 
 local function SetWardrobeOpen(isOpen: boolean)
@@ -179,7 +219,6 @@ local function SetWardrobeOpen(isOpen: boolean)
 
 	IsWardrobeOpen = isOpen
 	if isOpen then
-		CancelBowCharge()
 		PlayerServiceClient.SetRightClickReleased()
 		ApplyMouseLockState()
 		SetCameraUpdateSuppressed(true)
@@ -198,6 +237,16 @@ local function SetWardrobeOpen(isOpen: boolean)
 	end
 end
 
+local function SyncWardrobeStartState()
+	local shouldForceOpen = not WorldServiceClient.IsMatchStarted()
+	IsWardrobeForcedOpen = shouldForceOpen
+	if shouldForceOpen then
+		SetWardrobeOpen(true)
+	elseif IsWardrobeOpen then
+		SetWardrobeOpen(false)
+	end
+end
+
 -- Attach to UserInputService
 UserInputService.InputBegan:Connect(function(input, processed)
 	-- DEBUG_MOUSE_UNLOCK_START (easy delete block)
@@ -208,7 +257,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 	-- DEBUG_MOUSE_UNLOCK_END
 
+	if IsCinematicModeActive() then
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.B and not UserInputService:GetFocusedTextBox() then
+		if IsWardrobeForcedOpen then
+			return
+		end
 		SetWardrobeOpen(not IsWardrobeOpen)
 		return
 	end
@@ -221,22 +277,26 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		return
 	end
 
+	if IsCinematicModeActive() then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Q then
+		ItemLoadoutServiceClient.UseSlot(1)
+		return
+	elseif input.KeyCode == Enum.KeyCode.E then
+		ItemLoadoutServiceClient.UseSlot(2)
+		return
+	elseif input.KeyCode == Enum.KeyCode.R then
+		PlayerServiceClient.SetRightClickHeld()
+		WeaponServiceClient.UseAbility()
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		if input.UserInputState == Enum.UserInputState.Begin then
 			if IsBowEquipped() then
-				IsChargingBow = true
-				IsBowAiming = false
-				BowHoldToken += 1
-				local holdToken = BowHoldToken
-				task.delay(BOW_AIM_HOLD_DELAY, function()
-					if not IsChargingBow or BowHoldToken ~= holdToken or not IsBowEquipped() then
-						return
-					end
-
-					IsBowAiming = true
-					SetBowCameraEnabled(true)
-					AttackServiceClient.BeginBowCharge()
-				end)
+				FireBowShot()
 			else
 				-- Attack
 				if engine:Attack() then
@@ -245,15 +305,18 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			end
 		end
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		if input.UserInputState == Enum.UserInputState.Begin then
-			PlayerServiceClient.SetRightClickHeld()
-			-- Dash
-			if engine:Dash() then
-				PlayerServiceClient.RequestDashIFrames()
-			end
+		if input.UserInputState == Enum.UserInputState.Begin and engine:Dash() then
+			PlayerServiceClient.RequestDashIFrames()
 		end
 	end
 end)
+
+WorldServiceClient.GetStartStateChangedSignal():Connect(function()
+	SyncWardrobeStartState()
+end)
+
+task.defer(SyncWardrobeStartState)
+RunService.RenderStepped:Connect(SyncCinematicMovementState)
 
 UserInputService.InputEnded:Connect(function(input, processed)
 	if processed then
@@ -264,9 +327,11 @@ UserInputService.InputEnded:Connect(function(input, processed)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		CancelBowCharge()
-	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+	if IsCinematicModeActive() then
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.R then
 		PlayerServiceClient.SetRightClickReleased()
 	end
 end)

@@ -4,7 +4,7 @@ return {
 	Desc = "Places a yellow banner that grants +2 speed while in range.",
 	Icon = "rbxassetid://89774490546710",
 	MaxStack = 8,
-	SpawnWith = 2,
+	SpawnWith = 0,
 	InventoryData = {
 		Category = "Banner",
 		Type = "Support",

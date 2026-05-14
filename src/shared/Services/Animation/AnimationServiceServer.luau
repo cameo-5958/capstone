@@ -1,9 +1,7 @@
 --!strict
 
 -- Create the animation API
-local API = Instance.new("RemoteEvent")
-API.Parent = script.Parent
-API.Name = "AnimationHandler"
+local API = script.Parent:WaitForChild("AnimationHandler") :: RemoteEvent
 
 -- Requires
 local Players = game:GetService("Players")

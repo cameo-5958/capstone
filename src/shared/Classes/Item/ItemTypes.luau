@@ -34,14 +34,22 @@ export type ItemEffect = {
 	Range: number?,
 	Radius: number?,
 	Target: "Self" | "NearestEnemy" | "EnemiesInRadius"?,
+	TargetGroup: "Enemies" | "Players"?,
+	IncludeCaster: boolean?,
 	Offset: Vector3?,
 	Color: Color3?,
 	PulseInterval: number?,
 	ContactModifierDuration: number?,
 	Modifiers: { ItemModifier }?,
+	PullSpeed: number?,
+	MinPullSpeed: number?,
+	MaxResultantSpeed: number?,
+	LiftVelocity: number?,
+	DeadzoneRadius: number?,
+	PullHeight: number?,
 }
 
-export type ItemDefinition = {
+export type ConsumableDefinition = {
 	Id: string,
 	Name: string,
 	Desc: string,
@@ -53,8 +61,8 @@ export type ItemDefinition = {
 	Effects: { ItemEffect },
 }
 
-export type SerializedItemData = {
-	Kind: "Item",
+export type SerializedConsumableData = {
+	Kind: "Consumable",
 	ItemId: string,
 	Name: string,
 	Desc: string,
@@ -65,5 +73,40 @@ export type SerializedItemData = {
 	InventoryData: { [string]: any },
 	Effects: { ItemEffect },
 }
+
+export type InventoryItemDefinition = {
+	Id: string,
+	Name: string,
+	Desc: string,
+	Icon: string,
+	MaxStack: number,
+	SpawnWith: number,
+	CanEquip: boolean,
+	CanUse: boolean,
+	EquipSlotType: string?,
+	ModelAssetName: string?,
+	InventoryData: { [string]: any }?,
+	UseEffects: { [string]: any }?,
+}
+
+export type SerializedInventoryItemData = {
+	Kind: "Item",
+	ItemId: string,
+	Name: string,
+	Desc: string,
+	Icon: string,
+	MaxStack: number,
+	SpawnWith: number,
+	StackKey: string?,
+	CanEquip: boolean,
+	CanUse: boolean,
+	EquipSlotType: string?,
+	ModelAssetName: string?,
+	InventoryData: { [string]: any },
+	UseEffects: { [string]: any }?,
+}
+
+export type ItemDefinition = ConsumableDefinition | InventoryItemDefinition
+export type SerializedItemData = SerializedConsumableData | SerializedInventoryItemData
 
 return table.freeze({})

@@ -72,7 +72,6 @@ local function ProcessEnemyHit(attacker, target, physicalAttack: number, swingRa
 	end
 
 	if target:IsInvincible() then
-		print(("Hit whiffed on invincible target: %s -> %s"):format(attacker.Name, target.Name))
 		return false
 	end
 
@@ -81,7 +80,6 @@ local function ProcessEnemyHit(attacker, target, physicalAttack: number, swingRa
 		return false
 	end
 
-	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
 	GetDamageModule().DirectDamageToEntity(attacker, target, physicalAttack)
 	return true
 end
@@ -206,7 +204,7 @@ local function OnEnter(self: Neuron): ()
 	local lungeDistance = GetDesiredLungeDistance(self, distanceToTarget)
 	local lungeVelocity = lungeDistance / self.__Attributes["AttackDuration"]
 
-	self.Brain.MovementEngine.Humanoid:MoveTo(myPos)
+	self.Brain.MovementEngine:MoveTo(myPos)
 	self.Brain.MovementEngine:CancelLinearVelocity()
 	self.Brain.MovementEngine:DisableMovement()
 	self.Brain.MovementEngine:ScheduleDeferTask(totalAttackTime)

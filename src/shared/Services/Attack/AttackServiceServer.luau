@@ -57,10 +57,15 @@ type ActiveAttack = {
 local ActiveAttacks: { [Player]: ActiveAttack } = {}
 local NextAttackAt: { [Player]: number } = {}
 local HIT_CONFIRM_RETRY_DELAY = 0.08
-local BowChargeStartedAt: { [Player]: number } = {}
-local BOW_MIN_POWER_SCALE = 0.75
-local BOW_MAX_POWER_SCALE = 1.5
-local BOW_MAX_CHARGE_TIME = 2.5
+local DEFAULT_BOW_GRAVITY_SCALE = 0.35
+local DEFAULT_BOW_HOMING_STRENGTH = 12
+local DEFAULT_BOW_SHOT_LOCK_DURATION = 0.65
+local BOW_SHOT_LOCK_TOKEN_ATTRIBUTE = "BowShotLockToken"
+local BOW_SHOT_ANIMATIONS = {
+	"rbxassetid://135215634088644",
+	"rbxassetid://127584242031977",
+	"rbxassetid://117890025835582",
+}
 
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -133,6 +138,41 @@ local function GetNearestBowTarget(entity, acquireRange: number?): any?
 	return EnemyServiceServer.GetClosest(entity.RootPart.Position, acquireRange or 96)
 end
 
+local function ChooseBowShotAnimation(): string
+	return BOW_SHOT_ANIMATIONS[math.random(1, #BOW_SHOT_ANIMATIONS)]
+end
+
+local function LockBowShooter(entity, duration: number)
+	local character = entity.Character
+	if not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	local lockToken = (character:GetAttribute(BOW_SHOT_LOCK_TOKEN_ATTRIBUTE) or 0) + 1
+	character:SetAttribute(BOW_SHOT_LOCK_TOKEN_ATTRIBUTE, lockToken)
+
+	humanoid.WalkSpeed = 0
+	humanoid:Move(Vector3.zero, false)
+	entity.RootPart.AssemblyLinearVelocity = Vector3.zero
+
+	task.delay(duration, function()
+		if character.Parent == nil then
+			return
+		end
+
+		if character:GetAttribute(BOW_SHOT_LOCK_TOKEN_ATTRIBUTE) ~= lockToken then
+			return
+		end
+
+		humanoid.WalkSpeed = entity:GetStat("Speed")
+	end)
+end
+
 local function BeginBowCharge(player: Player)
 	local entity = PlayerServiceServer.GetEntity(player)
 	if not entity or not entity:IsAlive() then
@@ -143,14 +183,10 @@ local function BeginBowCharge(player: Player)
 	if not weapon or weapon.Class ~= "Bow" then
 		return
 	end
-
-	BowChargeStartedAt[player] = workspace:GetServerTimeNow()
 end
 
 local function ReleaseBowCharge(player: Player, payload: { [string]: any }?)
 	local entity = PlayerServiceServer.GetEntity(player)
-	local chargeStartedAt = BowChargeStartedAt[player]
-	BowChargeStartedAt[player] = nil
 	if not entity or not entity:IsAlive() then
 		return
 	end
@@ -161,39 +197,34 @@ local function ReleaseBowCharge(player: Player, payload: { [string]: any }?)
 	end
 
 	local attackContext = weapon:GetAttackContext()
-	local now = workspace:GetServerTimeNow()
-	chargeStartedAt = chargeStartedAt or now
-	local chargeDuration = math.clamp(now - chargeStartedAt, 0, attackContext.ChargeDuration or BOW_MAX_CHARGE_TIME)
-	local maxChargeDuration = attackContext.ChargeDuration or BOW_MAX_CHARGE_TIME
-	local chargeAlpha = if maxChargeDuration > 0 then math.clamp(chargeDuration / maxChargeDuration, 0, 1) else 0
-	local damageScale = BOW_MIN_POWER_SCALE + (BOW_MAX_POWER_SCALE - BOW_MIN_POWER_SCALE) * chargeAlpha
+	local lockDuration =
+		attackContext.MovementLockDuration or attackContext.LockDuration or DEFAULT_BOW_SHOT_LOCK_DURATION
+	AnimationServiceServer.PlayPlayerOnce(player, ChooseBowShotAnimation())
+	LockBowShooter(entity, lockDuration)
 	local origin = entity.RootPart.Position + Vector3.new(0, attackContext.ProjectileSpawnHeight or 2.25, 0)
-	local cameraLookVector = payload and payload.CameraLookVector
-	local direction: Vector3
-
-	if typeof(cameraLookVector) == "Vector3" and cameraLookVector.Magnitude > 0.001 then
-		direction = cameraLookVector.Unit
-	else
-		local target = GetNearestBowTarget(entity, attackContext.AcquireRange)
-		local targetPosition = if target
-			then target.RootPart.Position + Vector3.new(0, attackContext.ProjectileAimHeight or 1.5, 0)
-			else origin + entity.RootPart.CFrame.LookVector * (attackContext.Range or 60)
-		direction = targetPosition - origin
-		if direction.Magnitude <= 0.001 then
-			direction = entity.RootPart.CFrame.LookVector
+	local target = GetNearestBowTarget(entity, attackContext.AcquireRange)
+	local direction = entity.RootPart.CFrame.LookVector
+	local speed = attackContext.ProjectileSpeed or 110
+	if target then
+		local targetPosition = target.RootPart.Position + Vector3.new(0, attackContext.ProjectileAimHeight or 1.5, 0)
+		local delta = targetPosition - origin
+		if delta.Magnitude > 0.001 then
+			direction = delta.Unit
 		end
-		direction = direction.Unit
 	end
 
 	ProjectileServiceServer.FireArrow({
 		Position = origin,
-		Velocity = direction * (attackContext.ProjectileSpeed or 110),
+		Velocity = direction * speed,
+		Speed = speed,
 		MaxDistance = (attackContext.Range or 60) * entity:GetStat("ArrowTravelDistance"),
-		GravityScale = attackContext.GravityScale or 1,
+		GravityScale = attackContext.GravityScale or DEFAULT_BOW_GRAVITY_SCALE,
 		Radius = attackContext.ProjectileRadius or 0.5,
-		DamageScale = damageScale,
+		DamageScale = 1,
 		Owner = entity,
 		Weapon = weapon,
+		Target = target,
+		HomingStrength = attackContext.HomingStrength or DEFAULT_BOW_HOMING_STRENGTH,
 	})
 end
 
@@ -236,7 +267,8 @@ local function IsTargetInsideCapturedAttack(entity, target, active: ActiveAttack
 	local flatTarget = Vector3.new(targetPos.X, origin.Position.Y, targetPos.Z)
 	local delta = flatTarget - origin.Position
 	local distanceToTarget = delta.Magnitude
-	local lungeDistance = math.min(attackContext.MaxDashRange or 2.5, math.max(0, distanceToTarget - (attackContext.SwingRange or 4.5)))
+	local lungeDistance =
+		math.min(attackContext.MaxDashRange or 2.5, math.max(0, distanceToTarget - (attackContext.SwingRange or 4.5)))
 	local endPosition = origin.Position + origin.LookVector * lungeDistance
 	local endCFrame = CFrame.lookAt(endPosition, endPosition + origin.LookVector)
 
@@ -279,7 +311,12 @@ local function GetDefaultCombo(comboSet: ComboSet): ComboDefinition?
 	return nil
 end
 
-local function BuildActiveHitWindows(now: number, profile: AttackProfile, baseAttackContext: AttackContext, comboAttack: ComboAttack?): { ActiveHitWindow }
+local function BuildActiveHitWindows(
+	now: number,
+	profile: AttackProfile,
+	baseAttackContext: AttackContext,
+	comboAttack: ComboAttack?
+): { ActiveHitWindow }
 	local configuredWindows = comboAttack and comboAttack.HitWindows
 	local comboAttackContext = MergeAttackContext(baseAttackContext, comboAttack and comboAttack.AttackContext)
 	local comboAttackProfile = MergeAttackProfile(profile, comboAttack and comboAttack.AttackProfile)
@@ -375,7 +412,6 @@ function AttackServiceServer.ProcessEnemyHit(attacker, target, physicalAttack: n
 		return false
 	end
 
-	print(("Enemy hitbox registered hit: %s -> %s"):format(attacker.Name, target.Name))
 	Damage.DirectDamageToEntity(attacker, target, physicalAttack)
 	return true
 end
@@ -409,7 +445,8 @@ local function BeginPrimaryAttack(player: Player)
 
 	local animationSource = if comboAttack and HasAnimationId(comboAttack.AnimationId)
 		then comboAttack.AnimationId
-		elseif entity.__Animations["Attack"] ~= nil and entity.__Animations["Attack"] ~= ""
+		elseif
+			entity.__Animations["Attack"] ~= nil and entity.__Animations["Attack"] ~= ""
 		then entity.__Animations["Attack"]
 		else profile.AnimationId
 	local animationId = ResolveAnimationId(animationSource)
@@ -529,7 +566,6 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 				return
 			end
 
-			print(("Hitbox registered delayed hit: %s -> %s"):format(player.Name, retryTarget.Name))
 			retryWindowHits[targetUUID] = retryNow
 			retryActive.Weapon:ExecuteAttack(retryTarget, retryActive.ComboBaseDamage, retryEntity, {
 				IsHeavy = retryActive.IsHeavy,
@@ -540,7 +576,7 @@ local function ReportHit(player: Player, payload: { [string]: any }?)
 		return
 	end
 
-	print(("Hitbox registered hit: %s -> %s"):format(player.Name, target.Name))
+	print(("[AttackService] Hitbox registered hit: %s -> %s"):format(player.Name, target.Name))
 	hitWindowHits[payload.TargetUUID] = now
 	active.Weapon:ExecuteAttack(target, active.ComboBaseDamage, entity, {
 		IsHeavy = active.IsHeavy,
@@ -562,4 +598,3 @@ API.OnServerEvent:Connect(function(player: Player, action: string, payload: { [s
 end)
 
 return table.freeze(AttackServiceServer)
-

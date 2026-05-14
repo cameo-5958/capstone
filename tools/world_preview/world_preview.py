@@ -173,18 +173,42 @@ DEFAULT_CONFIG = WorldConfig(
     chunk_size=8,
     radius_tiles=14,
     base_y=120,
-    biome="TemperateGrassland",
+    biome="Plains",
     sea_level=2,
     ocean_mode="None",
 )
 
 BIOME_MATERIALS: Dict[str, Dict[str, str]] = {
-    "TemperateGrassland": {
+    "Plains": {
         "Surface": "Grass",
         "Mid": "Ground",
         "Deep": "Slate",
         "Water": "Water",
-    }
+    },
+    "Forest": {
+        "Surface": "Grass",
+        "Mid": "Ground",
+        "Deep": "Slate",
+        "Water": "Water",
+    },
+    "Tundra": {
+        "Surface": "Snow",
+        "Mid": "Slate",
+        "Deep": "Slate",
+        "Water": "Water",
+    },
+    "Desert": {
+        "Surface": "Sand",
+        "Mid": "Ground",
+        "Deep": "Slate",
+        "Water": "Water",
+    },
+    "Mountain": {
+        "Surface": "Slate",
+        "Mid": "Slate",
+        "Deep": "Slate",
+        "Water": "Water",
+    },
 }
 
 MATERIAL_RGB: Dict[str, Tuple[int, int, int]] = {
@@ -302,7 +326,7 @@ class WorldGenerator:
         return (x, z)
 
     def _get_biome_materials(self) -> Dict[str, str]:
-        return BIOME_MATERIALS.get(self.config.biome, BIOME_MATERIALS["TemperateGrassland"])
+        return BIOME_MATERIALS.get(self.config.biome, BIOME_MATERIALS["Plains"])
 
     def create_empty_columns(self) -> Dict[Tuple[int, int], TileColumn]:
         columns: Dict[Tuple[int, int], TileColumn] = {}

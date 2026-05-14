@@ -1,6 +1,4 @@
 --!strict
-
-local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local React = require(ReplicatedStorage.Packages.react)
@@ -8,15 +6,18 @@ local NinePartBorder = require(ReplicatedStorage.Classes.UI.NinePartBorder)
 local CombatNumbers = require(ReplicatedStorage.Modules.Combat.CombatNumbers)
 local InventoryServiceClient = require(ReplicatedStorage.Services.Inventory.InventoryServiceClient)
 local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WardrobePreviewLoader = require(ReplicatedStorage.Viewports.Wardrobe.WardrobePreviewLoader)
 local WardrobeSelection = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeSelection)
 
 type SelectedItem = WardrobeSelection.SelectedItem
 
 local WeaponsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("Weapons")
+local InventoryItemsDatabase = ReplicatedStorage:WaitForChild("Database"):WaitForChild("InventoryItems")
 
 type InventoryEntry = {
 	EntryId: string,
 	ItemKind: string,
+	StorageSection: string,
 	StackKey: string,
 	Quantity: number,
 	MaxStack: number,
@@ -55,7 +56,8 @@ type HotbarInfoLookup = {
 	ByWeaponId: { [string]: { HotbarInfo } },
 }
 
-type InventoryCategory = "Items" | "Armor" | "Weapons"
+type InventoryCategory = "Items" | "Consumables" | "Armor" | "Weapons"
+type InventoryFilterMode = "Full" | "ItemsOnly"
 
 local PANEL_WIDTH = 320
 local PANEL_HEIGHT = 430
@@ -84,10 +86,6 @@ local TITLE_SIGN_TOP_Y = PANEL_INNER_INSET
 local TITLE_SIGN_TEXT_CENTER_Y = (TITLE_SIGN_SOURCE_SIZE.Y - TITLE_SIGN_CENTER_FROM_BOTTOM) / TITLE_SIGN_SOURCE_SIZE.Y
 local TITLE_SIGN_TEXT_HEIGHT = math.floor(TITLE_SIGN_HEIGHT * 0.42)
 local LIST_TOP = math.floor(math.max(58, TITLE_SIGN_TOP_Y + TITLE_SIGN_HEIGHT + 8 - PANEL_INNER_INSET))
-local BOTTOM_SLOTS_COUNT = 3
-local BOTTOM_SLOTS_HEIGHT = 62
-local BOTTOM_SLOTS_GAP = 8
-local LIST_BOTTOM_INSET = BOTTOM_SLOTS_HEIGHT + BOTTOM_SLOTS_GAP + GRID_INSET
 
 local FOREST_PANEL_BACKGROUND = Color3.fromRGB(54, 35, 23)
 local FOREST_PANEL_STROKE = Color3.fromRGB(126, 84, 48)
@@ -105,28 +103,6 @@ local RARITY_BACKGROUNDS = {
 	EXALTED = Color3.fromRGB(136, 95, 43),
 	APEX = Color3.fromRGB(126, 28, 32),
 }
-
-local function preloadVisualAssets(instance: Instance, context: string): boolean
-	local loadedCleanly = true
-	local ok, err = pcall(function()
-		ContentProvider:PreloadAsync({ instance }, function(_contentId: string, status: Enum.AssetFetchStatus)
-			if status ~= Enum.AssetFetchStatus.Success then
-				loadedCleanly = false
-			end
-		end)
-	end)
-
-	if not ok then
-		warn(("[WardrobeInventory] Failed to preload %s preview assets: %s"):format(context, tostring(err)))
-		return false
-	end
-
-	if not loadedCleanly then
-		warn(("[WardrobeInventory] %s preview had assets that did not preload cleanly."):format(context))
-	end
-
-	return loadedCleanly
-end
 
 local function normalizeRarity(rarity: any): string
 	if type(rarity) ~= "string" or rarity == "" then
@@ -173,11 +149,19 @@ local function getEntryDetail(entry: InventoryEntry): string
 		return ("%s  DMG %s"):format(weaponClass, CombatNumbers.FormatTenth(baseDamage))
 	end
 
-	if entry.ItemKind == "Item" then
+	if entry.ItemKind == "Consumable" or entry.ItemKind == "Item" then
 		local category = if type(data.InventoryData) == "table"
 				and type(data.InventoryData.Category) == "string"
 			then data.InventoryData.Category
 			else "Consumable"
+		return ("%s  Stack %d"):format(category, entry.Quantity)
+	end
+
+	if entry.ItemKind == "InventoryItem" then
+		local category = if type(data.InventoryData) == "table"
+				and type(data.InventoryData.Category) == "string"
+			then data.InventoryData.Category
+			else "Item"
 		return ("%s  Stack %d"):format(category, entry.Quantity)
 	end
 
@@ -224,6 +208,10 @@ local function getEntryCategory(entry: InventoryEntry): InventoryCategory
 		return "Armor"
 	end
 
+	if entry.ItemKind == "InventoryItem" then
+		return "Items"
+	end
+
 	local data = entry.Data
 	local inventoryData = data.InventoryData
 	local inventoryType = if type(inventoryData) == "table" and type(inventoryData.Type) == "string"
@@ -235,7 +223,7 @@ local function getEntryCategory(entry: InventoryEntry): InventoryCategory
 		return "Armor"
 	end
 
-	return "Items"
+	return "Consumables"
 end
 
 local function cloneEntryData(entry: InventoryEntry): { [string]: any }
@@ -386,6 +374,53 @@ local function resolveWeaponModelTemplate(entry: InventoryEntry): Instance?
 	return nil
 end
 
+local function buildInventoryItemModel(entry: InventoryEntry): Model?
+	if entry.ItemKind ~= "InventoryItem" then
+		return nil
+	end
+
+	local itemId = entry.Data.ItemId
+	if type(itemId) ~= "string" or itemId == "" then
+		return nil
+	end
+
+	local folder = InventoryItemsDatabase:FindFirstChild(itemId)
+	if not folder or not folder:IsA("Folder") then
+		return nil
+	end
+
+	local namedModel = folder:FindFirstChild("Model")
+	if namedModel and namedModel:IsA("Model") then
+		return namedModel:Clone()
+	end
+
+	local modelBuilder = folder:FindFirstChild("ModelBuilder")
+	if modelBuilder and modelBuilder:IsA("ModuleScript") then
+		local ok, exported = pcall(require, modelBuilder)
+		if not ok then
+			return nil
+		end
+
+		local builderFn: (() -> Model)? = nil
+		if type(exported) == "function" then
+			builderFn = exported
+		elseif type(exported) == "table" and type((exported :: any).Build) == "function" then
+			builderFn = function()
+				return (exported :: any).Build()
+			end
+		end
+
+		if builderFn then
+			local built = builderFn()
+			if built and built:IsA("Model") then
+				return built
+			end
+		end
+	end
+
+	return nil
+end
+
 local function prepVisualClone(instance: Instance): ()
 	for _, descendant in ipairs(instance:GetDescendants()) do
 		if descendant:IsA("Script") or descendant:IsA("LocalScript") then
@@ -399,13 +434,20 @@ local function prepVisualClone(instance: Instance): ()
 	end
 end
 
-local function cloneWeaponVisual(entry: InventoryEntry): Model?
-	local template = resolveWeaponModelTemplate(entry)
-	if not template then
-		return nil
+local function cloneEntryVisual(entry: InventoryEntry): Model?
+	local clone: Instance? = nil
+	if entry.ItemKind == "Weapon" then
+		local template = resolveWeaponModelTemplate(entry)
+		if template then
+			clone = template:Clone()
+		end
+	elseif entry.ItemKind == "InventoryItem" then
+		clone = buildInventoryItemModel(entry)
 	end
 
-	local clone = template:Clone()
+	if not clone then
+		return nil
+	end
 	prepVisualClone(clone)
 
 	if clone:IsA("Model") then
@@ -474,32 +516,32 @@ local function InventoryItemViewport(props: { Entry: InventoryEntry })
 		camera.Parent = viewport
 		viewport.CurrentCamera = camera
 
-		local weaponModel = cloneWeaponVisual(entry)
-		if weaponModel then
+		local previewModel = cloneEntryVisual(entry)
+		if previewModel then
 			task.spawn(function()
-				preloadVisualAssets(weaponModel, getEntryName(entry))
+				WardrobePreviewLoader.PreloadInstanceAssets(previewModel)
 
 				if disposed or viewportRef.current ~= viewport then
-					weaponModel:Destroy()
+					previewModel:Destroy()
 					return
 				end
 
-				weaponModel.Parent = worldModel
-				frameWeaponModel(camera, weaponModel)
+				previewModel.Parent = worldModel
+				frameWeaponModel(camera, previewModel)
 			end)
 		end
 
 		return function()
 			disposed = true
-			if weaponModel and weaponModel.Parent == nil then
-				weaponModel:Destroy()
+			if previewModel and previewModel.Parent == nil then
+				previewModel:Destroy()
 			end
 
 			viewport.CurrentCamera = nil
 			worldModel:Destroy()
 			camera:Destroy()
 		end
-	end, { entry.EntryId, entry.ItemKind, weaponId })
+	end, { entry.EntryId, entry.ItemKind, weaponId, entry.Data.ItemId })
 
 	return React.createElement("ViewportFrame", {
 		ref = viewportRef,
@@ -519,7 +561,8 @@ local function inventoryTile(
 	index: number,
 	isSelected: boolean,
 	hotbarInfo: HotbarInfo?,
-	onSelected: () -> ()
+	onSelected: () -> (),
+	isInteractive: boolean
 )
 	local quantityText = if entry.Quantity > 1 then "x" .. tostring(entry.Quantity) else ""
 	local rarity = getEntryRarity(entry)
@@ -621,16 +664,19 @@ local function inventoryTile(
 			})
 			else nil,
 		SelectButton = React.createElement("TextButton", {
+			Active = isInteractive,
 			AutoButtonColor = false,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Position = UDim2.fromScale(0, 0),
-			Selectable = false,
+			Selectable = isInteractive,
 			Size = UDim2.fromScale(1, 1),
 			Text = "",
 			ZIndex = 10,
 			[React.Event.Activated] = function()
-				onSelected()
+				if isInteractive then
+					onSelected()
+				end
 			end,
 		}),
 	})
@@ -684,7 +730,8 @@ local function buildTiles(
 	entries: { InventoryEntry },
 	selectedEntryId: string?,
 	hotbarInfoByEntryId: { [string]: HotbarInfo },
-	layoutOrderOffset: number?
+	layoutOrderOffset: number?,
+	isLocked: boolean
 )
 	local tiles = {}
 	local orderOffset = layoutOrderOffset or 0
@@ -697,7 +744,8 @@ local function buildTiles(
 			hotbarInfo,
 			function()
 				WardrobeSelection.SetSelectedItem(buildSelectedInventoryItem(entry, hotbarInfo))
-			end
+			end,
+			not isLocked
 		)
 	end
 
@@ -707,6 +755,7 @@ end
 local function splitEntriesByCategory(entries: { InventoryEntry }): { [InventoryCategory]: { InventoryEntry } }
 	local grouped: { [InventoryCategory]: { InventoryEntry } } = {
 		Items = {},
+		Consumables = {},
 		Armor = {},
 		Weapons = {},
 	}
@@ -738,7 +787,9 @@ end
 local function buildCategoryContent(
 	entries: { InventoryEntry },
 	selectedEntryId: string?,
-	hotbarInfoByEntryId: { [string]: HotbarInfo }
+	hotbarInfoByEntryId: { [string]: HotbarInfo },
+	isLocked: boolean,
+	filterMode: InventoryFilterMode
 ): { [string]: any }
 	local grouped = splitEntriesByCategory(entries)
 	local children = {
@@ -750,7 +801,10 @@ local function buildCategoryContent(
 
 	local order = 1
 	local tileOrderOffset = 0
-	for _, categoryName in ipairs({ "Items", "Armor", "Weapons" }) do
+	local categories = if filterMode == "ItemsOnly"
+		then { "Items" }
+		else { "Items", "Consumables", "Armor", "Weapons" }
+	for _, categoryName in ipairs(categories) do
 		local categoryEntries = grouped[categoryName :: InventoryCategory]
 		children["Header_" .. categoryName] = categoryHeader(categoryName, order)
 		order += 1
@@ -783,7 +837,7 @@ local function buildCategoryContent(
 				Tiles = React.createElement(
 					React.Fragment,
 					nil,
-					buildTiles(categoryEntries, selectedEntryId, hotbarInfoByEntryId, tileOrderOffset)
+					buildTiles(categoryEntries, selectedEntryId, hotbarInfoByEntryId, tileOrderOffset, isLocked)
 				),
 			})
 			tileOrderOffset += #categoryEntries
@@ -794,45 +848,11 @@ local function buildCategoryContent(
 	return children
 end
 
-local function buildPermanentItemSlots(): { [string]: any }
-	local children = {
-		Layout = React.createElement("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			Padding = UDim.new(0, 8),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-		}),
-	}
-
-	for slot = 1, BOTTOM_SLOTS_COUNT do
-		children["Slot_" .. tostring(slot)] = React.createElement("Frame", {
-			BackgroundColor3 = FOREST_TILE_BACKGROUND,
-			BackgroundTransparency = 0.1,
-			BorderSizePixel = 0,
-			LayoutOrder = slot,
-			Size = UDim2.fromOffset(70, 44),
-		}, {
-			Stroke = React.createElement("UIStroke", {
-				Color = FOREST_PANEL_STROKE,
-				Thickness = 1,
-				Transparency = 0.25,
-			}),
-			Label = React.createElement("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Size = UDim2.fromScale(1, 1),
-				Text = ("Item %d"):format(slot),
-				TextColor3 = FOREST_MUTED_TEXT,
-				TextSize = 11,
-			}),
-		})
-	end
-
-	return children
-end
-
-local function WardrobeInventoryPanel()
+local function WardrobeInventoryPanel(props: {
+	IsLocked: boolean?,
+	FilterMode: InventoryFilterMode?,
+	TitleText: string?,
+})
 	local inventory, setInventory = React.useState(function()
 		return InventoryServiceClient.GetInventory()
 	end)
@@ -884,26 +904,37 @@ local function WardrobeInventoryPanel()
 	end, {})
 
 	local entries, hotbarInfoByEntryId = getDisplayEntries(inventory, loadout)
+	local isLocked = props.IsLocked == true
+	local filterMode = props.FilterMode or "Full"
 	local selectedEntryId = if selectedItem and selectedItem.Source == "Inventory" then selectedItem.EntryId else nil
-	local itemCount = #entries
-	local gridRowCount = math.max(MIN_GRID_ROWS, math.ceil(itemCount / GRID_COLUMNS))
+	local visibleEntryCount = 0
+	if filterMode == "ItemsOnly" then
+		for _, entry in ipairs(entries) do
+			if getEntryCategory(entry) == "Items" then
+				visibleEntryCount += 1
+			end
+		end
+	else
+		visibleEntryCount = #entries
+	end
+	local gridRowCount = math.max(MIN_GRID_ROWS, math.ceil(visibleEntryCount / GRID_COLUMNS))
 	local minimumCanvasHeight = gridRowCount * TILE_SIZE
 		+ math.max(0, gridRowCount - 1) * TILE_PADDING
 		+ (GRID_INSET * 2)
 	local titleSignImageTransparency = if TITLE_SIGN_IMAGE == "" then 1 else 0
 	local titleSignBackgroundTransparency = if TITLE_SIGN_IMAGE == "" then 0.18 else 1
-	local listChildren = if itemCount == 0
+	local listChildren = if visibleEntryCount == 0
 		then {
 			Empty = React.createElement("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.Gotham,
 				Size = UDim2.new(1, 0, 0, 48),
-				Text = "No inventory items",
+				Text = if filterMode == "ItemsOnly" then "No items" else "No inventory entries",
 				TextColor3 = FOREST_MUTED_TEXT,
 				TextSize = 18,
 			}),
 		}
-		else buildCategoryContent(entries, selectedEntryId, hotbarInfoByEntryId)
+		else buildCategoryContent(entries, selectedEntryId, hotbarInfoByEntryId, isLocked, filterMode)
 
 	return React.createElement("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -941,7 +972,7 @@ local function WardrobeInventoryPanel()
 				Position = UDim2.fromOffset(0, LIST_TOP),
 				ScrollBarImageColor3 = FOREST_PANEL_STROKE,
 				ScrollBarThickness = GRID_SCROLLBAR_GUTTER,
-				Size = UDim2.new(1, 0, 1, -(LIST_TOP + LIST_BOTTOM_INSET)),
+				Size = UDim2.new(1, 0, 1, -(LIST_TOP + GRID_INSET)),
 				ZIndex = 2,
 			}, {
 				Padding = React.createElement("UIPadding", {
@@ -951,22 +982,6 @@ local function WardrobeInventoryPanel()
 					PaddingTop = UDim.new(0, GRID_INSET),
 				}),
 				Content = React.createElement(React.Fragment, nil, listChildren),
-			}),
-			PermanentItemSlots = React.createElement("Frame", {
-				AnchorPoint = Vector2.new(0.5, 1),
-				BackgroundColor3 = FOREST_LABEL_BACKGROUND,
-				BackgroundTransparency = 0.08,
-				BorderSizePixel = 0,
-				Position = UDim2.new(0.5, 0, 1, -GRID_INSET),
-				Size = UDim2.new(1, -(GRID_INSET * 2), 0, BOTTOM_SLOTS_HEIGHT),
-				ZIndex = 4,
-			}, {
-				Stroke = React.createElement("UIStroke", {
-					Color = FOREST_PANEL_STROKE,
-					Thickness = 1,
-					Transparency = 0.28,
-				}),
-				Slots = React.createElement(React.Fragment, nil, buildPermanentItemSlots()),
 			}),
 		}),
 
@@ -993,7 +1008,7 @@ local function WardrobeInventoryPanel()
 				Font = Enum.Font.GothamBold,
 				Position = UDim2.fromScale(0.5, TITLE_SIGN_TEXT_CENTER_Y),
 				Size = UDim2.new(1, -24, 0, TITLE_SIGN_TEXT_HEIGHT),
-				Text = "Inventory",
+				Text = props.TitleText or "Inventory",
 				TextColor3 = FOREST_TEXT,
 				TextSize = 22,
 				TextStrokeColor3 = FOREST_SHADOW,

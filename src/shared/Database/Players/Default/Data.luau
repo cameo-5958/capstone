@@ -2,8 +2,15 @@ return {
 	["Name"] = "Player",
 	["__Animations"] = {
 		["Backstep"] = "rbxassetid://127716827513435",
+		["BowReload"] = "rbxassetid://105331018789938",
+		["BowShot"] = {
+			"rbxassetid://135215634088644",
+			"rbxassetid://127584242031977",
+			"rbxassetid://117890025835582",
+		},
 		["Dash"] = "rbxassetid://129646378332732",
 		["Idle"] = "rbxassetid://136309039087373",
+		["IdleBow"] = "rbxassetid://86131112268548",
 		["IdleClaymore"] = "rbxassetid://85891353109660",
 		["IdleSpear"] = "rbxassetid://86995338874823",
 		["Walk"] = "rbxassetid://100786776050944",

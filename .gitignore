@@ -12,3 +12,4 @@ Packages/
 
 # Ignore documentation in root file
 /*.md
+/.vscode/*

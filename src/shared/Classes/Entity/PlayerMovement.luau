@@ -144,7 +144,10 @@ local function GetDefaultAttackContext(): { [string]: any }
 	}
 end
 
-local function MergeAttackContext(baseContext: { [string]: any }?, overrideContext: { [string]: any }?): { [string]: any }
+local function MergeAttackContext(
+	baseContext: { [string]: any }?,
+	overrideContext: { [string]: any }?
+): { [string]: any }
 	local merged = table.clone(baseContext or {})
 	if overrideContext then
 		for key, value in pairs(overrideContext) do
@@ -168,7 +171,8 @@ local function GetResolvedComboAttackContext(
 	equippedWeapon: { [string]: any }?,
 	comboAttack: { [string]: any }?
 ): { [string]: any }
-	local resolvedContext = MergeAttackContext(GetDefaultAttackContext(), equippedWeapon and equippedWeapon.AttackContext or nil)
+	local resolvedContext =
+		MergeAttackContext(GetDefaultAttackContext(), equippedWeapon and equippedWeapon.AttackContext or nil)
 	if comboAttack == nil then
 		return resolvedContext
 	end
@@ -258,6 +262,16 @@ local function CollectAllComboAnimationIds(): { string }
 	return animationIds
 end
 
+local function IsBowEquipped(): boolean
+	local character = Players.LocalPlayer.Character
+	return character ~= nil and character:GetAttribute("ForceFaceCamera") == true
+end
+
+local function HasBowEquipped(): boolean
+	local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
+	return equippedWeapon ~= nil and equippedWeapon.Class == "Bow"
+end
+
 local AllComboAnimationIds = CollectAllComboAnimationIds()
 
 local function IsActionAnimationPlaying(self: MovementEngine): boolean
@@ -280,12 +294,21 @@ local function IsActionAnimationPlaying(self: MovementEngine): boolean
 		table.insert(activeAnimationIds, backstepAnimation)
 	end
 
-	return AnimationServiceClient.IsAnyLocalAnimationPlaying(activeAnimationIds)
-end
+	-- Add bow shot animation if bow is equipped
+	if HasBowEquipped() then
+		local bowShotAnim = self.__Animations["BowShot"]
+		if bowShotAnim then
+			if type(bowShotAnim) == "table" then
+				for _, animId in ipairs(bowShotAnim) do
+					table.insert(activeAnimationIds, animId)
+				end
+			else
+				table.insert(activeAnimationIds, bowShotAnim)
+			end
+		end
+	end
 
-local function IsBowEquipped(): boolean
-	local character = Players.LocalPlayer.Character
-	return character ~= nil and character:GetAttribute("ForceFaceCamera") == true
+	return AnimationServiceClient.IsAnyLocalAnimationPlaying(activeAnimationIds)
 end
 
 local function GetCameraRelativeDashDirection(rootPart: BasePart): (Vector3, boolean)
@@ -377,7 +400,7 @@ function MovementEngine.lnew(): MovementEngine
 	self.RootPart = chr.PrimaryPart :: Part
 	self.Player = lp
 	self.Speed = humanoid:GetAttribute("EntitySpeed") or humanoid.WalkSpeed
-	self.__Animations = table.clone(PlayerConfig.__Animations or {});
+	self.__Animations = table.clone(PlayerConfig.__Animations or {})
 	local movement = (self :: any) :: MovementEngine
 	movement:init()
 
@@ -607,6 +630,9 @@ function MovementEngine.GetAnimation(self: MovementEngine, animation: string): s
 	if animation == "Idle" then
 		local equippedWeapon = WeaponServiceClient.GetEquippedWeaponData()
 		local weaponClass = equippedWeapon and equippedWeapon.Class or "Sword"
+		if weaponClass == "Bow" and self.__Animations["IdleBow"] then
+			return self.__Animations["IdleBow"]
+		end
 		if weaponClass == "Claymore" and self.__Animations["IdleClaymore"] then
 			return self.__Animations["IdleClaymore"]
 		end
@@ -651,9 +677,7 @@ function MovementEngine.UpdateMovementAnimation(self: MovementEngine)
 	end
 
 	local isActivelyWalking = self.Humanoid.MoveDirection.Magnitude > 0.05
-	local canPlayLocomotion = self:IsMovementEnabled()
-		and self:IsActionEnabled()
-		and self.Character.Parent ~= nil
+	local canPlayLocomotion = self:IsMovementEnabled() and self:IsActionEnabled() and self.Character.Parent ~= nil
 	if not canPlayLocomotion or IsActionAnimationPlaying(self) then
 		StopCurrentLocomotionAnimation(self)
 		return
@@ -669,7 +693,10 @@ function MovementEngine.UpdateMovementAnimation(self: MovementEngine)
 		desiredAnimationId = idleAnimation
 	end
 
-	if self.CurrentLocomotionAnimation == desiredAnimation and self.CurrentLocomotionAnimationId == desiredAnimationId then
+	if
+		self.CurrentLocomotionAnimation == desiredAnimation
+		and self.CurrentLocomotionAnimationId == desiredAnimationId
+	then
 		return
 	end
 

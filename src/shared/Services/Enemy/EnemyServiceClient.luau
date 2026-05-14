@@ -16,6 +16,12 @@ type Entity = EntityTypes.Entity
 local __Enemies: {
 	[string]: Entity,
 } = {}
+local __PendingEnemies: {
+	[string]: {
+		Entity: Entity,
+		QueuedAt: number,
+	},
+} = {}
 local __EnemyTags: {
 	[string]: BillboardGui,
 } = {}
@@ -30,7 +36,8 @@ local __DamageIndicators: {
 		BaseTextSize: number,
 		RotationAmplitude: number,
 	},
-} = {}
+} =
+	{}
 local __AttackPredictors: {
 	[string]: {
 		Part: Part,
@@ -39,7 +46,8 @@ local __AttackPredictors: {
 		ClearAt: number,
 		PredictorColor: Color3?,
 	},
-} = {}
+} =
+	{}
 local __LookTargets: {
 	[string]: Vector3?,
 } = {}
@@ -55,7 +63,8 @@ local __AttackHitboxes: {
 		HitboxSize: Vector3,
 		HitboxOffset: CFrame,
 	},
-} = {}
+} =
+	{}
 local __HopShakeState: {
 	[string]: {
 		Phase: number,
@@ -64,6 +73,7 @@ local __HopShakeState: {
 } = {}
 local LOCAL_LINEAR_VELOCITY_NAME = "ClientLinearVelocity"
 local DAMAGE_INDICATOR_DURATION = 0.7
+local PENDING_INFLATE_TIMEOUT = 3
 local ClearAttackHitbox: (uuid: string) -> ()
 local ClearAttackPredictor: (uuid: string) -> ()
 local DestroyDamageIndicator: (indicatorId: string) -> ()
@@ -111,19 +121,20 @@ local function DestroyEnemyTag(uuid: string)
 	__EnemyTags[uuid] = nil
 end
 
-local function DestroyEnemyArtifacts(uuid: string)
-	DestroyEnemyTag(uuid)
-	ClearAttackHitbox(uuid)
-	ClearAttackPredictor(uuid)
-	__HopShakeState[uuid] = nil
-end
-
 local function DestroyEnemyDamageIndicators(uuid: string)
 	for indicatorId in pairs(__DamageIndicators) do
 		if string.sub(indicatorId, 1, #uuid) == uuid then
 			DestroyDamageIndicator(indicatorId)
 		end
 	end
+end
+
+local function DestroyEnemyArtifacts(uuid: string)
+	DestroyEnemyTag(uuid)
+	DestroyEnemyDamageIndicators(uuid)
+	ClearAttackHitbox(uuid)
+	ClearAttackPredictor(uuid)
+	__HopShakeState[uuid] = nil
 end
 
 function DestroyDamageIndicator(indicatorId: string)
@@ -238,6 +249,53 @@ local function EnsureEnemyTag(uuid: string, ent: Entity): BillboardGui?
 	return billboard
 end
 
+local function UpdateEnemyTag(uuid: string, ent: Entity)
+	local tag = EnsureEnemyTag(uuid, ent)
+	if not tag then
+		return
+	end
+
+	local container = tag:FindFirstChild("Container")
+	if not container then
+		return
+	end
+
+	local panel = container:FindFirstChild("Panel") :: Frame?
+	if not panel then
+		return
+	end
+
+	local title = panel:FindFirstChild("Title") :: TextLabel?
+	local healthText = panel:FindFirstChild("HealthText") :: TextLabel?
+	local healthBarBackground = panel:FindFirstChild("HealthBarBackground") :: Frame?
+	local healthBarFill = healthBarBackground and healthBarBackground:FindFirstChild("HealthBarFill") :: Frame?
+	if not title or not healthText or not healthBarBackground or not healthBarFill then
+		return
+	end
+
+	local currentHealth = ent.__Stats.Health
+	local maxHealth = ent.__Stats.MaxHealth
+	local healthRatio = if maxHealth > 0 then math.clamp(currentHealth / maxHealth, 0, 1) else 0
+
+	title.Text = ("[%s] %s"):format(FormatStatValue(GetEnemyDisplayLevel(ent)), ent.Name)
+	healthBarFill.Visible = healthRatio > 0
+	if healthRatio > 0 then
+		healthBarFill.Size = UDim2.new(healthRatio, -2, 1, -2)
+	end
+end
+
+local function TryInflateEnemy(uuid: string, ent: Entity): boolean
+	local inflated = Entity.Inflate(ent)
+	if not inflated then
+		return false
+	end
+
+	__PendingEnemies[uuid] = nil
+	__Enemies[uuid] = inflated
+	UpdateEnemyTag(uuid, inflated)
+	return true
+end
+
 local function ShowDamageIndicator(uuid: string, ent: Entity, damage: number, isCrit: boolean?)
 	local adornee = GetTagAdornee(ent)
 	if not adornee then
@@ -279,41 +337,6 @@ local function ShowDamageIndicator(uuid: string, ent: Entity, damage: number, is
 		BaseTextSize = 24,
 		RotationAmplitude = if isCrit then 11 else 4,
 	}
-end
-
-local function UpdateEnemyTag(uuid: string, ent: Entity)
-	local tag = EnsureEnemyTag(uuid, ent)
-	if not tag then
-		return
-	end
-
-	local container = tag:FindFirstChild("Container")
-	if not container then
-		return
-	end
-
-	local panel = container:FindFirstChild("Panel") :: Frame?
-	if not panel then
-		return
-	end
-
-	local title = panel:FindFirstChild("Title") :: TextLabel?
-	local healthText = panel:FindFirstChild("HealthText") :: TextLabel?
-	local healthBarBackground = panel:FindFirstChild("HealthBarBackground") :: Frame?
-	local healthBarFill = healthBarBackground and healthBarBackground:FindFirstChild("HealthBarFill") :: Frame?
-	if not title or not healthText or not healthBarBackground or not healthBarFill then
-		return
-	end
-
-	local currentHealth = ent.__Stats.Health
-	local maxHealth = ent.__Stats.MaxHealth
-	local healthRatio = if maxHealth > 0 then math.clamp(currentHealth / maxHealth, 0, 1) else 0
-
-	title.Text = ("[%s] %s"):format(FormatStatValue(GetEnemyDisplayLevel(ent)), ent.Name)
-	healthBarFill.Visible = healthRatio > 0
-	if healthRatio > 0 then
-		healthBarFill.Size = UDim2.new(healthRatio, -2, 1, -2)
-	end
 end
 
 local function IsEnemyAlive(ent: Entity?): boolean
@@ -493,6 +516,7 @@ API.OnClientEvent:Connect(function(ds: { [string]: { [string]: Entity } })
 	task.delay(0.5, function()
 		if ds["Remove"] then
 			for uuid in pairs(ds["Remove"]) do
+				__PendingEnemies[uuid] = nil
 				__Enemies[uuid] = nil
 				DestroyEnemyArtifacts(uuid)
 			end
@@ -500,10 +524,13 @@ API.OnClientEvent:Connect(function(ds: { [string]: { [string]: Entity } })
 
 		-- Create
 		for uuid, ent in pairs(ds["Create"] or {}) do
-			-- Cast to Entity to give functionality back
-			local inflated = Entity.Inflate(ent)
-			__Enemies[uuid] = inflated
-			UpdateEnemyTag(uuid, inflated)
+			if not TryInflateEnemy(uuid, ent) then
+				__Enemies[uuid] = nil
+				__PendingEnemies[uuid] = {
+					Entity = ent,
+					QueuedAt = workspace:GetServerTimeNow(),
+				}
+			end
 		end
 	end)
 end)
@@ -603,6 +630,20 @@ Handler.OnClientEvent:Connect(function(action: string, data: { [string]: any })
 end)
 
 RunService.Heartbeat:Connect(function(dt: number)
+	local now = workspace:GetServerTimeNow()
+
+	for uuid, pending in pairs(__PendingEnemies) do
+		if TryInflateEnemy(uuid, pending.Entity) then
+			continue
+		end
+
+		if now - pending.QueuedAt >= PENDING_INFLATE_TIMEOUT then
+			__PendingEnemies[uuid] = nil
+			__Enemies[uuid] = nil
+			DestroyEnemyArtifacts(uuid)
+		end
+	end
+
 	for uuid, target in pairs(__LookTargets) do
 		local ent = __Enemies[uuid]
 		if not target or not ent or not ent.Character or not ent.Character.PrimaryPart then
@@ -626,7 +667,6 @@ RunService.Heartbeat:Connect(function(dt: number)
 		end
 	end
 
-	local now = workspace:GetServerTimeNow()
 	for indicatorId, indicator in pairs(__DamageIndicators) do
 		local elapsed = now - indicator.StartedAt
 		local alpha = math.clamp(elapsed / indicator.Duration, 0, 1)
@@ -635,11 +675,8 @@ RunService.Heartbeat:Connect(function(dt: number)
 			continue
 		end
 
-		indicator.Gui.StudsOffsetWorldSpace = Vector3.new(
-			indicator.BaseOffset.X,
-			indicator.BaseOffset.Y + (elapsed * 0.45),
-			indicator.BaseOffset.Z
-		)
+		indicator.Gui.StudsOffsetWorldSpace =
+			Vector3.new(indicator.BaseOffset.X, indicator.BaseOffset.Y + (elapsed * 0.45), indicator.BaseOffset.Z)
 		indicator.Label.Rotation = math.sin(elapsed * 12) * indicator.RotationAmplitude * indicator.Direction
 		indicator.Label.TextTransparency = alpha
 		indicator.Label.TextStrokeTransparency = math.min(1, 0.4 + alpha)

@@ -6,11 +6,20 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local PlayerConfig = require(ReplicatedStorage.Database.Players.Default.Data)
+local Signal = require(ReplicatedStorage.Classes.Modifier.Signal)
 local SerializedViewCamera = require(ReplicatedStorage.Viewports.Forest.Viewpoints.ViewCamera)
 local React = require(ReplicatedStorage.Packages.react)
 local ReactRoblox = require(ReplicatedStorage.Packages["react-roblox"])
+local InventoryServiceClient = require(ReplicatedStorage.Services.Inventory.InventoryServiceClient)
+local ItemLoadoutServiceClient = require(ReplicatedStorage.Services.ItemLoadout.ItemLoadoutServiceClient)
+local WeaponServiceClient = require(ReplicatedStorage.Services.Weapon.WeaponServiceClient)
+local WorldServiceClient = require(ReplicatedStorage.Services.World.WorldServiceClient)
+local ShopServiceClient = require(ReplicatedStorage.Services.Shop.ShopServiceClient)
 local WardrobeInventoryPanel = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeInventoryPanel)
 local WardrobeOrbitBillboards = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeOrbitBillboards)
+local WardrobePreviewLoader = require(ReplicatedStorage.Viewports.Wardrobe.WardrobePreviewLoader)
+local WardrobeCraftingPanel = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeCraftingPanel)
+local WardrobeReadyPanel = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeReadyPanel)
 local WardrobeSelection = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeSelection)
 local WardrobeStatsPanel = require(ReplicatedStorage.Viewports.Wardrobe.WardrobeStatsPanel)
 
@@ -41,6 +50,7 @@ local orbitBillboardsRoot: any? = nil
 local orbitBillboardsContainer: Folder? = nil
 local wardrobeGuiRoot: any? = nil
 local wardrobeGui: ScreenGui? = nil
+local startStateConnection: RBXScriptConnection? = nil
 local isVisible = false
 local previousCurrentCamera: Camera? = nil
 local previousCameraType: Enum.CameraType? = nil
@@ -52,6 +62,10 @@ local activeViewCameraCFrame: CFrame? = nil
 local activeViewCameraFocus: CFrame? = nil
 local activeViewCameraFieldOfView: number? = nil
 local hiddenGuiStates: { [string]: boolean } = {}
+local visibleSessionId = 0
+local interfaceReadySignal = Signal.new()
+local isInterfaceReady = false
+local WARDROBE_PREVIEW_SYNC_TIMEOUT = 5
 local PLAYER_SLOT_MARKER_NAMES = {
 	"Person1",
 	"Person2",
@@ -67,6 +81,64 @@ local PLAYER_SLOT_MARKER_NAMES = {
 	"PlayerSlot4",
 }
 local TEMP_FILL_OTHER_PLAYER_SLOTS_WITH_LOCAL_PREVIEW = true
+local LEFT_PANEL_WIDTH = 500
+local LEFT_PANEL_HEIGHT = 420
+local LEFT_PANEL_LEFT_MARGIN = 24
+local LEFT_PANEL_CENTER_Y_OFFSET = 0
+local WARDROBE_NAV_Y_OFFSET = 222
+local WARDROBE_NAV_BUTTON_WIDTH = 158
+local WARDROBE_NAV_BUTTON_HEIGHT = 38
+local WARDROBE_NAV_GAP = 12
+local NAV_WOOD = Color3.fromRGB(46, 31, 18)
+local NAV_WOOD_ACTIVE = Color3.fromRGB(84, 55, 26)
+local NAV_STROKE = Color3.fromRGB(160, 118, 66)
+local NAV_TEXT = Color3.fromRGB(241, 226, 194)
+local NAV_TEXT_MUTED = Color3.fromRGB(148, 129, 104)
+
+type WardrobePage = "Inventory" | "Crafting"
+type ShopCatalog = ShopServiceClient.ShopCatalog
+
+local function hasInitialWardrobeData(): boolean
+	return InventoryServiceClient.HasReceivedInitialInventory()
+		and WeaponServiceClient.HasReceivedInitialLoadout()
+		and ItemLoadoutServiceClient.HasReceivedInitialLoadout()
+end
+
+local function setInterfaceReady(nextValue: boolean): ()
+	if isInterfaceReady == nextValue then
+		return
+	end
+
+	isInterfaceReady = nextValue
+	interfaceReadySignal:Fire(isInterfaceReady)
+end
+
+local function waitForInitialWardrobeData(timeoutSeconds: number): boolean
+	local deadline = os.clock() + timeoutSeconds
+
+	InventoryServiceClient.RequestInventory()
+	WeaponServiceClient.RequestLoadout()
+	ItemLoadoutServiceClient.RequestLoadout()
+
+	while os.clock() < deadline do
+		if hasInitialWardrobeData() then
+			return true
+		end
+
+		RunService.Heartbeat:Wait()
+	end
+
+	return hasInitialWardrobeData()
+end
+
+local function warmWardrobePreviews(): ()
+	waitForInitialWardrobeData(WARDROBE_PREVIEW_SYNC_TIMEOUT)
+	WardrobePreviewLoader.WarmupWardrobeAssets(
+		InventoryServiceClient.GetInventory(),
+		WeaponServiceClient.GetLoadoutData(),
+		ItemLoadoutServiceClient.GetLoadoutData()
+	)
+end
 
 local function setPlayerVisionLightEnabled(isEnabled: boolean): ()
 	local character = Players.LocalPlayer.Character
@@ -86,7 +158,8 @@ local function setPlayerVisionLightEnabled(isEnabled: boolean): ()
 end
 
 local function getWardrobeFolder(): Instance?
-	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
+	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports")
+		or ReplicatedStorage:WaitForChild("Viewports", 5)
 	if not viewportFolder then
 		warn("WardrobeViewport: ReplicatedStorage.Viewports was not found.")
 		return nil
@@ -102,13 +175,15 @@ local function getWardrobeFolder(): Instance?
 end
 
 local function getForestFolder(): Instance?
-	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
+	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports")
+		or ReplicatedStorage:WaitForChild("Viewports", 5)
 	if not viewportFolder then
 		warn("WardrobeViewport: ReplicatedStorage.Viewports was not found.")
 		return nil
 	end
 
-	local forestFolder = viewportFolder:FindFirstChild(FOREST_FOLDER_NAME) or viewportFolder:WaitForChild(FOREST_FOLDER_NAME, 5)
+	local forestFolder = viewportFolder:FindFirstChild(FOREST_FOLDER_NAME)
+		or viewportFolder:WaitForChild(FOREST_FOLDER_NAME, 5)
 	if not forestFolder then
 		return nil
 	end
@@ -117,7 +192,8 @@ local function getForestFolder(): Instance?
 end
 
 local function getViewportsRoot(): Instance?
-	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports") or ReplicatedStorage:WaitForChild("Viewports", 5)
+	local viewportFolder = ReplicatedStorage:FindFirstChild("Viewports")
+		or ReplicatedStorage:WaitForChild("Viewports", 5)
 	if not viewportFolder then
 		warn("WardrobeViewport: ReplicatedStorage.Viewports was not found.")
 		return nil
@@ -386,6 +462,8 @@ local function mountOrbitBillboards(tavernSet: Model, target: Model): ()
 end
 
 local function unmountWardrobeGui(): ()
+	setInterfaceReady(false)
+
 	if wardrobeGui then
 		wardrobeGui.Enabled = false
 	end
@@ -432,15 +510,229 @@ local function setNormalHudVisible(isEnabled: boolean): ()
 end
 
 local function renderWardrobeGui()
-	return React.createElement(React.Fragment, nil, {
-		Stats = React.createElement(WardrobeStatsPanel),
-		Inventory = React.createElement(WardrobeInventoryPanel),
-	})
+	local function WardrobeRoot()
+		local activePage, setActivePage = React.useState("Inventory" :: WardrobePage)
+		local shopCatalog, setShopCatalog = React.useState(function()
+			return ShopServiceClient.GetCatalog() :: ShopCatalog
+		end)
+		local isLocked = WorldServiceClient.IsWardrobeReady() and not WorldServiceClient.IsMatchStarted()
+
+		local function iconButton(
+			layoutOrder: number,
+			labelText: string,
+			isActive: boolean,
+			isEnabled: boolean,
+			iconFactory: () -> any,
+			onActivated: (() -> ())?
+		)
+			return React.createElement("TextButton", {
+				Active = isEnabled,
+				AutoButtonColor = isEnabled,
+				BackgroundColor3 = if isActive then NAV_WOOD_ACTIVE else NAV_WOOD,
+				BackgroundTransparency = if isEnabled then 0.06 else 0.26,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = layoutOrder,
+				Selectable = isEnabled,
+				Size = UDim2.fromOffset(WARDROBE_NAV_BUTTON_WIDTH, WARDROBE_NAV_BUTTON_HEIGHT),
+				Text = "",
+				ZIndex = 40,
+				[React.Event.Activated] = function()
+					if isEnabled and onActivated then
+						onActivated()
+					end
+				end,
+			}, {
+				Corner = React.createElement("UICorner", {
+					CornerRadius = UDim.new(0, 10),
+				}),
+				Stroke = React.createElement("UIStroke", {
+					Color = NAV_STROKE,
+					Thickness = if isActive then 2 else 1,
+					Transparency = if isEnabled then 0.14 else 0.55,
+				}),
+				Icon = React.createElement("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(24, WARDROBE_NAV_BUTTON_HEIGHT * 0.5),
+					Size = UDim2.fromOffset(26, 26),
+					ZIndex = 41,
+				}, iconFactory()),
+				Label = React.createElement("TextLabel", {
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(48, 0),
+					Size = UDim2.new(1, -56, 1, 0),
+					Text = labelText,
+					TextColor3 = if isEnabled then NAV_TEXT else NAV_TEXT_MUTED,
+					TextSize = 14,
+					Font = Enum.Font.GothamBold,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ZIndex = 41,
+				}),
+			})
+		end
+
+		local function inventoryIcon()
+			return {
+				TopLeft = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.fromOffset(9, 9),
+					ZIndex = 42,
+				}),
+				TopRight = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(13, 0),
+					Size = UDim2.fromOffset(9, 9),
+					ZIndex = 42,
+				}),
+				BottomLeft = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, 13),
+					Size = UDim2.fromOffset(9, 9),
+					ZIndex = 42,
+				}),
+				BottomRight = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(13, 13),
+					Size = UDim2.fromOffset(9, 9),
+					ZIndex = 42,
+				}),
+			}
+		end
+
+		local function craftingIcon()
+			return {
+				Handle = React.createElement("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(7, 18),
+					Rotation = -40,
+					Size = UDim2.fromOffset(5, 18),
+					ZIndex = 42,
+				}),
+				Head = React.createElement("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(16, 8),
+					Rotation = -40,
+					Size = UDim2.fromOffset(16, 7),
+					ZIndex = 42,
+				}),
+				Block = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(15, 15),
+					Size = UDim2.fromOffset(8, 8),
+					ZIndex = 42,
+				}),
+			}
+		end
+
+		local function resultsIcon()
+			return {
+				Base = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT_MUTED,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(2, 18),
+					Size = UDim2.fromOffset(20, 4),
+					ZIndex = 42,
+				}),
+				BarOne = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT_MUTED,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(3, 10),
+					Size = UDim2.fromOffset(4, 8),
+					ZIndex = 42,
+				}),
+				BarTwo = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT_MUTED,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(10, 6),
+					Size = UDim2.fromOffset(4, 12),
+					ZIndex = 42,
+				}),
+				BarThree = React.createElement("Frame", {
+					BackgroundColor3 = NAV_TEXT_MUTED,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(17, 2),
+					Size = UDim2.fromOffset(4, 16),
+					ZIndex = 42,
+				}),
+			}
+		end
+
+		React.useEffect(function()
+			local catalogConnection = ShopServiceClient.GetCatalogChangedSignal():Connect(function(nextCatalog: ShopCatalog)
+				setShopCatalog(nextCatalog)
+			end)
+			ShopServiceClient.RequestCatalog()
+			setShopCatalog(ShopServiceClient.GetCatalog() :: ShopCatalog)
+
+			return function()
+				catalogConnection:Disconnect()
+			end
+		end, {})
+
+		return React.createElement(React.Fragment, nil, {
+			Stats = if activePage == "Inventory" then React.createElement(WardrobeStatsPanel, {
+				IsLocked = isLocked,
+			}) else nil,
+			Inventory = React.createElement(WardrobeInventoryPanel, {
+				IsLocked = isLocked,
+			}),
+			Crafting = if activePage == "Crafting" then React.createElement(WardrobeCraftingPanel, {
+				Catalog = shopCatalog,
+			}) else nil,
+			Navigation = React.createElement("Frame", {
+				AnchorPoint = Vector2.new(0, 0),
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				Position = UDim2.new(0, LEFT_PANEL_LEFT_MARGIN, 0.5, WARDROBE_NAV_Y_OFFSET),
+				Size = UDim2.fromOffset(
+					(WARDROBE_NAV_BUTTON_WIDTH * 3) + (WARDROBE_NAV_GAP * 2),
+					WARDROBE_NAV_BUTTON_HEIGHT
+				),
+				ZIndex = 39,
+			}, {
+				Layout = React.createElement("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					HorizontalAlignment = Enum.HorizontalAlignment.Center,
+					Padding = UDim.new(0, WARDROBE_NAV_GAP),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+				InventoryButton = iconButton(1, "Items", activePage == "Inventory", true, inventoryIcon, function()
+					setActivePage("Inventory")
+				end),
+				CraftingButton = iconButton(2, "Craft", activePage == "Crafting", true, craftingIcon, function()
+					setActivePage("Crafting")
+				end),
+				ResultsButton = iconButton(3, "Results", false, false, resultsIcon, nil),
+			}),
+			Ready = React.createElement(WardrobeReadyPanel, {
+				IsLocked = isLocked,
+			}),
+		})
+	end
+
+	return React.createElement(WardrobeRoot)
 end
 
 local function mountWardrobeGui(): ()
 	if wardrobeGuiRoot then
+		if wardrobeGui then
+			wardrobeGui.Enabled = true
+		end
 		wardrobeGuiRoot:render(renderWardrobeGui())
+		setInterfaceReady(true)
 		return
 	end
 
@@ -457,12 +749,12 @@ local function mountWardrobeGui(): ()
 
 	wardrobeGui = screenGui
 	wardrobeGuiRoot = root
+	setInterfaceReady(true)
 end
 
 local function mountPreviewCharacter(tavernSet: Model): ()
 	local playerPoint = findPlayerPoint(tavernSet)
 	if not playerPoint then
-		warn("WardrobeViewport: PlayerPoint slot 1 was not found on the wardrobe viewport set.")
 		return
 	end
 	local playerPointCFrame = playerPoint.CFrame
@@ -470,7 +762,7 @@ local function mountPreviewCharacter(tavernSet: Model): ()
 	clearPlayerSlotMarkers(tavernSet)
 
 	local preview = previewCharacter
-	if not preview then
+	while not preview do
 		local character = Players.LocalPlayer.Character
 		if character then
 			local wasArchivable = character.Archivable
@@ -483,11 +775,8 @@ local function mountPreviewCharacter(tavernSet: Model): ()
 				previewCharacter = preview
 			end
 		end
-	end
 
-	if not preview then
-		warn("WardrobeViewport: PreviewCharacter was not ready yet.")
-		return
+		task.wait()
 	end
 
 	local previousPreview = tavernSet:FindFirstChild(PREVIEW_CHARACTER_NAME)
@@ -639,7 +928,12 @@ local function bindViewCamera(tavernSet: Model): boolean
 
 		local activeViewCamera = findViewCamera(mountedTavernSet)
 		if activeViewCamera then
-			applyViewCamera(activeViewCamera, activeViewCamera.CFrame, activeViewCamera.Focus, activeViewCamera.FieldOfView)
+			applyViewCamera(
+				activeViewCamera,
+				activeViewCamera.CFrame,
+				activeViewCamera.Focus,
+				activeViewCamera.FieldOfView
+			)
 		end
 	end)
 
@@ -680,29 +974,46 @@ local function restoreCamera(): ()
 end
 
 function WardrobeViewport.Show(): boolean
+	visibleSessionId += 1
+	local sessionId = visibleSessionId
 	isVisible = true
+	setInterfaceReady(false)
 	WardrobeSelection.SetSelectedItem(nil)
 
-	local tavernSet = ensureTavernSet()
-	if not tavernSet then
-		isVisible = false
-		return false
-	end
+	task.spawn(function()
+		warmWardrobePreviews()
 
-	local didBindCamera = bindViewCamera(tavernSet)
-	if didBindCamera then
-		setPlayerVisionLightEnabled(false)
-		setNormalHudVisible(false)
-		mountWardrobeGui()
-	else
-		isVisible = false
-	end
+		if not isVisible or visibleSessionId ~= sessionId then
+			return
+		end
 
-	return didBindCamera
+		local tavernSet = ensureTavernSet()
+		if not tavernSet then
+			if visibleSessionId == sessionId then
+				isVisible = false
+				setInterfaceReady(false)
+			end
+			return
+		end
+
+		local didBindCamera = bindViewCamera(tavernSet)
+		if didBindCamera then
+			setPlayerVisionLightEnabled(false)
+			setNormalHudVisible(false)
+			mountWardrobeGui()
+		elseif visibleSessionId == sessionId then
+			isVisible = false
+			setInterfaceReady(false)
+		end
+	end)
+
+	return true
 end
 
 function WardrobeViewport.Hide(): ()
+	visibleSessionId += 1
 	isVisible = false
+	setInterfaceReady(false)
 	WardrobeSelection.SetSelectedItem(nil)
 	setPlayerVisionLightEnabled(true)
 	unmountWardrobeGui()
@@ -713,6 +1024,14 @@ end
 
 function WardrobeViewport.IsVisible(): boolean
 	return isVisible
+end
+
+function WardrobeViewport.IsInterfaceReady(): boolean
+	return isInterfaceReady
+end
+
+function WardrobeViewport.GetInterfaceReadyChangedSignal()
+	return interfaceReadySignal
 end
 
 local function createPreviewFromCurrentCharacter(): ()
@@ -737,5 +1056,11 @@ if Players.LocalPlayer.Character then
 end
 
 ensureTavernSet()
+
+startStateConnection = WorldServiceClient.GetStartStateChangedSignal():Connect(function()
+	if wardrobeGuiRoot then
+		wardrobeGuiRoot:render(renderWardrobeGui())
+	end
+end)
 
 return table.freeze(WardrobeViewport)

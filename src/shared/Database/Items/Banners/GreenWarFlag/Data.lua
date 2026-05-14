@@ -4,7 +4,7 @@ return {
 	Desc = "Places a green banner that reduces incoming damage to 80% while in range.",
 	Icon = "rbxassetid://119245437245957",
 	MaxStack = 8,
-	SpawnWith = 2,
+	SpawnWith = 0,
 	InventoryData = {
 		Category = "Banner",
 		Type = "Support",

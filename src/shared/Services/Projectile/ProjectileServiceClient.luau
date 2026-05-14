@@ -11,22 +11,54 @@ local warnedEndpointMissing = false
 local ActiveVisuals: { [number]: {
 	Position: Vector3,
 	Velocity: Vector3,
+	Speed: number,
 	GravityScale: number,
+	HomingStrength: number,
 	DistanceTravelled: number,
 	MaxDistance: number,
+	TargetRootPart: BasePart?,
 	Visual: BasePart,
 } } = {}
 
 local function createFallbackArrowVisual(): BasePart
 	local part = Instance.new("Part")
 	part.Name = "ProjectileArrowFallback"
-	part.Size = Vector3.new(0.25, 0.25, 2.2)
-	part.Material = Enum.Material.Metal
-	part.Color = Color3.fromRGB(184, 184, 194)
+	part.Size = Vector3.new(0.5, 0.5, 0.5)
+	part.Material = Enum.Material.Wood
+	part.Color = Color3.fromRGB(111, 78, 55)
 	part.Anchored = true
 	part.CanCollide = false
 	part.CanQuery = false
 	part.CanTouch = false
+	local frontAttachment = Instance.new("Attachment")
+	frontAttachment.Name = "TrailFront"
+	frontAttachment.Position = Vector3.new(0, 0, -0.2)
+	frontAttachment.Parent = part
+
+	local backAttachment = Instance.new("Attachment")
+	backAttachment.Name = "TrailBack"
+	backAttachment.Position = Vector3.new(0, 0, 0.2)
+	backAttachment.Parent = part
+
+	local trail = Instance.new("Trail")
+	trail.Name = "ProjectileTrail"
+	trail.Attachment0 = frontAttachment
+	trail.Attachment1 = backAttachment
+	trail.Color = ColorSequence.new(Color3.fromRGB(181, 130, 84), Color3.fromRGB(96, 67, 44))
+	trail.LightEmission = 0.15
+	trail.Lifetime = 0.12
+	trail.MinLength = 0
+	trail.FaceCamera = true
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(1, 0.85),
+	})
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.45),
+		NumberSequenceKeypoint.new(1, 0.1),
+	})
+	trail.Parent = part
+
 	return part
 end
 
@@ -59,16 +91,9 @@ local function SpawnProjectile(payload)
 		return
 	end
 
-	local sourceArrow = payload.SourceArrow
-
 	DestroyProjectile(payload.ProjectileId)
 
-	local clone: BasePart
-	if sourceArrow and sourceArrow:IsA("BasePart") then
-		clone = sourceArrow:Clone() :: BasePart
-	else
-		clone = createFallbackArrowVisual()
-	end
+	local clone = createFallbackArrowVisual()
 	clone.Name = "ProjectileArrow"
 	clone.Anchored = true
 	clone.CanCollide = false
@@ -79,9 +104,12 @@ local function SpawnProjectile(payload)
 	ActiveVisuals[payload.ProjectileId] = {
 		Position = payload.Position,
 		Velocity = payload.Velocity,
+		Speed = if typeof(payload.Speed) == "number" then payload.Speed else payload.Velocity.Magnitude,
 		GravityScale = if typeof(payload.GravityScale) == "number" then payload.GravityScale else 1,
+		HomingStrength = if typeof(payload.HomingStrength) == "number" then payload.HomingStrength else 0,
 		DistanceTravelled = 0,
 		MaxDistance = if typeof(payload.MaxDistance) == "number" then payload.MaxDistance else 80,
+		TargetRootPart = if payload.TargetRootPart and payload.TargetRootPart:IsA("BasePart") then payload.TargetRootPart else nil,
 		Visual = clone,
 	}
 	UpdateVisual(ActiveVisuals[payload.ProjectileId])
@@ -130,9 +158,25 @@ end)
 
 RunService.RenderStepped:Connect(function(dt: number)
 	for projectileId, projectile in pairs(ActiveVisuals) do
-		local gravity = Vector3.new(0, -workspace.Gravity * projectile.GravityScale, 0)
-		local nextVelocity = projectile.Velocity + gravity * dt
-		local nextPosition = projectile.Position + projectile.Velocity * dt + (gravity * (0.5 * dt * dt))
+		local targetRootPart = projectile.TargetRootPart
+		local hasTarget = targetRootPart ~= nil and targetRootPart.Parent ~= nil
+		local nextVelocity = projectile.Velocity
+		if hasTarget then
+			local desiredDirection = targetRootPart.Position + Vector3.new(0, 1.5, 0) - projectile.Position
+			if desiredDirection.Magnitude > 0.001 and projectile.Speed > 0.001 then
+				local desiredVelocity = desiredDirection.Unit * projectile.Speed
+				local blendAlpha = math.clamp(projectile.HomingStrength * dt, 0, 1)
+				nextVelocity = projectile.Velocity:Lerp(desiredVelocity, blendAlpha)
+				if nextVelocity.Magnitude > 0.001 then
+					nextVelocity = nextVelocity.Unit * projectile.Speed
+				end
+			end
+		end
+
+		local gravityScale = if hasTarget then 0 else projectile.GravityScale
+		local gravity = Vector3.new(0, -workspace.Gravity * gravityScale, 0)
+		nextVelocity += gravity * dt
+		local nextPosition = projectile.Position + nextVelocity * dt
 		projectile.DistanceTravelled += (nextPosition - projectile.Position).Magnitude
 		projectile.Position = nextPosition
 		projectile.Velocity = nextVelocity

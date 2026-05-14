@@ -1,4 +1,5 @@
 --!strict
+local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AnimationServiceServer = require(ReplicatedStorage.Services.Animation.AnimationServiceServer)
@@ -25,6 +26,12 @@ export type MovementEngine = SharedMovementEngine & {
 	EntityUUID: string,
 	FacingTarget: Vector3?,
 	LookAlign: AlignOrientation?,
+	__LastMoveTarget: Vector3?,
+	__LastRequestedMoveTarget: Vector3?,
+	__PathGoal: Vector3?,
+	__PathWaypoints: { PathWaypoint }?,
+	__PathComputedAt: number,
+	__NextPathComputeAt: number,
 	__Animations: { string: string },
 	LookAt: (MovementEngine, Vector3) -> (),
 	ClearLookAt: (MovementEngine) -> (),
@@ -39,12 +46,191 @@ export type MovementEngine = SharedMovementEngine & {
 	init: (MovementEngine) -> (),
 }
 
+local NAVIGATION_REPATH_INTERVAL = 0.3
+local NAVIGATION_GOAL_EPSILON = 3
+local DIRECT_MOVE_EPSILON = 1.5
+local MAX_DESTINATION_PROBE_DISTANCE = 3
+local DESTINATION_PROBE_OFFSETS = {
+	Vector3.zero,
+	Vector3.new(1, 0, 0),
+	Vector3.new(-1, 0, 0),
+	Vector3.new(0, 0, 1),
+	Vector3.new(0, 0, -1),
+	Vector3.new(1, 0, 1),
+	Vector3.new(1, 0, -1),
+	Vector3.new(-1, 0, 1),
+	Vector3.new(-1, 0, -1),
+}
+
+local function getNavigationIgnoreList(self: MovementEngine): { Instance }
+	local ignoreList = { self.Character }
+	local entitiesFolder = workspace:FindFirstChild("EntitiesFolder")
+	if entitiesFolder then
+		table.insert(ignoreList, entitiesFolder)
+	end
+	return ignoreList
+end
+
+local function makeNavigationRaycastParams(self: MovementEngine): RaycastParams
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = getNavigationIgnoreList(self)
+	params.RespectCanCollide = true
+	return params
+end
+
+local function makeDestinationOverlapParams(self: MovementEngine): OverlapParams
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = getNavigationIgnoreList(self)
+	params.MaxParts = 32
+	return params
+end
+
+local function getAgentRadius(self: MovementEngine): number
+	return math.max(1.5, math.max(self.RootPart.Size.X, self.RootPart.Size.Z) * 0.5)
+end
+
+local function getAgentHeight(self: MovementEngine): number
+	return math.max(4, self.RootPart.Size.Y + 2)
+end
+
+local function projectDestinationToGround(self: MovementEngine, requestedPosition: Vector3): Vector3?
+	local raycastParams = makeNavigationRaycastParams(self)
+	local probeRadius = math.max(1, math.min(MAX_DESTINATION_PROBE_DISTANCE, getAgentRadius(self)))
+	local desiredY = requestedPosition.Y
+
+	for _, unitOffset in ipairs(DESTINATION_PROBE_OFFSETS) do
+		local offset = unitOffset * probeRadius
+		local probe = requestedPosition + offset
+		local rayOrigin = Vector3.new(probe.X, desiredY + 24, probe.Z)
+		local groundHit = workspace:Raycast(rayOrigin, Vector3.new(0, -96, 0), raycastParams)
+		if groundHit then
+			local groundedPosition = Vector3.new(probe.X, groundHit.Position.Y + self.RootPart.Size.Y * 0.5, probe.Z)
+			local overlapParams = makeDestinationOverlapParams(self)
+			local clearanceSize = Vector3.new(
+				math.max(1.5, self.RootPart.Size.X * 0.9),
+				math.max(2, self.RootPart.Size.Y * 0.9),
+				math.max(1.5, self.RootPart.Size.Z * 0.9)
+			)
+			local overlaps = workspace:GetPartBoundsInBox(CFrame.new(groundedPosition), clearanceSize, overlapParams)
+			local blocked = false
+			for _, part in ipairs(overlaps) do
+				if part.CanCollide then
+					blocked = true
+					break
+				end
+			end
+
+			if not blocked then
+				return groundedPosition
+			end
+		end
+	end
+
+	return nil
+end
+
+local function hasDirectTravelPath(self: MovementEngine, destination: Vector3): boolean
+	local origin = self.RootPart.Position + Vector3.new(0, math.max(1, self.RootPart.Size.Y * 0.25), 0)
+	local direction = destination - origin
+	if direction.Magnitude <= DIRECT_MOVE_EPSILON then
+		return true
+	end
+
+	local result = workspace:Raycast(origin, direction, makeNavigationRaycastParams(self))
+	return result == nil
+end
+
+local function computePathWaypoints(self: MovementEngine, destination: Vector3): { PathWaypoint }?
+	local path = PathfindingService:CreatePath({
+		AgentRadius = getAgentRadius(self),
+		AgentHeight = getAgentHeight(self),
+		AgentCanJump = self.Humanoid.UseJumpPower == false or self.Humanoid.JumpPower > 0,
+		WaypointSpacing = math.max(3, getAgentRadius(self) * 1.5),
+	})
+
+	local ok, err = pcall(function()
+		path:ComputeAsync(self.RootPart.Position, destination)
+	end)
+	if not ok then
+		warn(string.format("[EntityMovement] Path compute failed for %s: %s", tostring(self), tostring(err)))
+		return nil
+	end
+
+	if path.Status ~= Enum.PathStatus.Success then
+		return nil
+	end
+
+	local waypoints = path:GetWaypoints()
+	if #waypoints == 0 then
+		return nil
+	end
+
+	return waypoints
+end
+
+local function chooseMoveTargetFromPath(self: MovementEngine, destination: Vector3): (Vector3?, Enum.PathWaypointAction?)
+	local now = os.clock()
+	local pathGoal = self.__PathGoal
+	local shouldRecompute = self.__PathWaypoints == nil
+		or pathGoal == nil
+		or (pathGoal - destination).Magnitude > NAVIGATION_GOAL_EPSILON
+		or now >= self.__NextPathComputeAt
+
+	if shouldRecompute then
+		self.__PathGoal = destination
+		self.__PathWaypoints = computePathWaypoints(self, destination)
+		self.__PathComputedAt = now
+		self.__NextPathComputeAt = now + NAVIGATION_REPATH_INTERVAL
+	end
+
+	local waypoints = self.__PathWaypoints
+	if not waypoints then
+		return nil, nil
+	end
+
+	local currentPosition = self.RootPart.Position
+	local minimumAdvanceDistance = math.max(1.5, getAgentRadius(self))
+	for _, waypoint in ipairs(waypoints) do
+		local waypointPosition = Vector3.new(waypoint.Position.X, destination.Y, waypoint.Position.Z)
+		if (waypointPosition - currentPosition).Magnitude > minimumAdvanceDistance then
+			return waypointPosition, waypoint.Action
+		end
+	end
+
+	return destination, waypoints[#waypoints].Action
+end
+
+local function resolveMoveTarget(self: MovementEngine, requestedPosition: Vector3): (Vector3?, Enum.PathWaypointAction?)
+	local groundedDestination = projectDestinationToGround(self, requestedPosition)
+	if not groundedDestination then
+		self.__PathGoal = nil
+		self.__PathWaypoints = nil
+		return nil, nil
+	end
+
+	if hasDirectTravelPath(self, groundedDestination) then
+		self.__PathGoal = nil
+		self.__PathWaypoints = nil
+		return groundedDestination, nil
+	end
+
+	return chooseMoveTargetFromPath(self, groundedDestination)
+end
+
 function MovementEngine.__tostring(self: MovementEngine): string
 	return "MovementEngine<" .. (self.EntityUUID or self.Character.Name) .. ">"
 end
 
 function MovementEngine.init(self: MovementEngine): ()
 	self.FacingTarget = nil
+	self.__LastMoveTarget = nil
+	self.__LastRequestedMoveTarget = nil
+	self.__PathGoal = nil
+	self.__PathWaypoints = nil
+	self.__PathComputedAt = 0
+	self.__NextPathComputeAt = 0
 	MovementShared.Init(self)
 	self.__SpeedChangedConnection = self.Entity:GetStatChangedSignal("Speed"):Connect(function(newValue: number)
 		self.Speed = newValue
@@ -249,10 +435,21 @@ function MovementEngine.MoveTo(self: MovementEngine, position: Vector3, lookAt: 
 		self:ClearLookAt()
 	end
 
-	self.Humanoid:MoveTo(position)
+	self.__LastRequestedMoveTarget = position
+	local resolvedTarget, waypointAction = resolveMoveTarget(self, position)
+	if not resolvedTarget then
+		resolvedTarget = self.RootPart.Position
+	end
+
+	self.__LastMoveTarget = resolvedTarget
+	if waypointAction == Enum.PathWaypointAction.Jump then
+		self.Humanoid.Jump = true
+	end
+
+	self.Humanoid:MoveTo(resolvedTarget)
 	Handler:FireAllClients("Move", {
 		UUID = self.EntityUUID,
-		Position = position,
+		Position = resolvedTarget,
 		LookAt = lookAt,
 	})
 end
@@ -291,6 +488,8 @@ end
 function MovementEngine.Destroy(self: MovementEngine)
 	self:CancelLinearVelocity()
 	self:ClearLookAt()
+	self.__PathGoal = nil
+	self.__PathWaypoints = nil
 
 	if self.DeferredCancelTask then
 		task.cancel(self.DeferredCancelTask)

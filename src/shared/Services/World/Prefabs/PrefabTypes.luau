@@ -38,13 +38,23 @@ export type TreasureSpawnMarkerConfig = {
 	PromptObjectText: string?,
 }
 
+export type HarvestSpawnMarkerConfig = {
+	Enabled: boolean?,
+	ItemId: string,
+	QuantityMin: number?,
+	QuantityMax: number?,
+	PromptActionText: string?,
+	PromptObjectText: string?,
+}
+
 export type PrefabSpawnMarker = {
 	Id: string,
-	Type: "Enemy" | "Treasure",
+	Type: "Enemy" | "Treasure" | "Harvest",
 	Offset: Vector3,
 	YawDegrees: number?,
 	Enemy: EnemySpawnMarkerConfig?,
 	Treasure: TreasureSpawnMarkerConfig?,
+	Harvest: HarvestSpawnMarkerConfig?,
 }
 
 export type PrefabDefinition = {

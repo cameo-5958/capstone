@@ -5,7 +5,7 @@ return {
 	["Rarity"] = "Refined",
 	["Icon"] = "rbxassetid://87392125700271",
 
-	["BaseDamage"] = 15,
+	["BaseDamage"] = 5,
 	["__Stats"] = {},
 	["Weight"] = 11,
 	["WeaponPassive"] = nil,

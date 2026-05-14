@@ -46,6 +46,7 @@ local function Build(parent: Instance, context: PrefabTypes.PrefabBuildContext):
 
 	PrefabUtils.addPart(model, "ChestBase", pivot * CFrame.new(0, 1.75, 0), Vector3.new(3.8, 2.5, 2.4), Enum.Material.WoodPlanks, Color3.fromRGB(93, 64, 40), 0, nil)
 	PrefabUtils.addPart(model, "ChestLid", pivot * CFrame.new(0, 3.25, 0), Vector3.new(3.8, 1.0, 2.5), Enum.Material.WoodPlanks, Color3.fromRGB(110, 76, 47), 0, nil)
+	PrefabUtils.addPart(model, "ChestStripe", pivot * CFrame.new(0, 3.78, 0), Vector3.new(3.4, 0.28, 2.54), Enum.Material.SmoothPlastic, Color3.fromRGB(140, 79, 154), 0, nil)
 	PrefabUtils.addPart(model, "ChestBand", pivot * CFrame.new(0, 2.35, -1.26), Vector3.new(3.8, 0.7, 0.25), Enum.Material.Metal, Color3.fromRGB(156, 136, 84), 0, nil)
 	PrefabUtils.addPart(model, "ChestLock", pivot * CFrame.new(0, 2.2, -1.43), Vector3.new(0.7, 0.6, 0.2), Enum.Material.Metal, Color3.fromRGB(208, 172, 88), 0, nil)
 

@@ -33,7 +33,7 @@ local ModuleByPathCache: { [string]: ModuleScript }? = nil
 local ExcludedPrefabIds = {}
 
 local RuntimeNaturePools: { [string]: { string } } = {
-	TemperateGrassland = {
+	Plains = {
 		"TemperateGrassland::MeadowOakTall",
 		"TemperateGrassland::MeadowOakWide",
 		"TemperateGrassland::WildflowerPatch",
@@ -41,23 +41,17 @@ local RuntimeNaturePools: { [string]: { string } } = {
 		"TemperateGrassland::GraniteBoulderCluster",
 		"TemperateGrassland::FallenLogMossy",
 	},
-	PineHighlands = {
-		"PineHighlands::HighlandPineTall",
-		"PineHighlands::HighlandPineBent",
-		"PineHighlands::NeedleShrubPatch",
-		"PineHighlands::MossRockPile",
-		"PineHighlands::FernCluster",
-		"PineHighlands::FallenPineLog",
-	},
 	Forest = {
 		"Forest::AncientTrunkGiant",
 		"Forest::VineWrappedTrunk",
+		"Forest::BerryBush",
 		"Forest::ThornBushCluster",
+		"Forest::WildMushroomPatch",
 		"Forest::MossSpireRock",
 		"Forest::RottingLogPile",
 		"Forest::GlowingMushroomPatch",
 	},
-	Alpine = {
+	Tundra = {
 		"Alpine::SnowPineTall",
 		"Alpine::SnowPineCluster",
 		"Alpine::FrostShrubPatch",
@@ -65,7 +59,7 @@ local RuntimeNaturePools: { [string]: { string } } = {
 		"Alpine::WindCarvedBoulder",
 		"Alpine::SnowDriftMound",
 	},
-	HighlandDesert = {
+	Desert = {
 		"HighlandDesert::SaguaroTall",
 		"HighlandDesert::BarrelCactusCluster",
 		"HighlandDesert::DryBrushPatch",
@@ -73,13 +67,13 @@ local RuntimeNaturePools: { [string]: { string } } = {
 		"HighlandDesert::DuneGrassClump",
 		"HighlandDesert::DeadwoodStump",
 	},
-	Marshland = {
-		"Marshland::CypressTreeTwisted",
-		"Marshland::MangroveCluster",
-		"Marshland::ReedBedDense",
-		"Marshland::LilyMudPatch",
-		"Marshland::BogRockPile",
-		"Marshland::DriftwoodStack",
+	Mountain = {
+		"PineHighlands::HighlandPineTall",
+		"PineHighlands::HighlandPineBent",
+		"Alpine::IceRockCluster",
+		"Alpine::WindCarvedBoulder",
+		"PineHighlands::MossRockPile",
+		"Alpine::SnowDriftMound",
 	},
 }
 

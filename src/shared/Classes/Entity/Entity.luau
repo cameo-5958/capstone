@@ -176,14 +176,15 @@ function OnStatChanged(self: Entity, statName: string, newValue: number, _: numb
 end
 
 -- Constructor
-function Entity.new(Model: Model, Name: string): Entity
+function Entity.new(Model: Model, Name: string, initialLevel: number?): Entity
 	local self = setmetatable({}, Entity)
 
 	self.UUID = HttpService:GenerateGUID(false)
 	self.Name = Name
 	self.Family = "Unknown"
-	self.Level = 1
-	self.__ScaledLevel = 1
+	local level = math.max(1, math.floor(initialLevel or 1))
+	self.Level = level
+	self.__ScaledLevel = level
 
 	self.Character = Model
 	self.RootPart = (Model.PrimaryPart or Model:WaitForChild("HumanoidRootPart")) :: BasePart
@@ -215,13 +216,13 @@ function Entity.new(Model: Model, Name: string): Entity
 	return (self :: any) :: Entity
 end
 
-function Entity.Inflate(ent: Entity): Entity
+function Entity.Inflate(ent: Entity): Entity?
 	setmetatable(ent, Entity)
 
 	local uuid = ent.UUID
 	local char = workspace.EntitiesFolder:FindFirstChild(uuid)
 	if not char then
-		error("Entity with UUID " .. uuid .. " does not exist in the world.")
+		return nil
 	end
 
 	ent.Character = char :: Model
@@ -555,14 +556,7 @@ end
 
 function Entity.TakeDamage(self: Entity, damage: number, _: Entity): ()
 	local roundedDamage = CombatNumbers.RoundToTenth(damage)
-	print("Taking " .. roundedDamage .. " damage")
 	self:SetStat("Health", self:GetStat("Health") - roundedDamage)
-
-	if not self:IsAlive() then
-		print("Am Dead")
-		local hum = self.Character:FindFirstChild("Humanoid") :: Humanoid
-		hum:TakeDamage(99999)
-	end
 end
 
 Entity.Modifier = Modifier

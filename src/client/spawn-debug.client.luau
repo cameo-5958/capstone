@@ -11,6 +11,7 @@ end
 
 local WorldServiceClient = require(ReplicatedStorage.Services.World.WorldServiceClient)
 local WorldTypes = require(ReplicatedStorage.Services.World.WorldTypes)
+local PlayerEndpoint = ReplicatedStorage:WaitForChild("Services"):WaitForChild("Player"):WaitForChild("PlayerEndpoint") :: RemoteEvent
 
 type WorldRegenerateOptions = {
 	Biome: string?,
@@ -45,7 +46,7 @@ end
 
 local BIOME_OPTIONS = gatherBiomeOptions()
 if #BIOME_OPTIONS <= 0 then
-	table.insert(BIOME_OPTIONS, "TemperateGrassland")
+	table.insert(BIOME_OPTIONS, "Plains")
 end
 
 local function findIndex(options: { string }, value: string?): number
@@ -80,7 +81,7 @@ local frame = Instance.new("Frame")
 frame.Name = "Panel"
 frame.AnchorPoint = Vector2.new(1, 0)
 frame.Position = UDim2.new(1, -20, 0, 20)
-frame.Size = UDim2.fromOffset(340, 248)
+frame.Size = UDim2.fromOffset(340, 416)
 frame.BackgroundColor3 = Color3.fromRGB(20, 25, 32)
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
@@ -245,6 +246,69 @@ local resetCorner = Instance.new("UICorner")
 resetCorner.CornerRadius = UDim.new(0, 8)
 resetCorner.Parent = resetModeButton
 
+local itemButtonRow = Instance.new("Frame")
+itemButtonRow.Name = "ItemButtons"
+itemButtonRow.BackgroundTransparency = 1
+itemButtonRow.Size = UDim2.new(1, 0, 0, 36)
+itemButtonRow.Parent = content
+
+local grantWeaponsButton = Instance.new("TextButton")
+grantWeaponsButton.Name = "GrantWeaponsButton"
+grantWeaponsButton.BackgroundColor3 = Color3.fromRGB(64, 82, 112)
+grantWeaponsButton.BorderSizePixel = 0
+grantWeaponsButton.Position = UDim2.new(0, 0, 0, 0)
+grantWeaponsButton.Size = UDim2.new(0.5, -4, 1, 0)
+grantWeaponsButton.Font = Enum.Font.GothamBold
+grantWeaponsButton.Text = "Grant All Weapons"
+grantWeaponsButton.TextColor3 = Color3.fromRGB(228, 236, 248)
+grantWeaponsButton.TextSize = 14
+grantWeaponsButton.Parent = itemButtonRow
+local grantWeaponsCorner = Instance.new("UICorner")
+grantWeaponsCorner.CornerRadius = UDim.new(0, 8)
+grantWeaponsCorner.Parent = grantWeaponsButton
+
+local spawnItemsButton = Instance.new("TextButton")
+spawnItemsButton.Name = "SpawnItemsButton"
+spawnItemsButton.BackgroundColor3 = Color3.fromRGB(95, 83, 42)
+spawnItemsButton.BorderSizePixel = 0
+spawnItemsButton.Position = UDim2.new(0.5, 4, 0, 0)
+spawnItemsButton.Size = UDim2.new(0.5, -4, 1, 0)
+spawnItemsButton.Font = Enum.Font.GothamBold
+spawnItemsButton.Text = "Grant All Database Items"
+spawnItemsButton.TextColor3 = Color3.fromRGB(248, 238, 205)
+spawnItemsButton.TextSize = 14
+spawnItemsButton.Parent = itemButtonRow
+local spawnItemsCorner = Instance.new("UICorner")
+spawnItemsCorner.CornerRadius = UDim.new(0, 8)
+spawnItemsCorner.Parent = spawnItemsButton
+
+local damageRow = createRow("Take Damage")
+local damageTextBox = Instance.new("TextBox")
+damageTextBox.Name = "DamageInput"
+damageTextBox.AnchorPoint = Vector2.new(1, 0.5)
+damageTextBox.Position = UDim2.new(1, -88, 0.5, 0)
+damageTextBox.Size = UDim2.fromOffset(82, 30)
+damageTextBox.Text = "10"
+damageTextBox.PlaceholderText = "Amount"
+damageTextBox.Parent = damageRow
+styleTextBox(damageTextBox)
+
+local takeDamageButton = Instance.new("TextButton")
+takeDamageButton.Name = "TakeDamageButton"
+takeDamageButton.AnchorPoint = Vector2.new(1, 0.5)
+takeDamageButton.Position = UDim2.new(1, 0, 0.5, 0)
+takeDamageButton.Size = UDim2.fromOffset(78, 30)
+takeDamageButton.BackgroundColor3 = Color3.fromRGB(120, 54, 54)
+takeDamageButton.BorderSizePixel = 0
+takeDamageButton.Font = Enum.Font.GothamBold
+takeDamageButton.Text = "Damage"
+takeDamageButton.TextColor3 = Color3.fromRGB(248, 232, 232)
+takeDamageButton.TextSize = 13
+takeDamageButton.Parent = damageRow
+local takeDamageCorner = Instance.new("UICorner")
+takeDamageCorner.CornerRadius = UDim.new(0, 8)
+takeDamageCorner.Parent = takeDamageButton
+
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "Status"
 statusLabel.BackgroundTransparency = 1
@@ -304,6 +368,18 @@ local function requestRegeneration()
 	WorldServiceClient.RequestRegenerate(resolvedSeed, options)
 end
 
+local function readDamageAmount(): number
+	local parsed = tonumber(damageTextBox.Text)
+	if type(parsed) ~= "number" then
+		damageTextBox.Text = "10"
+		return 10
+	end
+
+	local clamped = math.max(1, math.floor(parsed + 0.5))
+	damageTextBox.Text = tostring(clamped)
+	return clamped
+end
+
 biomeButton.MouseButton1Click:Connect(cycleBiome)
 generationButton.MouseButton1Click:Connect(cycleGenerationType)
 baseLevelTextBox.FocusLost:Connect(function()
@@ -314,6 +390,24 @@ resetModeButton.MouseButton1Click:Connect(function()
 	generationIndex = 1
 	generationButton.Text = GENERATION_TYPES[generationIndex]
 	statusLabel.Text = "Generation mode reset to Standard"
+end)
+grantWeaponsButton.MouseButton1Click:Connect(function()
+	PlayerEndpoint:FireServer("DebugGrantAllWeapons", {})
+	statusLabel.Text = "Granted all weapons"
+end)
+spawnItemsButton.MouseButton1Click:Connect(function()
+	PlayerEndpoint:FireServer("DebugGrantAllNonConsumableItems", {})
+	statusLabel.Text = "Granted all database items"
+end)
+takeDamageButton.MouseButton1Click:Connect(function()
+	local amount = readDamageAmount()
+	PlayerEndpoint:FireServer("DebugTakeDamage", {
+		Amount = amount,
+	})
+	statusLabel.Text = string.format("Took %d damage", amount)
+end)
+damageTextBox.FocusLost:Connect(function()
+	readDamageAmount()
 end)
 
 WorldServiceClient.GetWorldChangedSignal():Connect(function(action: string, payload: { [string]: any }?)
